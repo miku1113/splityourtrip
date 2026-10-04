@@ -1,16 +1,19 @@
 {
   "expo": {
-    "name": "splitYourTrip",
+    "name": "Split Your Trip",
     "slug": "splitYourTrip",
-    "version": "1.0.0",
+    "version": "1.0.22",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "splityourtrip",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.splityourtrip.app"
     },
     "android": {
+      "package": "com.splityourtrip.app",
+      "versionCode": 23,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
