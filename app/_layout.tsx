@@ -7,7 +7,18 @@ import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, useThemeStore } from '../src/theme/useThemeStore';
 import { useContactsStore } from '../src/features/contacts/useContactsStore';
-import { Platform, StatusBar, View } from 'react-native';
+import { Platform, StatusBar, View, Text, TextInput } from 'react-native';
+
+// Standardize responsive font behavior across devices (prevents accessibility zoom layout breakage)
+if ((Text as any).defaultProps == null) {
+  (Text as any).defaultProps = {};
+}
+(Text as any).defaultProps.maxFontSizeMultiplier = 1.25;
+
+if ((TextInput as any).defaultProps == null) {
+  (TextInput as any).defaultProps = {};
+}
+(TextInput as any).defaultProps.maxFontSizeMultiplier = 1.25;
 
 export {
   ErrorBoundary,

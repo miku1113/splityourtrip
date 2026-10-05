@@ -19,6 +19,7 @@ import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
+import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 
 type FilterType = 'all' | 'owes_you' | 'you_owe' | 'registered';
 
@@ -322,9 +323,9 @@ export default function FriendsScreen() {
   const friendsSummary = useContactsStore(s => s.friendsSummary);
   const fetchFriendsSummary = useContactsStore(s => s.fetchFriendsSummary);
   const isLoading = useContactsStore(s => s.isLoading);
-  const initContacts = useContactsStore(s => s.initContacts);
   const inviteFriend = useContactsStore(s => s.inviteFriend);
 
+  const [initialLoading, setInitialLoading] = useState(contacts.length === 0);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [refreshing, setRefreshing] = useState(false);
@@ -338,8 +339,12 @@ export default function FriendsScreen() {
   useEffect(() => {
     lastFetchRef.current = Date.now();
     getUserCurrencyPreference().then(c => setUserCurrency(c));
-    fetchFriendsSummary(user?.id);
-    initContacts();
+    if (contacts.length === 0) {
+      setInitialLoading(true);
+    }
+    fetchFriendsSummary(user?.id).finally(() => {
+      setInitialLoading(false);
+    });
   }, [user?.id]);
 
   useFocusEffect(
@@ -368,10 +373,7 @@ export default function FriendsScreen() {
     setRefreshing(true);
     setVisibleCount(PAGE_SIZE);
     lastFetchRef.current = Date.now();
-    await Promise.all([
-      fetchFriendsSummary(user?.id),
-      initContacts(true),
-    ]);
+    await fetchFriendsSummary(user?.id);
     setRefreshing(false);
   };
 
@@ -590,7 +592,7 @@ export default function FriendsScreen() {
           <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Search transacted friends..."
+            placeholder="Search friends or chats..."
             placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -690,7 +692,7 @@ export default function FriendsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
         ListEmptyComponent={
-          isLoading ? (
+          initialLoading || (isLoading && contacts.length === 0) ? (
             <View style={styles.emptyView}>
               <ActivityIndicator size="large" color={colors.primary} />
               <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 12 }]}>
@@ -700,9 +702,9 @@ export default function FriendsScreen() {
           ) : (
             <View style={styles.emptyView}>
               <Text style={{ fontSize: 44, marginBottom: 8 }}>👥</Text>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Friends with Transactions</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Chats or Transactions Yet</Text>
               <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-                Friends you share trips or split expenses with appear here. Tap the + button below to add an expense!
+                Friends you share trips, chats, or split expenses with will appear here. Tap the + button to start a split or chat!
               </Text>
             </View>
           )
@@ -741,14 +743,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   summaryHeader: {
-    padding: 16,
+    padding: moderateScale(16),
     borderBottomWidth: 1,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: moderateScale(10),
   },
   summaryCol: {
     flex: 1,
@@ -756,52 +758,52 @@ const styles = StyleSheet.create({
   },
   summaryDivider: {
     width: 1,
-    height: 36,
+    height: moderateScale(36),
   },
   summaryLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
     marginBottom: 4,
   },
   summaryAmount: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '800',
   },
   netPill: {
     alignSelf: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: moderateScale(12),
+    paddingVertical: moderateScale(5),
     borderRadius: 20,
   },
   netPillText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
   },
   searchSection: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: moderateScale(16),
+    paddingTop: moderateScale(12),
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 25,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: moderateScale(14),
+    paddingVertical: moderateScale(9),
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: moderateScale(16),
+    paddingVertical: moderateScale(10),
+    gap: moderateScale(8),
   },
   filterPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: moderateScale(12),
+    paddingVertical: moderateScale(6),
     borderRadius: 20,
     backgroundColor: 'rgba(150, 150, 150, 0.1)',
   },
@@ -809,7 +811,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#6366F1',
   },
   filterPillText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
   },
   inlineLoadingRow: {
@@ -820,13 +822,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   inlineLoadingText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   listContent: {
-    padding: 16,
+    padding: moderateScale(16),
     paddingTop: 4,
-    paddingBottom: 100,
+    paddingBottom: moderateScale(100),
   },
   friendRowContainer: {
     overflow: 'hidden',
@@ -834,17 +836,17 @@ const styles = StyleSheet.create({
   friendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: moderateScale(12),
+    paddingHorizontal: moderateScale(14),
   },
   avatarWrapper: {
     position: 'relative',
-    marginRight: 12,
+    marginRight: moderateScale(12),
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(22),
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -852,13 +854,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -1,
     right: -1,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: moderateScale(12),
+    height: moderateScale(12),
+    borderRadius: moderateScale(6),
     borderWidth: 2,
   },
   avatarText: {
-    fontSize: 17,
+    fontSize: scaleFont(17),
     fontWeight: '700',
   },
   friendDetails: {
@@ -871,7 +873,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   friendName: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '700',
   },
   appBadge: {
@@ -880,15 +882,15 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   appBadgeText: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '700',
   },
   friendPhone: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     marginTop: 3,
   },
   rightActionCol: {
-    marginLeft: 10,
+    marginLeft: moderateScale(8),
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
@@ -910,15 +912,15 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   amountTypeTag: {
-    fontSize: 11,
+    fontSize: scaleFont(10.5),
     fontWeight: '600',
   },
   amountValText: {
-    fontSize: 13,
+    fontSize: scaleFont(12.5),
     fontWeight: '700',
   },
   balZeroSub: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     marginTop: 1,
   },
   netMiniPill: {
@@ -928,58 +930,58 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   netMiniPillText: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '700',
   },
   balAmountText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '700',
   },
   balSubLabel: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '600',
     marginTop: 1,
   },
   balSettledText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   inviteMiniBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: moderateScale(26),
+    height: moderateScale(26),
+    borderRadius: moderateScale(13),
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 6,
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 70,
+    marginLeft: moderateScale(70),
   },
   emptyView: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 20,
+    paddingVertical: moderateScale(60),
+    paddingHorizontal: moderateScale(20),
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: scaleFont(17),
     fontWeight: '700',
   },
   emptySub: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     textAlign: 'center',
     marginTop: 6,
-    lineHeight: 18,
+    lineHeight: scaleFont(18),
   },
   loadMoreBtn: {
-    paddingVertical: 12,
+    paddingVertical: moderateScale(12),
     borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 6,
-    marginBottom: 16,
+    marginBottom: moderateScale(16),
   },
   loadMoreSpinnerRow: {
     flexDirection: 'row',

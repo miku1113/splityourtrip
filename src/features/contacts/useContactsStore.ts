@@ -28,6 +28,7 @@ export interface FriendsSummaryTotals {
 
 interface ContactsState {
   contacts: FriendContact[];
+  deviceContacts: FriendContact[];
   friendsSummary: FriendsSummaryTotals;
   hasPermission: boolean;
   isLoading: boolean;
@@ -104,6 +105,7 @@ export function getUserContactsStorageKey(userId?: string | null): string {
 
 export const useContactsStore = create<ContactsState>((set, get) => ({
   contacts: [],
+  deviceContacts: [],
   friendsSummary: {
     totalOwedToYouPaise: 0,
     totalYouOwePaise: 0,
@@ -116,6 +118,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
   clearContacts: () => {
     set({
       contacts: [],
+      deviceContacts: [],
       friendsSummary: {
         totalOwedToYouPaise: 0,
         totalYouOwePaise: 0,
@@ -133,6 +136,28 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       const targetId = userId || authState.user?.id || authState.profile?.id;
       if (!targetId) return get().friendsSummary;
 
+      // 0. If current contacts is empty, load instantly from storage cache to avoid blank flash
+      if (get().contacts.length === 0) {
+        try {
+          const cacheKey = `@splityourtrip_friends_summary_${targetId}`;
+          const rawCache = await AppStorage.getItem(cacheKey);
+          if (rawCache) {
+            const parsed = JSON.parse(rawCache);
+            if (parsed && Array.isArray(parsed.friends) && parsed.friends.length > 0) {
+              set({
+                contacts: parsed.friends,
+                friendsSummary: {
+                  totalOwedToYouPaise: parsed.totalOwedToYouPaise || 0,
+                  totalYouOwePaise: parsed.totalYouOwePaise || 0,
+                  netOverallPaise: parsed.netOverallPaise || 0,
+                },
+                isLoading: false,
+              });
+            }
+          }
+        } catch {}
+      }
+
       const { fetchFriendsSummaryApi } = require('../../services/friendsApi');
       const summaryRes = await fetchFriendsSummaryApi(targetId);
 
@@ -143,7 +168,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       const seenNames = new Set<string>();
       const merged: FriendContact[] = [];
 
-      // 1. Add API friends (which already have pending settlements at top)
+      // 1. Add API friends (which only contains people with shared trips/splits/messages)
       for (const f of apiFriends) {
         const cleanName = f.name.trim().toLowerCase();
         const normPhone = f.cleanPhone || normalizePhone(f.phoneNumber);
@@ -175,11 +200,12 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         }
       }
 
-      // 2. Add device contacts that weren't in API friends
+      // 2. Preserve manually added friends that haven't synced to backend yet
       for (const c of existing) {
+        if (!c.id?.startsWith('manual_')) continue;
         const cleanName = c.name.trim().toLowerCase();
         const normPhone = c.cleanPhone || normalizePhone(c.phoneNumber);
-        const canonicalId = c.profileId || c.id;
+        const canonicalId = c.id;
 
         const isAlreadyAdded =
           seenIds.has(canonicalId) ||
@@ -203,6 +229,8 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         if (aPending && bPending) {
           return Math.abs(b.netBalancePaise || 0) - Math.abs(a.netBalancePaise || 0);
         }
+        const tripDiff = (b.sharedTripsCount || 0) - (a.sharedTripsCount || 0);
+        if (tripDiff !== 0) return tripDiff;
         return (a.name || '').localeCompare(b.name || '');
       });
 
@@ -249,6 +277,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       return newTotals;
     } catch (err: any) {
       console.log('fetchFriendsSummary notice:', err?.message);
+      set({ isLoading: false });
       return get().friendsSummary;
     }
   },
@@ -257,32 +286,12 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
     // Avoid redundant expensive contact scanning if already synced in the last 2 minutes
     const lastSync = get().lastSyncedAt;
     const isRecent = lastSync && Date.now() - new Date(lastSync).getTime() < 120000;
-    if (!force && get().contacts.length > 0 && isRecent) {
+    if (!force && get().deviceContacts.length > 0 && isRecent) {
       return;
     }
 
-    // 1. Load user-partitioned cached contacts only if store is currently empty
-    let hasCached = get().contacts.length > 0;
-    if (!hasCached) {
-      const storageKey = getUserContactsStorageKey();
-      try {
-        const cached = await AppStorage.getItem(storageKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            set({ contacts: parsed, isLoading: false });
-            hasCached = true;
-          }
-        }
-      } catch {}
-    }
-
-    if (!hasCached && force) {
-      set({ isLoading: true });
-    }
-
     try {
-      // 2. Automatically request permission on startup (with timeout guard)
+      // 1. Request permission (with timeout guard)
       let granted = false;
       try {
         const { status } = await withTimeout(Contacts.requestPermissionsAsync(), 5000);
@@ -303,52 +312,10 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         } catch {}
       }
 
-      // 3. Query all profiles from Supabase to check registration status
-      let registeredProfiles: Array<{
-        id: string;
-        full_name: string;
-        phone_number: string | null;
-        avatar_url: string | null;
-      }> = [];
-
-      if (isSupabaseConfigured) {
-        try {
-          const { data: profs, error } = await withTimeout(
-            supabase
-              .from('profiles')
-              .select('id, full_name, phone_number, avatar_url'),
-            4500
-          );
-          if (!error && profs) {
-            registeredProfiles = profs;
-          }
-        } catch (e: any) {
-          console.log('Profiles query notice in contacts sync:', e?.message);
-        }
-      }
-
-      // Build quick lookup maps for profiles
-      const profileByNormalizedPhone = new Map<string, typeof registeredProfiles[0]>();
-      const profileByName = new Map<string, typeof registeredProfiles[0]>();
-
-      registeredProfiles.forEach(p => {
-        if (p.phone_number) {
-          const norm = normalizePhone(p.phone_number);
-          if (norm) profileByNormalizedPhone.set(norm, p);
-        }
-        if (p.full_name) {
-          profileByName.set(p.full_name.trim().toLowerCase(), p);
-        }
-      });
-
-      // Existing contacts to preserve calculated balances and avoid flashing
-      const existingContacts = get().contacts;
-
-      // 4. Map device contacts
+      // Map device contacts strictly into deviceContacts (for contact picker / modals)
       const mappedContacts: FriendContact[] = [];
       const seenPhones = new Set<string>();
       const seenNames = new Set<string>();
-      const seenIds = new Set<string>();
 
       for (const dc of rawDeviceContacts) {
         const name = dc.name?.trim();
@@ -363,126 +330,23 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         if (norm) seenPhones.add(norm);
         seenNames.add(name.toLowerCase());
 
-        // Check if user is registered in database
-        const matchedProfile = (norm && profileByNormalizedPhone.get(norm)) || profileByName.get(name.toLowerCase());
-
-        // Find existing match to preserve computed balances and stable id!
-        const existingMatch = existingContacts.find(ec =>
-          (matchedProfile?.id && ec.profileId === matchedProfile.id) ||
-          (norm && (ec.cleanPhone === norm || normalizePhone(ec.phoneNumber) === norm)) ||
-          normalizeNameForMatch(ec.name) === normalizeNameForMatch(name)
-        );
-
-        const canonicalId = matchedProfile?.id || existingMatch?.id || dc.id || `contact_${name}_${norm}`;
-        seenIds.add(canonicalId);
-
         mappedContacts.push({
-          id: canonicalId,
-          name: existingMatch?.name || name,
-          phoneNumber: phone || existingMatch?.phoneNumber,
-          cleanPhone: norm || existingMatch?.cleanPhone,
-          isRegistered: Boolean(matchedProfile || existingMatch?.isRegistered),
-          profileId: matchedProfile?.id || existingMatch?.profileId,
-          avatarUrl: matchedProfile?.avatar_url || existingMatch?.avatarUrl || undefined,
-          owedToYouPaise: existingMatch?.owedToYouPaise,
-          youOwePaise: existingMatch?.youOwePaise,
-          netBalancePaise: existingMatch?.netBalancePaise,
-          sharedTripsCount: existingMatch?.sharedTripsCount,
+          id: dc.id || `contact_${name}_${norm}`,
+          name,
+          phoneNumber: phone,
+          cleanPhone: norm,
+          isRegistered: false,
         });
       }
 
-      // 5. Also include registered app users who might not be in device phone contacts
-      registeredProfiles.forEach(rp => {
-        const norm = normalizePhone(rp.phone_number);
-        const name = rp.full_name?.trim() || 'Split Your Trip User';
-        const canonicalId = rp.id;
-        const alreadyIncluded =
-          seenIds.has(canonicalId) ||
-          (norm && seenPhones.has(norm)) ||
-          seenNames.has(name.toLowerCase());
-
-        if (!alreadyIncluded) {
-          seenIds.add(canonicalId);
-          if (norm) seenPhones.add(norm);
-          seenNames.add(name.toLowerCase());
-
-          const existingMatch = existingContacts.find(ec =>
-            ec.profileId === rp.id ||
-            ec.id === rp.id ||
-            (norm && (ec.cleanPhone === norm || normalizePhone(ec.phoneNumber) === norm)) ||
-            normalizeNameForMatch(ec.name) === normalizeNameForMatch(name)
-          );
-
-          mappedContacts.push({
-            id: canonicalId,
-            name: existingMatch?.name || name,
-            phoneNumber: rp.phone_number || existingMatch?.phoneNumber || undefined,
-            cleanPhone: norm || existingMatch?.cleanPhone || undefined,
-            isRegistered: true,
-            profileId: rp.id,
-            avatarUrl: rp.avatar_url || existingMatch?.avatarUrl || undefined,
-            owedToYouPaise: existingMatch?.owedToYouPaise,
-            youOwePaise: existingMatch?.youOwePaise,
-            netBalancePaise: existingMatch?.netBalancePaise,
-            sharedTripsCount: existingMatch?.sharedTripsCount,
-          });
-        }
-      });
-
-      // 5.5 Preserve any manual friends or previously cached transacted friends not in device contacts
-      existingContacts.forEach(ec => {
-        const norm = normalizePhone(ec.phoneNumber);
-        const nameLower = ec.name?.trim().toLowerCase() || '';
-        const canonicalId = ec.profileId || ec.id;
-        const alreadyIncluded =
-          seenIds.has(canonicalId) ||
-          (norm && seenPhones.has(norm)) ||
-          (nameLower && seenNames.has(nameLower)) ||
-          mappedContacts.some(mc => mc.id === canonicalId);
-
-        if (!alreadyIncluded && ec.name) {
-          seenIds.add(canonicalId);
-          if (norm) seenPhones.add(norm);
-          if (nameLower) seenNames.add(nameLower);
-          mappedContacts.push(ec);
-        }
-      });
-
-      // Sort: Pending settlements FIRST, then registered, then alphabetical
-      mappedContacts.sort((a, b) => {
-        const aPending = (a.netBalancePaise || 0) !== 0 || (a.owedToYouPaise || 0) > 0 || (a.youOwePaise || 0) > 0;
-        const bPending = (b.netBalancePaise || 0) !== 0 || (b.owedToYouPaise || 0) > 0 || (b.youOwePaise || 0) > 0;
-        if (aPending && !bPending) return -1;
-        if (!aPending && bPending) return 1;
-        if (aPending && bPending) {
-          return Math.abs(b.netBalancePaise || 0) - Math.abs(a.netBalancePaise || 0);
-        }
-        if (a.isRegistered && !b.isRegistered) return -1;
-        if (!a.isRegistered && b.isRegistered) return 1;
-        return a.name.localeCompare(b.name);
-      });
+      mappedContacts.sort((a, b) => a.name.localeCompare(b.name));
 
       set({
-        contacts: mappedContacts,
-        isLoading: false,
+        deviceContacts: mappedContacts,
         lastSyncedAt: new Date().toISOString(),
       });
-
-      // Cache for offline usage in user-partitioned key
-      try {
-        const storageKey = getUserContactsStorageKey();
-        await AppStorage.setItem(storageKey, JSON.stringify(mappedContacts));
-      } catch {}
-
-      // Re-compute friend balances and summary
-      try {
-        const { useAuthStore } = require('../auth/useAuthStore');
-        const currentUserId = useAuthStore.getState().user?.id;
-        await get().fetchFriendsSummary(currentUserId);
-      } catch {}
     } catch (err: any) {
-      console.log('Error initializing contacts:', err?.message);
-      set({ isLoading: false });
+      console.log('Error initializing device contacts:', err?.message);
     }
   },
 

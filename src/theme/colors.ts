@@ -44,14 +44,28 @@ export const darkColors = {
   inputBackground: '#131B2B',
 };
 
+export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device } from './responsive';
+import { scaleFont, moderateScale } from './responsive';
+
+export const typography = {
+  h1: scaleFont(26),
+  h2: scaleFont(20),
+  h3: scaleFont(18),
+  title: scaleFont(16),
+  body: scaleFont(14),
+  caption: scaleFont(12),
+  tiny: scaleFont(10),
+};
+
 export const theme = {
   colors: darkColors, // Default to dark as requested!
+  typography,
   spacing: {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
+    xs: moderateScale(4),
+    sm: moderateScale(8),
+    md: moderateScale(16),
+    lg: moderateScale(24),
+    xl: moderateScale(32),
   },
   borderRadius: {
     sm: 6,

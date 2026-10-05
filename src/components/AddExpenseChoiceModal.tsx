@@ -21,6 +21,7 @@ import { useTheme } from '../theme/useThemeStore';
 import { useTripStore } from '../features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../features/contacts/useContactsStore';
 import { useAuthStore } from '../features/auth/useAuthStore';
+import { scaleFont, moderateScale } from '../theme/responsive';
 
 const PAGE_SIZE = 10;
 
@@ -36,7 +37,7 @@ export default function AddExpenseChoiceModal({ visible, onClose }: AddExpenseCh
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const { trips, createTrip, addMember, findOrCreateFriendSplitTrip, isLoading: tripsLoading } = useTripStore();
-  const { contacts, isLoading: contactsLoading, initContacts, addManualFriend } = useContactsStore();
+  const { contacts, deviceContacts, isLoading: contactsLoading, initContacts, addManualFriend } = useContactsStore();
   const { user, profile } = useAuthStore();
 
   const [step, setStep] = useState<StepMode>('choose_type');
@@ -60,6 +61,9 @@ export default function AddExpenseChoiceModal({ visible, onClose }: AddExpenseCh
   useEffect(() => {
     setTripsVisibleCount(PAGE_SIZE);
     setFriendsVisibleCount(PAGE_SIZE);
+    if (step === 'select_friend' && (!deviceContacts || deviceContacts.length === 0)) {
+      initContacts();
+    }
   }, [searchQuery, step]);
 
   // Reset state when closing or opening
@@ -118,12 +122,27 @@ export default function AddExpenseChoiceModal({ visible, onClose }: AddExpenseCh
   const filteredFriends = useMemo(() => {
     if (!searchQuery.trim()) return contacts;
     const q = searchQuery.toLowerCase().trim();
-    return contacts.filter(
+    const chatMatches = contacts.filter(
       c =>
         c.name.toLowerCase().includes(q) ||
         (c.phoneNumber && c.phoneNumber.includes(q))
     );
-  }, [contacts, searchQuery]);
+    const seenPhones = new Set<string>();
+    const seenNames = new Set<string>();
+    chatMatches.forEach(c => {
+      seenNames.add(c.name.trim().toLowerCase());
+      if (c.cleanPhone) seenPhones.add(c.cleanPhone);
+    });
+
+    const deviceMatches = (deviceContacts || []).filter(dc => {
+      const name = dc.name.trim().toLowerCase();
+      if (seenNames.has(name)) return false;
+      if (dc.cleanPhone && seenPhones.has(dc.cleanPhone)) return false;
+      return name.includes(q) || (dc.phoneNumber && dc.phoneNumber.includes(q));
+    });
+
+    return [...chatMatches, ...deviceMatches];
+  }, [contacts, deviceContacts, searchQuery]);
 
   const paginatedFriends = useMemo(
     () => filteredFriends.slice(0, friendsVisibleCount),
@@ -798,9 +817,9 @@ const styles = StyleSheet.create({
   sheetContainer: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingTop: 16,
-    paddingBottom: 36,
-    paddingHorizontal: 20,
+    paddingTop: moderateScale(16),
+    paddingBottom: moderateScale(36),
+    paddingHorizontal: moderateScale(20),
     maxHeight: '80%',
     borderTopWidth: 1,
   },
@@ -808,89 +827,89 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 14,
+    paddingBottom: moderateScale(14),
   },
   backButton: {
     padding: 4,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '700',
   },
   closeButton: {
     padding: 4,
   },
   optionsContainer: {
-    paddingVertical: 12,
+    paddingVertical: moderateScale(12),
   },
   sectionSubtitle: {
-    fontSize: 14,
-    marginBottom: 16,
+    fontSize: scaleFont(14),
+    marginBottom: moderateScale(16),
   },
   choiceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: moderateScale(16),
     borderRadius: 16,
     borderWidth: 1,
-    marginBottom: 14,
+    marginBottom: moderateScale(14),
   },
   iconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: moderateScale(48),
+    height: moderateScale(48),
+    borderRadius: moderateScale(24),
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
+    marginRight: moderateScale(14),
   },
   choiceTextContainer: {
     flex: 1,
   },
   choiceTitle: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
     marginBottom: 4,
   },
   choiceDesc: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
   },
   listSection: {
-    paddingVertical: 10,
-    maxHeight: 440,
+    paddingVertical: moderateScale(10),
+    maxHeight: moderateScale(440),
   },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    height: 44,
+    paddingHorizontal: moderateScale(12),
+    height: moderateScale(44),
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: moderateScale(12),
     gap: 8,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   scrollList: {
-    maxHeight: 380,
+    maxHeight: moderateScale(380),
   },
   listItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: moderateScale(12),
     borderBottomWidth: 1,
-    gap: 12,
+    gap: moderateScale(12),
   },
   listAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: moderateScale(42),
+    height: moderateScale(42),
+    borderRadius: moderateScale(21),
     alignItems: 'center',
     justifyContent: 'center',
   },
   listAvatarText: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
   },
   nameRow: {
@@ -899,11 +918,11 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   itemTitle: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '600',
   },
   itemSubtitle: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     marginTop: 2,
   },
   onAppBadge: {
@@ -912,11 +931,11 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   onAppBadgeText: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '700',
   },
   paginationFooter: {
-    paddingVertical: 12,
+    paddingVertical: moderateScale(12),
     alignItems: 'center',
   },
   footerLoadingRow: {
@@ -925,7 +944,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   footerLoadingText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   loadMoreBtn: {

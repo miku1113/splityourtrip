@@ -23,6 +23,7 @@ import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore, Trip } from '../../src/features/trips/useTripStore';
 import { useContactsStore, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { useTheme } from '../../src/theme/useThemeStore';
+import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 
 const PAGE_SIZE = 10;
 
@@ -1209,23 +1210,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 4,
+    paddingHorizontal: moderateScale(16),
+    paddingTop: moderateScale(16),
+    paddingBottom: moderateScale(4),
   },
   greetingSub: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '500',
   },
   greetingName: {
-    fontSize: 22,
+    fontSize: scaleFont(22),
     fontWeight: '800',
     letterSpacing: -0.3,
   },
   profileAvatarMini: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: moderateScale(20),
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#6366F1',
@@ -1236,27 +1237,27 @@ const styles = StyleSheet.create({
   },
   avatarMiniText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
   },
   topActions: {
     flexDirection: 'row',
-    padding: 16,
-    gap: 12,
+    padding: moderateScale(16),
+    gap: moderateScale(12),
   },
   createBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: moderateScale(12),
     borderRadius: 12,
     gap: 6,
   },
   createBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   joinBtn: {
     flex: 1,
@@ -1264,31 +1265,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    paddingVertical: 12,
+    paddingVertical: moderateScale(12),
     borderRadius: 12,
     gap: 6,
   },
   joinBtnText: {
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   loadingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 16,
+    marginHorizontal: moderateScale(16),
     marginBottom: 8,
     paddingVertical: 8,
     borderRadius: 10,
     gap: 8,
   },
   loadingBannerText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   listContent: {
-    padding: 16,
-    paddingBottom: 100,
+    padding: moderateScale(16),
+    paddingBottom: moderateScale(100),
   },
   tripRowContainer: {
     overflow: 'hidden',
@@ -1296,12 +1297,12 @@ const styles = StyleSheet.create({
   tripRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: moderateScale(12),
+    paddingHorizontal: moderateScale(14),
   },
   tripBadge: {
-    width: 44,
-    height: 44,
+    width: moderateScale(44),
+    height: moderateScale(44),
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1312,15 +1313,15 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   tripBadgeText: {
-    fontSize: 22,
+    fontSize: scaleFont(22),
   },
   tripInfo: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
+    marginLeft: moderateScale(12),
+    marginRight: moderateScale(8),
   },
   tripName: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '700',
   },
   tripSubRow: {
@@ -1329,7 +1330,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   tripDates: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
   },
   tripRightCol: {
     alignItems: 'flex-end',
@@ -1353,13 +1354,13 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusTagText: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '700',
     letterSpacing: 0.5,
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 70,
+    marginLeft: moderateScale(70),
   },
   paginationFooter: {
     paddingVertical: 14,
@@ -1371,7 +1372,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   footerLoadingText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '600',
   },
   loadMoreBtn: {
@@ -1381,26 +1382,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   loadMoreBtnText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '700',
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: moderateScale(60),
   },
   emptyIcon: {
-    fontSize: 48,
+    fontSize: scaleFont(48),
     marginBottom: 16,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '700',
   },
   emptySubtitle: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     textAlign: 'center',
     marginTop: 6,
-    maxWidth: 280,
+    maxWidth: moderateScale(280),
   },
   modalOverlay: {
     flex: 1,
@@ -1410,17 +1411,17 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    padding: 24,
+    padding: moderateScale(24),
     borderTopWidth: 1,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: scaleFont(20),
     fontWeight: '700',
   },
   modalDesc: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     marginTop: 4,
-    marginBottom: 16,
+    marginBottom: moderateScale(16),
   },
   modalLabel: {
     fontSize: 13,
