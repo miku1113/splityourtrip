@@ -17,6 +17,41 @@ import { splitEqual } from '../../services/split';
 import { formatCurrencyAmount } from '../../services/currency';
 import { getContactNameByPhone, getEffectiveContactName } from '../contacts/useContactsStore';
 
+// Universal helper to reliably find the active user's TripMember row without assuming admin
+export function findMyMember(
+  members: TripMember[],
+  userId?: string | null,
+  userPhone?: string | null
+): TripMember | undefined {
+  if (!members || members.length === 0) return undefined;
+
+  // 1. Strict match by Supabase auth ID / profile ID
+  if (userId) {
+    const byProfile = members.find(
+      m => (m.profile_id && m.profile_id === userId) || (m.user_id && m.user_id === userId)
+    );
+    if (byProfile) return byProfile;
+  }
+
+  // 2. Strict match by user's phone number
+  const cleanPhone = userPhone ? normalizePhone(userPhone) : '';
+  if (cleanPhone && cleanPhone.length >= 6) {
+    const byPhone = members.find(m => {
+      if (!m.phone_number) return false;
+      const mNorm = normalizePhone(m.phone_number);
+      return mNorm === cleanPhone || (mNorm.length >= 6 && cleanPhone.includes(mNorm.slice(-10)));
+    });
+    if (byPhone) return byPhone;
+  }
+
+  // 3. Fallback ONLY if completely unauthenticated / offline guest mode (no user id and no phone)
+  if (!userId && !cleanPhone) {
+    return members.find(m => m.role === 'admin') || members[0];
+  }
+
+  return undefined;
+}
+
 // Helper to generate RFC4122 v4 compliant UUID
 export function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -3193,18 +3228,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         client
           .from('trip_members')
           .select('id, trip_id, phone_number, profile_id')
-          .not('phone_number', 'is', null),
+          .ilike('phone_number', `%${last10}%`),
         4000
       );
 
       if (matchedMembers && matchedMembers.length > 0) {
-        const candidates = matchedMembers.filter(m => {
-          if (m.profile_id === userId) return false;
-          const mDigits = (m.phone_number || '').replace(/[^0-9]/g, '');
-          return mDigits.length >= 6 && mDigits.slice(-10) === last10;
-        });
-
-        for (const m of candidates) {
+        for (const m of matchedMembers) {
+          if (m.profile_id === userId) continue;
           await client
             .from('trip_members')
             .update({
@@ -3223,6 +3253,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             .from('trips')
             .update({ friend_id: userId })
             .eq('id', m.trip_id)
+            .neq('created_by', userId)
             .eq('trip_type', 'friend_split');
         }
       }
@@ -3269,17 +3300,24 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         const isSplit = t.trip_type === 'friend_split' || t.name.toLowerCase().startsWith('split with ');
         if (!isSplit) continue;
 
-        // A. Match by friend_id or created_by
-        if (resolvedProfileId && (t.friend_id === resolvedProfileId || t.created_by === resolvedProfileId)) {
-          matchedTrip = t;
-          break;
+        // A. Match by friend_id and created_by bi-directionally
+        if (resolvedProfileId && currentUserId) {
+          if (
+            (t.friend_id === resolvedProfileId && t.created_by === currentUserId) ||
+            (t.created_by === resolvedProfileId && (t.friend_id === currentUserId || !t.friend_id))
+          ) {
+            matchedTrip = t;
+            break;
+          }
         }
-        if (friend.id && t.friend_id === friend.id) {
+
+        // B. Match by friend.id
+        if (friend.id && (t.friend_id === friend.id || (resolvedProfileId && t.friend_id === resolvedProfileId))) {
           matchedTrip = t;
           break;
         }
 
-        // B. Match by members
+        // C. Match by members inside local trip details
         let tMembers: TripMember[] = get().members.filter(m => m.trip_id === t.id);
         if (tMembers.length === 0) {
           try {
@@ -3295,24 +3333,21 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           const hasFriend = tMembers.some(m => {
             if (resolvedProfileId && (m.profile_id === resolvedProfileId || m.user_id === resolvedProfileId)) return true;
             if (cleanFriendPhone && m.phone_number && normalizePhone(m.phone_number) === cleanFriendPhone) return true;
-            if (friend.id && m.id === friend.id) return true;
+            if (friend.id && (m.id === friend.id || m.profile_id === friend.id)) return true;
             return false;
           });
-          if (hasFriend) {
+
+          const hasMe = tMembers.some(m => {
+            if (currentUserId && (m.profile_id === currentUserId || m.user_id === currentUserId)) return true;
+            if (currentUserPhone && m.phone_number && normalizePhone(m.phone_number) === currentUserPhone) return true;
+            if (t.created_by === currentUserId) return true;
+            return false;
+          });
+
+          if (hasFriend && hasMe) {
             matchedTrip = t;
             break;
           }
-        }
-
-        // C. Match by name
-        const tName = t.name.toLowerCase();
-        if (tName === `split with ${cleanFriendName}` || tName === cleanFriendName) {
-          matchedTrip = t;
-          break;
-        }
-        if (currentUserName && currentUserName !== 'You' && tName === `split with ${currentUserName.toLowerCase().trim()}`) {
-          matchedTrip = t;
-          break;
         }
       }
 
@@ -3320,14 +3355,21 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (!matchedTrip && isSupabaseConfigured && currentUserId) {
         try {
           const client = supabaseAdmin || supabase;
+
+          // A. Check trips table directly for bi-directional 1-on-1 split
           if (resolvedProfileId) {
             const { data: remoteTrips } = await withTimeout(
               client
                 .from('trips')
                 .select('*')
                 .eq('trip_type', 'friend_split')
-                .or(`and(created_by.eq.${currentUserId},friend_id.eq.${resolvedProfileId}),and(created_by.eq.${resolvedProfileId},friend_id.eq.${currentUserId})`)
-                .limit(1),
+                .or(
+                  `and(created_by.eq.${currentUserId},friend_id.eq.${resolvedProfileId}),` +
+                  `and(created_by.eq.${resolvedProfileId},friend_id.eq.${currentUserId}),` +
+                  `and(created_by.eq.${resolvedProfileId},friend_id.is.null)`
+                )
+                .order('created_at', { ascending: false })
+                .limit(2),
               3000
             ).catch(() => ({ data: null }));
 
@@ -3336,6 +3378,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             }
           }
 
+          // B. Check trip_members for existing trips where Friend's phone or profile is a member
           if (!matchedTrip && cleanFriendPhone) {
             const cleanDigits = cleanFriendPhone.replace(/[^0-9]/g, '');
             const last10 = cleanDigits.slice(-10);
@@ -3345,7 +3388,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                   .from('trip_members')
                   .select('trip_id')
                   .ilike('phone_number', `%${last10}%`)
-                  .limit(5),
+                  .limit(10),
                 3000
               ).catch(() => ({ data: null }));
 
@@ -3357,13 +3400,44 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                     .select('*')
                     .in('id', candidateTripIds)
                     .eq('trip_type', 'friend_split')
-                    .limit(1),
+                    .or(`created_by.eq.${currentUserId},friend_id.eq.${currentUserId}`),
                   3000
                 ).catch(() => ({ data: null }));
 
                 if (candTrips && candTrips.length > 0) {
                   matchedTrip = candTrips[0] as Trip;
                 }
+              }
+            }
+          }
+
+          // C. Reverse check: Did Friend create a split trip where my phone number is in trip_members?
+          if (!matchedTrip && currentUserPhone && currentUserPhone.length >= 6) {
+            const myLast10 = currentUserPhone.slice(-10);
+            const { data: myMemberRows } = await withTimeout(
+              client
+                .from('trip_members')
+                .select('trip_id')
+                .ilike('phone_number', `%${myLast10}%`)
+                .limit(10),
+              3000
+            ).catch(() => ({ data: null }));
+
+            if (myMemberRows && myMemberRows.length > 0) {
+              const candidateTripIds = myMemberRows.map((m: any) => m.trip_id);
+              let candQuery = client
+                .from('trips')
+                .select('*')
+                .in('id', candidateTripIds)
+                .eq('trip_type', 'friend_split');
+
+              if (resolvedProfileId) {
+                candQuery = candQuery.or(`created_by.eq.${resolvedProfileId},friend_id.eq.${resolvedProfileId}`);
+              }
+
+              const { data: revTrips } = await withTimeout(candQuery.limit(1), 3000).catch(() => ({ data: null }));
+              if (revTrips && revTrips.length > 0) {
+                matchedTrip = revTrips[0] as Trip;
               }
             }
           }
@@ -3385,25 +3459,41 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         }
       }
 
-      // 4. If matched trip found, ensure profile_id and friend_id are linked in Supabase
+      // 4. If matched trip found, ensure BOTH users are properly linked in trip_members and trips in Supabase
       if (matchedTrip) {
-        if (resolvedProfileId && isSupabaseConfigured) {
+        if (isSupabaseConfigured) {
           try {
             const client = supabaseAdmin || supabase;
-            if (matchedTrip.friend_id !== resolvedProfileId && matchedTrip.created_by === currentUserId) {
+            // Update friend_id if I created it and friend_id wasn't set
+            if (resolvedProfileId && matchedTrip.created_by === currentUserId && matchedTrip.friend_id !== resolvedProfileId) {
               await client.from('trips').update({ friend_id: resolvedProfileId }).eq('id', matchedTrip.id);
             }
-            await client.from('trip_members').update({
-              profile_id: resolvedProfileId,
-              user_id: resolvedProfileId,
-              is_guest: false,
-            }).eq('trip_id', matchedTrip.id).or('profile_id.is.null,user_id.is.null');
+            // Link friend's profile_id if they have a member row by phone
+            if (resolvedProfileId) {
+              if (cleanFriendPhone) {
+                const friendLast10 = cleanFriendPhone.slice(-10);
+                await client
+                  .from('trip_members')
+                  .update({ profile_id: resolvedProfileId, user_id: resolvedProfileId, is_guest: false })
+                  .eq('trip_id', matchedTrip.id)
+                  .ilike('phone_number', `%${friendLast10}%`);
+              }
+            }
+            // Link my profile_id if I have a member row by phone
+            if (currentUserId && currentUserPhone) {
+              const myLast10 = currentUserPhone.slice(-10);
+              await client
+                .from('trip_members')
+                .update({ profile_id: currentUserId, user_id: currentUserId, is_guest: false })
+                .eq('trip_id', matchedTrip.id)
+                .ilike('phone_number', `%${myLast10}%`);
+            }
           } catch {}
         }
         return matchedTrip;
       }
 
-      // 5. If no trip exists anywhere, create one now!
+      // 5. If no trip exists anywhere, create ONE shared trip!
       const targetFriendId = resolvedProfileId || friend.id;
       const newTrip = await get().createTrip(
         `Split with ${friend.name.trim()}`,

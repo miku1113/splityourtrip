@@ -26,6 +26,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import {
   useTripStore,
   normalizeExpensesForTrip,
+  findMyMember,
 } from '../../../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../../../src/features/auth/useAuthStore';
 import { useTheme } from '../../../../src/theme/useThemeStore';
@@ -51,6 +52,8 @@ export default function BillDetailScreen() {
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const { user, profile } = useAuthStore();
+  const currentUserPhone =
+    profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
   const {
     trips,
     members: storeMembers,
@@ -198,14 +201,8 @@ export default function BillDetailScreen() {
 
   // Identify current user's member in this trip
   const myMember = useMemo(() => {
-    return (
-      tripMembers.find(
-        m =>
-          (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-          m.role === 'admin'
-      ) || tripMembers[0]
-    );
-  }, [tripMembers, user?.id]);
+    return findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
+  }, [tripMembers, user?.id, currentUserPhone]);
 
   // Determine if current user created this expense (only creator can edit; others view only)
   const canEdit = useMemo(() => {

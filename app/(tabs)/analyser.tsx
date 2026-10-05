@@ -21,6 +21,7 @@ import {
   useTripStore,
   computeBalances,
   normalizeExpensesForTrip,
+  findMyMember,
 } from '../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { AppStorage } from '../../src/lib/storage';
@@ -48,7 +49,9 @@ interface TripCachedAnalytics {
 export default function AnalyserScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const { user } = useAuthStore();
+  const { user, profile } = useAuthStore();
+  const currentUserPhone =
+    profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
   const { trips, expenses, members, initTrips, isLoading: storeLoading } = useTripStore();
 
   const [selectedTripFilter, setSelectedTripFilter] = useState<string>('all');
@@ -261,12 +264,7 @@ export default function AnalyserScreen() {
       const data = allTripsData[t.id];
       if (!data) continue;
 
-      const myMember =
-        data.members.find(
-          m =>
-            (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-            m.role === 'admin'
-        ) || data.members[0];
+      const myMember = findMyMember(data.members, user?.id, currentUserPhone) || data.members[0];
 
       const myBalanceRow = data.balances.find(b => b.member_id === myMember?.id);
       if (myBalanceRow) {

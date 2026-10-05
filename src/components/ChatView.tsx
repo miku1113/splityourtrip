@@ -30,6 +30,7 @@ import {
   computeBalances,
   normalizeExpensesForTrip,
   deletedExpenseIdsSet,
+  findMyMember,
 } from '../features/trips/useTripStore';
 import {
   useContactsStore,
@@ -226,35 +227,85 @@ export default function ChatView({
   const currentUserName =
     profile?.full_name || profile?.name || user?.email?.split('@')[0] || 'You';
   const currentUserId = user?.id || 'local_user';
+  const currentUserPhone =
+    profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
 
   const myMember = useMemo(() => {
-    return (
-      tripMembers.find(
-        m =>
-          (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-          m.role === 'admin'
-      ) || tripMembers[0]
-    );
-  }, [tripMembers, user?.id]);
+    const found = findMyMember(tripMembers, user?.id, currentUserPhone);
+    if (found) return found;
+    // In 1-on-1 friend split, if we can identify the friend member, myMember is the other one
+    if (!isGroup && tripMembers.length === 2) {
+      const friendNorm = friendPhone ? normalizePhone(friendPhone) : '';
+      if (friendNorm) {
+        const friendMem = tripMembers.find(
+          m => m.phone_number && normalizePhone(m.phone_number) === friendNorm
+        );
+        if (friendMem) {
+          return tripMembers.find(m => m.id !== friendMem.id);
+        }
+      }
+      if (friendId) {
+        const friendMem = tripMembers.find(
+          m => m.id === friendId || m.profile_id === friendId || (m as any).user_id === friendId
+        );
+        if (friendMem) {
+          return tripMembers.find(m => m.id !== friendMem.id);
+        }
+      }
+    }
+    // Only if completely offline or unauthenticated
+    if (!user?.id) {
+      return tripMembers.find(m => m.role === 'admin') || tripMembers[0];
+    }
+    return undefined;
+  }, [tripMembers, user?.id, currentUserPhone, isGroup, friendPhone, friendId]);
 
   const otherMember = useMemo(() => {
+    if (!tripMembers || tripMembers.length === 0) return undefined;
+    if (myMember) {
+      const notMe = tripMembers.find(m => m.id !== myMember.id);
+      if (notMe) return notMe;
+    }
+    if (friendPhone) {
+      const friendNorm = normalizePhone(friendPhone);
+      const byPhone = tripMembers.find(
+        m => m.phone_number && normalizePhone(m.phone_number) === friendNorm
+      );
+      if (byPhone) return byPhone;
+    }
+    if (friendId) {
+      const byId = tripMembers.find(
+        m => m.id === friendId || m.profile_id === friendId || (m as any).user_id === friendId
+      );
+      if (byId) return byId;
+    }
     return tripMembers.find(m => m.id !== myMember?.id);
-  }, [tripMembers, myMember?.id]);
+  }, [tripMembers, myMember, friendPhone, friendId]);
 
   useEffect(() => {
     if (!isGroup && otherMember) {
       const phone = friendPhone || otherMember.phone_number;
+      // Guard: Never set title to current user's own phone or name
+      const myNorm = currentUserPhone ? normalizePhone(currentUserPhone) : '';
+      const otherNorm = phone ? normalizePhone(phone) : '';
+      if (myNorm && otherNorm && myNorm === otherNorm) {
+        return;
+      }
       const effective = getEffectiveContactName({
         phoneNumber: phone,
         contactName: otherMember.display_name,
         displayName: otherMember.display_name,
         fallback: displayTitle,
       });
+      const myName = currentUserName?.trim().toLowerCase();
+      if (effective && myName && effective.trim().toLowerCase() === myName && myName !== 'you') {
+        return;
+      }
       if (effective && effective !== displayTitle && effective !== 'Friend' && effective !== 'Member') {
         setDisplayTitle(effective);
       }
     }
-  }, [isGroup, otherMember?.phone_number, otherMember?.display_name, friendPhone]);
+  }, [isGroup, otherMember?.phone_number, otherMember?.display_name, friendPhone, currentUserPhone, currentUserName, displayTitle]);
 
   const resolveSenderName = useCallback(
     (msg: TripMessage) => {
@@ -396,12 +447,7 @@ export default function ChatView({
   const handleLinkFriendToContact = async (contact: FriendContact) => {
     setLinkingInProgress(true);
     try {
-      const myMember =
-        tripMembers.find(
-          m =>
-            (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-            m.role === 'admin'
-        ) || tripMembers[0];
+      const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
       const otherMember = tripMembers.find(m => m.id !== myMember?.id);
 
       await linkGuestWithContact({
@@ -476,12 +522,7 @@ export default function ChatView({
 
       if (tMembers.length === 0) continue;
 
-      const myMember =
-        tMembers.find(
-          m =>
-            (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-            m.role === 'admin'
-        ) || tMembers[0];
+      const myMember = findMyMember(tMembers, user?.id, currentUserPhone) || tMembers[0];
 
       // Find if this friend is a member of trip `t`
       const isDirectFriendTrip =
@@ -844,26 +885,16 @@ export default function ChatView({
   // Group trip net balance for current user when isGroup === true
   const groupMyNetPaise = useMemo(() => {
     if (!isGroup) return 0;
-    const myMember =
-      tripMembers.find(
-        m =>
-          (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-          m.role === 'admin'
-      ) || tripMembers[0];
+    const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
     if (!myMember) return 0;
     const row = balances.find(b => b.member_id === myMember.id);
     return row ? row.net_balance : 0;
-  }, [isGroup, tripMembers, balances, user?.id]);
+  }, [isGroup, tripMembers, balances, user?.id, currentUserPhone]);
 
   // Primary creditor name when user owes in a group trip
   const groupPrimaryCreditorName = useMemo(() => {
     if (!isGroup) return displayTitle;
-    const myMember =
-      tripMembers.find(
-        m =>
-          (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-          m.role === 'admin'
-      ) || tripMembers[0];
+    const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
     if (!myMember) return displayTitle;
     const netRecord: Record<string, number> = {};
     balances
@@ -1401,20 +1432,16 @@ export default function ChatView({
             </View>
           }
           renderItem={({ item }) => {
-          const isFromOther =
-            !isGroup &&
-            ((otherMember &&
-              ((item.sender_id && (item.sender_id === otherMember.id || item.sender_id === otherMember.profile_id || item.sender_id === otherMember.user_id)) ||
-                (item.sender_name && otherMember.display_name && item.sender_name.trim().toLowerCase() === otherMember.display_name.trim().toLowerCase()))) ||
-              (item.sender_name && displayTitle && item.sender_name.trim().toLowerCase() === displayTitle.trim().toLowerCase()));
-
-          const isMine = !isFromOther && (
-            item.sender_id === currentUserId ||
-            (user?.id && item.sender_id === user.id) ||
-            !isGroup ||
-            (item.sender_name && currentUserName && item.sender_name.trim().toLowerCase() === currentUserName.trim().toLowerCase()) ||
-            (item.sender_name && item.sender_name.trim().toLowerCase() === 'you')
+          // Reliably identify if message was sent by active user
+          const isMine = Boolean(
+            (user?.id && (item.sender_id === user.id || (item as any).sender_profile_id === user.id)) ||
+            (currentUserId && item.sender_id === currentUserId) ||
+            (myMember && (item.sender_id === myMember.id || item.sender_id === myMember.profile_id || item.sender_id === (myMember as any).user_id)) ||
+            (item.sender_name && item.sender_name.trim().toLowerCase() === 'you') ||
+            (item.sender_name && currentUserName && item.sender_name.trim().toLowerCase() === currentUserName.trim().toLowerCase() && (!otherMember?.display_name || item.sender_name.trim().toLowerCase() !== otherMember.display_name.trim().toLowerCase()))
           );
+
+          const isFromOther = !isGroup ? !isMine : false;
 
           // 1. Photo Message
           if (item.type === 'image' && item.media_url) {

@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { useTripStore } from '../../../src/features/trips/useTripStore';
+import { useTripStore, findMyMember } from '../../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import { useTheme } from '../../../src/theme/useThemeStore';
+import { getEffectiveContactName } from '../../../src/features/contacts/useContactsStore';
 import ChatView from '../../../src/components/ChatView';
 
 export default function TripDetailScreen() {
@@ -36,21 +37,26 @@ export default function TripDetailScreen() {
     created_at: new Date().toISOString(),
   };
 
-
-  const { user } = useAuthStore();
+  const { user, profile } = useAuthStore();
+  const currentUserPhone =
+    profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
 
   const isSingleSplit =
     trip.trip_type === 'friend_split' ||
     trip.name.toLowerCase().startsWith('split with ') ||
     (members.length === 2 && !trip.image_url);
 
-  const myMember =
-    members.find(
-      m => (user?.id && (m.profile_id === user.id || m.user_id === user.id)) || m.role === 'admin'
-    ) || members[0];
-  const otherMember = members.find(m => m.id !== myMember?.id);
+  const myMember = findMyMember(members, user?.id, currentUserPhone);
+  const otherMember = members.find(m => !myMember || m.id !== myMember.id);
   const cleanTitle = isSingleSplit
-    ? (otherMember?.display_name || trip.name.replace(/^split with\s+/i, ''))
+    ? getEffectiveContactName({
+        phoneNumber: otherMember?.phone_number,
+        contactName: otherMember?.display_name,
+        displayName: otherMember?.display_name,
+        fallback:
+          otherMember?.display_name ||
+          (trip.created_by === user?.id ? trip.name.replace(/^split with\s+/i, '') : 'Friend'),
+      })
     : trip.name;
 
   return (

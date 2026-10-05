@@ -25,6 +25,7 @@ import {
   useTripStore,
   normalizeExpensesForTrip,
   computeBalances,
+  findMyMember,
 } from '../../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import {
@@ -48,6 +49,8 @@ export default function TripInfoScreen() {
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const { user, profile } = useAuthStore();
+  const currentUserPhone =
+    profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
   const {
     trips,
     members: rawMembers,
@@ -263,12 +266,7 @@ export default function TripInfoScreen() {
 
         if (tMembers.length === 0) continue;
 
-        const myMember =
-          tMembers.find(
-            m =>
-              (user?.id && (m.profile_id === user.id || m.user_id === user.id)) ||
-              m.role === 'admin'
-          ) || tMembers[0];
+        const myMember = findMyMember(tMembers, user?.id, currentUserPhone) || tMembers[0];
 
         const isDirectFriendTrip =
           t.id === id ||
@@ -381,9 +379,7 @@ export default function TripInfoScreen() {
 
   const effectiveMembers = React.useMemo(() => {
     if (!isFriendSplit) return members;
-    const myMember = members.find(
-      m => m.role === 'admin' || (user?.id && (m.profile_id === user.id || m.user_id === user.id))
-    ) || {
+    const myMember = findMyMember(members, user?.id, currentUserPhone) || {
       id: user?.id || 'me',
       trip_id: id,
       display_name: 'You',

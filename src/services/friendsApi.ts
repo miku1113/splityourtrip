@@ -3,7 +3,7 @@ import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
 import { FriendContact, normalizePhone, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
-import { computeBalances, normalizeExpensesForTrip } from '../features/trips/useTripStore';
+import { computeBalances, normalizeExpensesForTrip, findMyMember } from '../features/trips/useTripStore';
 
 export interface FriendsApiResult {
   totalOwedToYouPaise: number;
@@ -32,6 +32,17 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
   if (!userId) {
     return cachedResult || { totalOwedToYouPaise: 0, totalYouOwePaise: 0, netOverallPaise: 0, friends: [] };
   }
+
+  let myUserPhone: string | null = null;
+  try {
+    const { useAuthStore } = require('../features/auth/useAuthStore');
+    const authState = useAuthStore.getState();
+    myUserPhone =
+      authState.profile?.phone_number ||
+      (authState.user as any)?.phone ||
+      (authState.user as any)?.user_metadata?.phone_number ||
+      null;
+  } catch {}
 
   try {
     const sb = supabaseAdmin || supabase;
@@ -200,11 +211,7 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
 
       if (tMembers.length === 0) continue;
 
-      const myMember =
-        tMembers.find(m => m.profile_id === userId || (m as any).user_id === userId) ||
-        tMembers.find(m => m.role === 'admin') ||
-        tMembers[0];
-
+      const myMember = findMyMember(tMembers, userId, myUserPhone);
       if (!myMember) continue;
 
       // Attach splits to raw expenses
@@ -229,6 +236,8 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       for (const otherMember of tMembers) {
         if (otherMember.id === myMember.id) continue;
         if (otherMember.profile_id && otherMember.profile_id === userId) continue;
+        if ((otherMember as any).user_id && (otherMember as any).user_id === userId) continue;
+        if (myUserPhone && otherMember.phone_number && normalizePhone(otherMember.phone_number) === normalizePhone(myUserPhone)) continue;
 
         const prof = otherMember.profile_id ? profilesMap.get(otherMember.profile_id) : null;
         const friendPhone = prof?.phone_number || otherMember.phone_number || undefined;

@@ -488,7 +488,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
     }
 
     try {
-      const { computeBalances, normalizeExpensesForTrip, useTripStore } = require('../trips/useTripStore');
+      const { computeBalances, normalizeExpensesForTrip, findMyMember, useTripStore } = require('../trips/useTripStore');
       const { calculateSettlement } = require('../../services/settle');
       const { useAuthStore } = require('../auth/useAuthStore');
 
@@ -580,34 +580,38 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
           t.name.toLowerCase().startsWith('split with ');
 
         // Current user's member in this trip
-        const myMember =
-          members.find(
-            m =>
-              (resolvedUserId && (m.profile_id === resolvedUserId || m.user_id === resolvedUserId)) ||
-              (resolvedUserPhone && normalizePhone(m.phone_number) === resolvedUserPhone)
-          ) ||
-          members.find(m => m.role === 'admin') ||
-          members[0];
+        const myMember = findMyMember(members, resolvedUserId, resolvedUserPhone);
 
         if (isFriendSplit) {
           const otherFromMembers = members.find(m => !myMember || m.id !== myMember.id);
-          const fallbackName =
-            otherFromMembers?.display_name ||
-            t.name.replace(/^split with\s+/i, '').trim();
+          const isOtherMe =
+            otherFromMembers &&
+            ((resolvedUserId && (otherFromMembers.profile_id === resolvedUserId || otherFromMembers.user_id === resolvedUserId)) ||
+              (resolvedUserPhone && otherFromMembers.phone_number && normalizePhone(otherFromMembers.phone_number) === resolvedUserPhone));
 
-          if (fallbackName) {
-            synthesizedFriends.push({
-              id: t.friend_id || otherFromMembers?.id || `friend_${t.id}`,
-              name: fallbackName,
-              phoneNumber: otherFromMembers?.phone_number || undefined,
-              cleanPhone: normalizePhone(otherFromMembers?.phone_number) || undefined,
-              isRegistered: Boolean(otherFromMembers?.profile_id),
-              isGuest:
-                otherFromMembers?.is_guest === false
-                  ? false
-                  : Boolean(!otherFromMembers?.profile_id && !otherFromMembers?.phone_number),
-              profileId: otherFromMembers?.profile_id || undefined,
+          if (otherFromMembers && !isOtherMe) {
+            const rawPhone = otherFromMembers.phone_number;
+            const fallbackName = getEffectiveContactName({
+              phoneNumber: rawPhone,
+              contactName: otherFromMembers.display_name,
+              displayName: otherFromMembers.display_name,
+              fallback: otherFromMembers.display_name || (t.created_by === resolvedUserId ? t.name.replace(/^split with\s+/i, '').trim() : 'Friend'),
             });
+
+            if (fallbackName && fallbackName !== 'You') {
+              synthesizedFriends.push({
+                id: t.friend_id || otherFromMembers.id || `friend_${t.id}`,
+                name: fallbackName,
+                phoneNumber: rawPhone || undefined,
+                cleanPhone: normalizePhone(rawPhone) || undefined,
+                isRegistered: Boolean(otherFromMembers.profile_id),
+                isGuest:
+                  otherFromMembers.is_guest === false
+                    ? false
+                    : Boolean(!otherFromMembers.profile_id && !otherFromMembers.phone_number),
+                profileId: otherFromMembers.profile_id || undefined,
+              });
+            }
           }
         }
 
@@ -623,18 +627,29 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
 
         for (const otherMember of members) {
           if (otherMember.id === myMember.id) continue;
+          if (resolvedUserId && (otherMember.profile_id === resolvedUserId || otherMember.user_id === resolvedUserId)) continue;
+          if (resolvedUserPhone && otherMember.phone_number && normalizePhone(otherMember.phone_number) === resolvedUserPhone) continue;
 
           // Ensure every member from every Group Trip also exists in contacts list
           if (otherMember.display_name && otherMember.display_name.trim()) {
-            synthesizedFriends.push({
-              id: (isFriendSplit && t.friend_id) ? t.friend_id : otherMember.id,
-              name: otherMember.display_name.trim(),
-              phoneNumber: otherMember.phone_number || undefined,
-              cleanPhone: normalizePhone(otherMember.phone_number) || undefined,
-              isRegistered: Boolean(otherMember.profile_id && !otherMember.is_guest),
-              isGuest: Boolean(otherMember.is_guest && !otherMember.phone_number),
-              profileId: otherMember.profile_id || undefined,
+            const rawPhone = otherMember.phone_number;
+            const resolvedName = getEffectiveContactName({
+              phoneNumber: rawPhone,
+              contactName: otherMember.display_name,
+              displayName: otherMember.display_name,
+              fallback: otherMember.display_name.trim(),
             });
+            if (resolvedName && resolvedName !== 'You') {
+              synthesizedFriends.push({
+                id: (isFriendSplit && t.friend_id) ? t.friend_id : otherMember.id,
+                name: resolvedName,
+                phoneNumber: rawPhone || undefined,
+                cleanPhone: normalizePhone(rawPhone) || undefined,
+                isRegistered: Boolean(otherMember.profile_id && !otherMember.is_guest),
+                isGuest: Boolean(otherMember.is_guest && !otherMember.phone_number),
+                profileId: otherMember.profile_id || undefined,
+              });
+            }
           }
 
           let toGetWithOther = 0;

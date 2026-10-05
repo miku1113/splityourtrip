@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { useTripStore } from '../../../src/features/trips/useTripStore';
+import { useTripStore, findMyMember } from '../../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import { PaymentMode, SplitType, TripMember } from '../../../src/types/database';
 import { theme } from '../../../src/theme/colors';
@@ -57,6 +57,8 @@ export default function AddExpenseScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, profile } = useAuthStore();
+  const currentUserPhone =
+    profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
   const { trips, members: rawMembers, expenses, addExpense, updateExpense, loadTripDetails } = useTripStore();
   const { colors, isDark } = useTheme();
 
@@ -316,9 +318,7 @@ export default function AddExpenseScreen() {
   React.useEffect(() => {
     if (members.length > 0 && !existingExpense) {
       if (!paidBy || !members.some(m => m.id === paidBy)) {
-        const myMember =
-          members.find(m => (user?.id && m.profile_id === user.id) || m.role === 'admin') ||
-          members[0];
+        const myMember = findMyMember(members, user?.id, currentUserPhone) || members[0];
         setPaidBy(myMember.id);
       }
       if (
@@ -389,10 +389,7 @@ export default function AddExpenseScreen() {
 
     // Auto-resolve paidBy if empty
     if (!targetPaidBy && members.length > 0) {
-      const myMember =
-        members.find(
-          m => (user?.id && (m.profile_id === user.id || m.user_id === user.id)) || m.role === 'admin'
-        ) || members[0];
+      const myMember = findMyMember(members, user?.id, currentUserPhone) || members[0];
       targetPaidBy = myMember?.id || '';
     }
 
