@@ -129,7 +129,7 @@ export interface TripMessage {
   message?: string;
   content?: string;
   type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'document';
-  chat_type?: 'trip' | 'user';
+  chat_type?: 'group' | 'individual' | 'trip' | 'user';
   media_url?: string;
   media_name?: string;
   media_size?: string;

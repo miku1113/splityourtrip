@@ -191,7 +191,8 @@ interface TripStoreState {
     senderId: string,
     senderName: string,
     text: string,
-    mediaData?: { type: 'image' | 'document'; url: string; name?: string; size?: string }
+    mediaData?: { type: 'image' | 'document'; url: string; name?: string; size?: string },
+    chatType?: 'group' | 'individual'
   ) => Promise<boolean>;
   linkGuestWithContact: (data: {
     tripId?: string;
@@ -255,7 +256,7 @@ export function parseMessagePayload(rawContent: string) {
   let mediaUrl: string | undefined = undefined;
   let mediaName: string | undefined = undefined;
   let mediaSize: string | undefined = undefined;
-  let chatType: 'trip' | 'user' | undefined = undefined;
+  let chatType: 'group' | 'individual' | undefined = undefined;
 
   if (rawContent && rawContent.startsWith('{') && rawContent.includes('"type":')) {
     try {
@@ -267,8 +268,12 @@ export function parseMessagePayload(rawContent: string) {
       if (parsed.media_url) mediaUrl = parsed.media_url;
       if (parsed.media_name) mediaName = parsed.media_name;
       if (parsed.media_size) mediaSize = parsed.media_size;
-      if (parsed.chat_type) chatType = parsed.chat_type;
-      else if (parsed.chatType) chatType = parsed.chatType;
+      const rawChatType = parsed.chat_type || parsed.chatType;
+      if (rawChatType === 'individual' || rawChatType === 'user') {
+        chatType = 'individual';
+      } else if (rawChatType === 'group' || rawChatType === 'trip') {
+        chatType = 'group';
+      }
     } catch {}
   }
   return { msgType, displayText, expId, expData, mediaUrl, mediaName, mediaSize, chatType };
@@ -1363,7 +1368,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       });
 
       const isFriendSplit = tripData?.trip_type === 'friend_split';
-      const defaultChatType: 'trip' | 'user' = isFriendSplit ? 'user' : 'trip';
+      const defaultChatType: 'group' | 'individual' = isFriendSplit ? 'individual' : 'group';
 
       const enrichedExpenses = (expensesRaw || []).map(exp => {
         const expSplits = allSplits.filter(s => s.expense_id === exp.id);
@@ -1499,7 +1504,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           message: parsed.displayText,
           content: tm.message || '',
           type: parsed.msgType,
-          chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') ? 'user' : defaultChatType),
+          chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') || tm.message?.includes('"chat_type":"individual"') ? 'individual' : defaultChatType),
           media_url: parsed.mediaUrl,
           media_name: parsed.mediaName,
           media_size: parsed.mediaSize,
@@ -1517,7 +1522,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           continue;
         }
         seenMsgIds.add(m.id);
-        const chatTypeFromMeta = m.metadata?.chat_type || parsed.chatType || defaultChatType;
+        const metaChatType = m.metadata?.chat_type || parsed.chatType || defaultChatType;
+        const resolvedChatType: 'group' | 'individual' =
+          metaChatType === 'individual' || metaChatType === 'user' ? 'individual' : 'group';
         enrichedMessages.push({
           id: m.id,
           trip_id: m.trip_id || tripId,
@@ -1526,7 +1533,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           message: parsed.displayText,
           content: m.content || '',
           type: parsed.msgType,
-          chat_type: chatTypeFromMeta,
+          chat_type: resolvedChatType,
           media_url: parsed.mediaUrl,
           media_name: parsed.mediaName,
           media_size: parsed.mediaSize,
@@ -1539,12 +1546,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       const existingMsgs = (localDetails?.messages || [])
         .map(m => {
           const parsed = parseMessagePayload(m.content || m.message || '');
+          const localChatType = m.chat_type || parsed.chatType || defaultChatType;
+          const resolvedChatType: 'group' | 'individual' =
+            localChatType === 'individual' || localChatType === 'user' ? 'individual' : 'group';
           return {
             ...m,
             trip_id: m.trip_id || tripId,
             message: parsed.displayText,
             type: m.type || parsed.msgType,
-            chat_type: m.chat_type || parsed.chatType || defaultChatType,
+            chat_type: resolvedChatType,
             expense_id: m.expense_id || parsed.expId,
             expense_data: m.expense_data || parsed.expData,
           };
@@ -2786,7 +2796,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     senderId: string,
     senderName: string,
     text: string,
-    mediaData?: { type: 'image' | 'document'; url: string; name?: string; size?: string }
+    mediaData?: { type: 'image' | 'document'; url: string; name?: string; size?: string },
+    chatTypeOverride?: 'group' | 'individual'
   ) => {
     if (!text.trim() && !mediaData) return false;
 
@@ -2811,7 +2822,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     const tripObj = get().trips.find(t => t.id === tripId) || get().activeTrip;
     const isFriendSplit = tripObj?.trip_type === 'friend_split';
-    const chatType: 'trip' | 'user' = isFriendSplit ? 'user' : 'trip';
+    const chatType: 'group' | 'individual' =
+      chatTypeOverride || (isFriendSplit ? 'individual' : 'group');
 
     let fullPayload = text.trim();
     if (mediaData) {
@@ -2913,8 +2925,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
               message_type: dbMsgType,
               metadata: {
                 chat_type: chatType,
+                message_type: chatType === 'group' ? 'group_message' : 'individual_message',
                 friend_id: tripObj?.friend_id || null,
-                is_group: !isFriendSplit,
+                is_group: chatType === 'group',
               },
             });
           } catch {}
@@ -3439,7 +3452,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
               message: parsed.displayText,
               content: tm.message || '',
               type: parsed.msgType,
-              chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') ? 'user' : 'trip'),
+              chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') || tm.message?.includes('"chat_type":"individual"') ? 'individual' : 'group'),
               media_url: parsed.mediaUrl,
               media_name: parsed.mediaName,
               media_size: parsed.mediaSize,
@@ -3481,6 +3494,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         );
         const rawContent = newMsg.message || newMsg.content || '';
         const parsed = parseMessagePayload(rawContent);
+        const rawChatType = parsed.chatType || newMsg.metadata?.chat_type;
+        const resolvedChatType: 'group' | 'individual' =
+          rawChatType === 'individual' || rawChatType === 'user' || rawContent.includes('"chat_type":"user"') || rawContent.includes('"chat_type":"individual"')
+            ? 'individual'
+            : 'group';
         const msgObj: TripMessage = {
           id: newMsg.id,
           trip_id: newMsg.trip_id || tripId,
@@ -3489,7 +3507,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           message: parsed.displayText,
           content: rawContent,
           type: parsed.msgType,
-          chat_type: parsed.chatType || newMsg.metadata?.chat_type || (rawContent.includes('"chat_type":"user"') ? 'user' : 'trip'),
+          chat_type: resolvedChatType,
           media_url: parsed.mediaUrl || newMsg.media_url,
           media_name: parsed.mediaName || newMsg.media_name,
           media_size: parsed.mediaSize || newMsg.media_size,

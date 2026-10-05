@@ -439,15 +439,39 @@ export default function ChatView({
         if (deletedExpenseIdsSet.has(exp.id)) continue;
         const amt = Number(exp.amount) || 0;
         const expSplits = exp.splits || [];
-        const isPayerMe = exp.paid_by === myMember.id;
-        const isPayerFriend = exp.paid_by === friendMember.id;
-        const mySplit = expSplits.find((s: any) => s.member_id === myMember.id);
-        const friendSplit = expSplits.find((s: any) => s.member_id === friendMember.id);
+        const isPayerMe =
+          exp.paid_by === myMember.id ||
+          (user?.id && (exp.paid_by === user.id || exp.created_by === user.id));
+        const isPayerFriend =
+          exp.paid_by === friendMember.id ||
+          (targetProfileId && exp.paid_by === targetProfileId);
+        const mySplit = expSplits.find(
+          (s: any) =>
+            s.member_id === myMember.id ||
+            (user?.id && (s.profile_id === user.id || s.member_id === user.id))
+        );
+        const friendSplit = expSplits.find(
+          (s: any) =>
+            s.member_id === friendMember.id ||
+            (targetProfileId && (s.profile_id === targetProfileId || s.member_id === targetProfileId))
+        );
 
-        if (!isPayerMe && !isPayerFriend && !friendSplit) continue;
+        const meInSplit = Boolean(mySplit);
+        const friendInSplit = Boolean(friendSplit);
+
+        // Strict mutual involvement: in individual chat, show ONLY expenses where WE BOTH ARE SPLITTING TOGETHER!
+        // 1. I paid, and friend is in the split
+        // 2. Friend paid, and I am in the split
+        // 3. Both of us are in the split together (even if a 3rd party paid)
+        const isSplittingTogether =
+          (isPayerMe && friendInSplit) ||
+          (isPayerFriend && meInSplit) ||
+          (meInSplit && friendInSplit);
+
+        if (!isSplittingTogether) continue;
 
         let impactPaise = 0;
-        if (isPayerMe && friendSplit) {
+        if (isPayerMe && friendInSplit) {
           impactPaise = Number(friendSplit.amount) || 0; // Friend owes you
         } else if (isPayerFriend && mySplit) {
           impactPaise = -(Number(mySplit.amount) || 0); // You owe friend
@@ -565,7 +589,12 @@ export default function ChatView({
           .filter(e => !deletedExpenseIdsSet.has(e.id))
           .map(e => e.id)
       );
+
+      // In group chat: filter out individual messages
       const validMessages = messages.filter(m => {
+        if (m.chat_type === 'individual' || m.chat_type === 'user') {
+          return false;
+        }
         const expId = m.expense_id || m.expense_data?.id;
         if (expId && (deletedExpenseIdsSet.has(expId) || !validTripExpenseIds.has(expId))) {
           return false;
@@ -592,6 +621,7 @@ export default function ChatView({
           message: `💰 Added expense: "${exp.description}"`,
           content: '',
           type: 'expense',
+          chat_type: 'group',
           expense_id: exp.id,
           expense_data: {
             id: exp.id,
@@ -614,14 +644,19 @@ export default function ChatView({
       );
     }
 
-    const validSharedExpenseIds = new Set([
-      ...tripExpenses.filter(e => !deletedExpenseIdsSet.has(e.id)).map(e => e.id),
-      ...sharedExpenseMessages
+    // Individual Chat (!isGroup):
+    // Only show shared expenses where we both are splitting together!
+    const validSharedExpenseIds = new Set(
+      sharedExpenseMessages
         .map(se => se.expense_id || se.expense_data?.id)
-        .filter((id): id is string => Boolean(id && !deletedExpenseIdsSet.has(id))),
-    ]);
+        .filter((id): id is string => Boolean(id && !deletedExpenseIdsSet.has(id)))
+    );
 
+    // In individual chat: filter out group messages and filter out expenses that don't involve both users
     const validMessages = messages.filter(m => {
+      if (m.chat_type === 'group' || m.chat_type === 'trip') {
+        return false;
+      }
       const expId = m.expense_id || m.expense_data?.id;
       if (expId && (deletedExpenseIdsSet.has(expId) || !validSharedExpenseIds.has(expId))) {
         return false;
@@ -768,7 +803,14 @@ export default function ChatView({
     if (!inputText.trim()) return;
     const textToSend = inputText.trim();
     setInputText('');
-    await sendMessage(tripId, currentUserId, currentUserName, textToSend);
+    await sendMessage(
+      tripId,
+      currentUserId,
+      currentUserName,
+      textToSend,
+      undefined,
+      isGroup ? 'group' : 'individual'
+    );
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
@@ -817,7 +859,8 @@ export default function ChatView({
             url: remoteUrl,
             name: asset.fileName || 'Photo.jpg',
             size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
-          }
+          },
+          isGroup ? 'group' : 'individual'
         );
         setInputText('');
         setTimeout(() => {
@@ -876,7 +919,8 @@ export default function ChatView({
             url: remoteUrl,
             name: asset.fileName || 'Photo.jpg',
             size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
-          }
+          },
+          isGroup ? 'group' : 'individual'
         );
         setInputText('');
         setTimeout(() => {
@@ -908,7 +952,8 @@ export default function ChatView({
             url: file.uri,
             name: file.name || 'Document.pdf',
             size: file.size ? `${Math.round(file.size / 1024)} KB` : 'PDF',
-          }
+          },
+          isGroup ? 'group' : 'individual'
         );
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
