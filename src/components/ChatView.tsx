@@ -35,6 +35,8 @@ import {
   useContactsStore,
   normalizePhone,
   FriendContact,
+  getContactNameByPhone,
+  getEffectiveContactName,
 } from '../features/contacts/useContactsStore';
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from '../services/settle';
@@ -96,7 +98,17 @@ export default function ChatView({
     initContacts,
   } = useContactsStore();
 
-  const [displayTitle, setDisplayTitle] = useState(title);
+  const initialResolvedTitle = useMemo(() => {
+    if (isGroup) return title;
+    return getEffectiveContactName({
+      phoneNumber: friendPhone,
+      contactName: title,
+      displayName: title,
+      fallback: title,
+    });
+  }, [title, isGroup, friendPhone]);
+
+  const [displayTitle, setDisplayTitle] = useState(initialResolvedTitle);
   const [displayPhone, setDisplayPhone] = useState(friendPhone || '');
   const [isLinkedLocal, setIsLinkedLocal] = useState(Boolean(friendPhone && friendPhone.trim().length > 0));
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
@@ -109,8 +121,18 @@ export default function ChatView({
   const [isBlocked, setIsBlocked] = useState(false);
 
   useEffect(() => {
-    setDisplayTitle(title);
-  }, [title]);
+    if (isGroup) {
+      setDisplayTitle(title);
+    } else {
+      const effective = getEffectiveContactName({
+        phoneNumber: friendPhone,
+        contactName: title,
+        displayName: title,
+        fallback: title,
+      });
+      setDisplayTitle(effective);
+    }
+  }, [title, isGroup, friendPhone]);
 
   useEffect(() => {
     if (friendPhone && friendPhone.trim().length > 0) {
@@ -218,6 +240,77 @@ export default function ChatView({
   const otherMember = useMemo(() => {
     return tripMembers.find(m => m.id !== myMember?.id);
   }, [tripMembers, myMember?.id]);
+
+  useEffect(() => {
+    if (!isGroup && otherMember) {
+      const phone = friendPhone || otherMember.phone_number;
+      const effective = getEffectiveContactName({
+        phoneNumber: phone,
+        contactName: otherMember.display_name,
+        displayName: otherMember.display_name,
+        fallback: displayTitle,
+      });
+      if (effective && effective !== displayTitle && effective !== 'Friend' && effective !== 'Member') {
+        setDisplayTitle(effective);
+      }
+    }
+  }, [isGroup, otherMember?.phone_number, otherMember?.display_name, friendPhone]);
+
+  const resolveSenderName = useCallback(
+    (msg: TripMessage) => {
+      if (
+        msg.sender_id &&
+        (msg.sender_id === user?.id ||
+          msg.sender_id === currentUserId ||
+          (myMember && msg.sender_id === myMember.id))
+      ) {
+        return 'You';
+      }
+      const member = tripMembers.find(
+        m =>
+          msg.sender_id &&
+          (m.profile_id === msg.sender_id ||
+            m.id === msg.sender_id ||
+            (m as any).user_id === msg.sender_id)
+      );
+      const phone = member?.phone_number;
+      return getEffectiveContactName({
+        phoneNumber: phone,
+        contactName: member?.display_name,
+        displayName: msg.sender_name || member?.display_name,
+        fallback: msg.sender_name || member?.display_name || 'Member',
+      });
+    },
+    [tripMembers, user?.id, currentUserId, myMember]
+  );
+
+  const resolveExpensePayerName = useCallback(
+    (exp: any) => {
+      if (
+        exp.paid_by_id &&
+        (exp.paid_by_id === user?.id ||
+          exp.paid_by_id === currentUserId ||
+          (myMember && exp.paid_by_id === myMember.id))
+      ) {
+        return 'You';
+      }
+      const member = tripMembers.find(
+        m =>
+          exp.paid_by_id &&
+          (m.profile_id === exp.paid_by_id ||
+            m.id === exp.paid_by_id ||
+            (m as any).user_id === exp.paid_by_id)
+      );
+      const phone = member?.phone_number;
+      return getEffectiveContactName({
+        phoneNumber: phone,
+        contactName: member?.display_name,
+        displayName: exp.paid_by_name || member?.display_name,
+        fallback: exp.paid_by_name || member?.display_name || 'Member',
+      });
+    },
+    [tripMembers, user?.id, currentUserId, myMember]
+  );
 
   // Determine if the current 1-on-1 friend is an unlinked Guest
   const isGuestFriend = useMemo(() => {
@@ -782,7 +875,14 @@ export default function ChatView({
     const myDebt = settlements.find(s => s.from === myMember.id);
     if (myDebt) {
       const creditor = tripMembers.find(m => m.id === myDebt.to);
-      if (creditor) return creditor.display_name;
+      if (creditor) {
+        return getEffectiveContactName({
+          phoneNumber: creditor.phone_number,
+          contactName: creditor.display_name,
+          displayName: creditor.display_name,
+          fallback: creditor.display_name || 'Member',
+        });
+      }
     }
     return displayTitle;
   }, [isGroup, tripMembers, balances, tripId, user?.id, displayTitle]);
@@ -1335,6 +1435,11 @@ export default function ChatView({
                     },
                   ]}
                 >
+                  {isGroup && !isMine && (
+                    <Text style={[styles.senderNameHeader, { color: colors.primary, paddingHorizontal: 8, paddingTop: 6 }]}>
+                      {resolveSenderName(item)}
+                    </Text>
+                  )}
                   <TouchableOpacity
                     activeOpacity={0.9}
                     onPress={() => setSelectedPhotoPreview(item.media_url || null)}
@@ -1380,6 +1485,11 @@ export default function ChatView({
                   activeOpacity={0.8}
                   onPress={() => handleOpenDoc(item.media_url)}
                 >
+                  {isGroup && !isMine && (
+                    <Text style={[styles.senderNameHeader, { color: colors.primary, marginBottom: 4 }]}>
+                      {resolveSenderName(item)}
+                    </Text>
+                  )}
                   <View style={[styles.docIconBox, { backgroundColor: isMine ? 'rgba(255,255,255,0.2)' : colors.dangerBg }]}>
                     <Ionicons name="document-text" size={24} color={isMine ? '#FFFFFF' : colors.danger} />
                   </View>
@@ -1471,7 +1581,7 @@ export default function ChatView({
                         {exp.description}
                       </Text>
                       <Text style={[styles.expenseCardSubtitle, { color: colors.textSecondary }]}>
-                        Paid by {exp.paid_by_name} • Split among {exp.split_count || 2} members
+                        Paid by {resolveExpensePayerName(exp)} • Split among {exp.split_count || 2} members
                       </Text>
                       {exp.location ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 3 }}>
@@ -1534,8 +1644,8 @@ export default function ChatView({
                   },
                 ]}
               >
-                {isGroup && !isMine && item.sender_name && (
-                  <Text style={[styles.senderNameHeader, { color: colors.primary }]}>{item.sender_name}</Text>
+                {isGroup && !isMine && (
+                  <Text style={[styles.senderNameHeader, { color: colors.primary }]}>{resolveSenderName(item)}</Text>
                 )}
                 <Text style={[styles.messageText, { color: isMine ? '#FFFFFF' : colors.text }]}>
                   {item.message}

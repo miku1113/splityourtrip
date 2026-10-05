@@ -3,6 +3,7 @@ import { View, StyleSheet, StatusBar } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import ChatView from '../../src/components/ChatView';
 import { useTheme } from '../../src/theme/useThemeStore';
+import { getEffectiveContactName } from '../../src/features/contacts/useContactsStore';
 
 export default function FriendChatScreen() {
   const router = useRouter();
@@ -14,7 +15,12 @@ export default function FriendChatScreen() {
   }>();
   const { colors, isDark } = useTheme();
 
-  const title = friendName || 'Friend Chat';
+  const title = getEffectiveContactName({
+    phoneNumber: friendPhone,
+    contactName: friendName,
+    displayName: friendName,
+    fallback: friendName || 'Friend Chat',
+  });
   const subtitle = friendPhone ? `${friendPhone} • Split Your Trip` : '✨ Split Your Trip';
 
   return (

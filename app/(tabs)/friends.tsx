@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
-import { useContactsStore, FriendContact } from '../../src/features/contacts/useContactsStore';
+import { useContactsStore, FriendContact, getEffectiveContactName } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 
@@ -74,6 +74,13 @@ const FriendRowItem = React.memo(function FriendRowItem({
   const isGuest = Boolean(item.isGuest && !item.isRegistered && !item.phoneNumber);
 
   const isOpeningThisFriend = isOpening;
+
+  const displayName = getEffectiveContactName({
+    phoneNumber: item.phoneNumber || item.cleanPhone,
+    contactName: item.name,
+    displayName: item.name,
+    fallback: item.name,
+  });
 
   return (
     <View
@@ -132,7 +139,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                   { color: item.isRegistered ? colors.primaryDark : colors.text },
                 ]}
               >
-                {item.name ? item.name.charAt(0).toUpperCase() : '?'}
+                {displayName ? displayName.charAt(0).toUpperCase() : '?'}
               </Text>
             )}
           </View>
@@ -151,7 +158,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
         <View style={styles.friendDetails}>
           <View style={styles.nameRow}>
             <Text style={[styles.friendName, { color: colors.text }]} numberOfLines={1}>
-              {item.name}
+              {displayName}
             </Text>
             {item.isRegistered ? (
               <View
@@ -472,11 +479,18 @@ export default function FriendsScreen() {
       const targetTrip = await findOrCreateFriendSplitTrip(friend);
 
       if (targetTrip) {
+        const targetFriendName = getEffectiveContactName({
+          phoneNumber: friend.phoneNumber || friend.cleanPhone,
+          contactName: friend.name,
+          displayName: friend.name,
+          fallback: friend.name.trim(),
+        });
+
         router.push({
           pathname: '/chat/[id]',
           params: {
             id: targetTrip.id,
-            friendName: friend.name.trim(),
+            friendName: targetFriendName,
             friendPhone: friend.phoneNumber || '',
             friendId: friend.id,
           },

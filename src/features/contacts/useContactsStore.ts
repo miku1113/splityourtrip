@@ -103,6 +103,101 @@ export function getUserContactsStorageKey(userId?: string | null): string {
   return '@splityourtrip_cached_contacts_guest';
 }
 
+// In-memory mapping of device phonebook contacts (10-digit phone -> Saved Contact Name)
+export const deviceContactNamesByPhone = new Map<string, string>();
+
+// Initialize from storage for instant sync
+AppStorage.getItem('@splityourtrip_device_contacts_name_map')
+  .then(raw => {
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      Object.entries(parsed).forEach(([k, v]) => {
+        if (k && v) deviceContactNamesByPhone.set(k, v as string);
+      });
+    }
+  })
+  .catch(() => {});
+
+export function isPhoneNumberLike(str?: string | null): boolean {
+  if (!str) return false;
+  const trimmed = str.trim();
+  const digits = trimmed.replace(/[^0-9]/g, '');
+  if (digits.length < 5) return false;
+  const nonPhoneChars = trimmed.replace(/[0-9+\-()\s]/g, '');
+  return nonPhoneChars.length === 0;
+}
+
+export function isGenericPlaceholder(name?: string | null): boolean {
+  if (!name) return true;
+  const lower = name.trim().toLowerCase();
+  return (
+    lower === 'member' ||
+    lower === 'traveler' ||
+    lower === 'split your trip user' ||
+    lower === 'user' ||
+    lower === 'friend' ||
+    lower === 'friend chat' ||
+    lower === 'guest' ||
+    lower === 'unknown' ||
+    isPhoneNumberLike(name)
+  );
+}
+
+export function getContactNameByPhone(rawPhone?: string | null): string | null {
+  if (!rawPhone) return null;
+  const norm = normalizePhone(rawPhone);
+  if (!norm) return null;
+  const found = deviceContactNamesByPhone.get(norm);
+  if (found && !isGenericPlaceholder(found)) {
+    return found.trim();
+  }
+  return null;
+}
+
+export function getEffectiveContactName(options: {
+  phoneNumber?: string | null;
+  contactName?: string | null;
+  displayName?: string | null;
+  profileName?: string | null;
+  fallback?: string;
+}): string {
+  const { phoneNumber, contactName, displayName, profileName, fallback = 'Friend' } = options;
+
+  // 1. Device Phonebook contact name (Saved by the user in device contacts)
+  if (phoneNumber) {
+    const savedPhoneName = getContactNameByPhone(phoneNumber);
+    if (savedPhoneName && savedPhoneName.trim() && !isGenericPlaceholder(savedPhoneName)) {
+      return savedPhoneName.trim();
+    }
+  }
+
+  // 2. Explicit contact name from local contacts list (if it's a real name)
+  if (contactName && contactName.trim() && !isGenericPlaceholder(contactName)) {
+    return contactName.trim();
+  }
+
+  // 3. Trip member display name (if user explicitly assigned a real nickname/name)
+  if (displayName && displayName.trim() && !isGenericPlaceholder(displayName)) {
+    return displayName.trim();
+  }
+
+  // 4. USE PROFILE NAME WHEN NO NAME IS THERE!
+  // If the user has not saved this person in contacts, display their remote profile name!
+  if (profileName && profileName.trim() && !isGenericPlaceholder(profileName)) {
+    return profileName.trim();
+  }
+
+  // 5. If no real name is available anywhere, use phone number if present
+  if (displayName && displayName.trim() && isPhoneNumberLike(displayName)) {
+    return displayName.trim();
+  }
+  if (phoneNumber && phoneNumber.trim()) {
+    return phoneNumber.trim();
+  }
+
+  return fallback;
+}
+
 export const useContactsStore = create<ContactsState>((set, get) => ({
   contacts: [],
   deviceContacts: [],
@@ -181,6 +276,10 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
           normalizeNameForMatch(e.name) === normalizeNameForMatch(f.name)
         );
 
+        // Resolve Contact Name: device contact name > existing contact name > f.name (never profile name)
+        const savedContactName = normPhone ? deviceContactNamesByPhone.get(normPhone) : null;
+        const resolvedName = savedContactName || (existingMatch?.name && !isGenericPlaceholder(existingMatch.name) ? existingMatch.name : null) || f.name;
+
         const canonicalId = f.profileId || f.id || existingMatch?.id || `friend_${cleanName}`;
         if (!seenIds.has(canonicalId) && !seenNames.has(cleanName)) {
           seenIds.add(canonicalId);
@@ -191,7 +290,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
             ...existingMatch,
             ...f,
             id: canonicalId,
-            name: (existingMatch?.name && existingMatch.name.length > f.name.length) ? existingMatch.name : f.name,
+            name: resolvedName,
             phoneNumber: f.phoneNumber || existingMatch?.phoneNumber,
             cleanPhone: normPhone || existingMatch?.cleanPhone,
             avatarUrl: f.avatarUrl || existingMatch?.avatarUrl,
@@ -316,6 +415,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       const mappedContacts: FriendContact[] = [];
       const seenPhones = new Set<string>();
       const seenNames = new Set<string>();
+      const nameMap: Record<string, string> = {};
 
       for (const dc of rawDeviceContacts) {
         const name = dc.name?.trim();
@@ -323,6 +423,11 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
 
         const phone = dc.phoneNumbers?.[0]?.number;
         const norm = normalizePhone(phone);
+
+        if (norm) {
+          deviceContactNamesByPhone.set(norm, name);
+          nameMap[norm] = name;
+        }
 
         if (norm && seenPhones.has(norm)) continue;
         if (!norm && seenNames.has(name.toLowerCase())) continue;
@@ -339,9 +444,25 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         });
       }
 
+      try {
+        await AppStorage.setItem('@splityourtrip_device_contacts_name_map', JSON.stringify(nameMap));
+      } catch {}
+
       mappedContacts.sort((a, b) => a.name.localeCompare(b.name));
 
+      // Also ensure active contacts reflect the user's saved phone contact names immediately
+      const currentContacts = get().contacts;
+      const updatedContacts = currentContacts.map(c => {
+        const phone = c.cleanPhone || normalizePhone(c.phoneNumber);
+        const savedContactName = phone ? deviceContactNamesByPhone.get(phone) : null;
+        if (savedContactName && savedContactName !== c.name) {
+          return { ...c, name: savedContactName };
+        }
+        return c;
+      });
+
       set({
+        contacts: updatedContacts,
         deviceContacts: mappedContacts,
         lastSyncedAt: new Date().toISOString(),
       });

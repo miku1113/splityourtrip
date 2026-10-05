@@ -1,7 +1,7 @@
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
-import { FriendContact, normalizePhone } from '../features/contacts/useContactsStore';
+import { FriendContact, normalizePhone, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
 import { computeBalances, normalizeExpensesForTrip } from '../features/trips/useTripStore';
 
@@ -169,13 +169,20 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         const otherPersonId = tripMeta.created_by === userId ? tripMeta.friend_id : (tripMeta.friend_id === userId ? tripMeta.created_by : null);
         if (otherPersonId) {
           const prof = profilesMap.get(otherPersonId);
-          const friendName = prof?.full_name || tripMeta.name?.replace(/^split with /i, '').trim() || 'Friend';
+          const friendPhone = prof?.phone_number || undefined;
+          const rawTripFriendName = tripMeta.name?.replace(/^split with /i, '').trim();
+          const friendName = getEffectiveContactName({
+            phoneNumber: friendPhone,
+            displayName: rawTripFriendName,
+            profileName: prof?.full_name,
+            fallback: rawTripFriendName || 'Friend',
+          });
           const friendKey = otherPersonId;
           const entry = friendMap.get(friendKey) || {
             id: otherPersonId,
             name: friendName,
-            phoneNumber: prof?.phone_number || undefined,
-            cleanPhone: normalizePhone(prof?.phone_number) || undefined,
+            phoneNumber: friendPhone,
+            cleanPhone: normalizePhone(friendPhone) || undefined,
             profileId: otherPersonId,
             isGuest: false,
             avatarUrl: prof?.avatar_url || undefined,
@@ -183,6 +190,9 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
             youOwePaise: 0,
             trips: new Set<string>(),
           };
+          if (!entry.name || entry.name === 'Friend') {
+            entry.name = friendName;
+          }
           entry.trips.add(tId);
           friendMap.set(friendKey, entry);
         }
@@ -220,15 +230,25 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         if (otherMember.id === myMember.id) continue;
         if (otherMember.profile_id && otherMember.profile_id === userId) continue;
 
-        const normPhone = normalizePhone(otherMember.phone_number);
-        const friendKey = otherMember.profile_id || normPhone || otherMember.id;
         const prof = otherMember.profile_id ? profilesMap.get(otherMember.profile_id) : null;
+        const friendPhone = prof?.phone_number || otherMember.phone_number || undefined;
+        const normPhone = normalizePhone(otherMember.phone_number);
+        const resolvedPhone = normalizePhone(friendPhone) || normPhone;
+        const friendKey = otherMember.profile_id || resolvedPhone || otherMember.id;
+
+        const resolvedFriendName = getEffectiveContactName({
+          phoneNumber: friendPhone,
+          contactName: otherMember.display_name,
+          displayName: otherMember.display_name,
+          profileName: prof?.full_name,
+          fallback: otherMember.display_name || 'Friend',
+        });
 
         const entry = friendMap.get(friendKey) || {
           id: otherMember.profile_id || otherMember.id,
-          name: prof?.full_name || otherMember.display_name,
-          phoneNumber: prof?.phone_number || otherMember.phone_number || undefined,
-          cleanPhone: normPhone || (prof?.phone_number ? normalizePhone(prof.phone_number) : undefined),
+          name: resolvedFriendName,
+          phoneNumber: friendPhone,
+          cleanPhone: resolvedPhone || undefined,
           profileId: otherMember.profile_id || undefined,
           isGuest: otherMember.is_guest,
           avatarUrl: prof?.avatar_url || (otherMember as any).avatar_url,
@@ -240,8 +260,13 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         if (prof?.avatar_url && !entry.avatarUrl) {
           entry.avatarUrl = prof.avatar_url;
         }
-        if (prof?.full_name && (!entry.name || entry.name.length < prof.full_name.length)) {
-          entry.name = prof.full_name;
+
+        // CRITICAL: Prioritize device contact name. If none exists, use profile name!
+        const matchedContactName = getContactNameByPhone(friendPhone || entry.phoneNumber || entry.cleanPhone);
+        if (matchedContactName) {
+          entry.name = matchedContactName;
+        } else if (!entry.name || isGenericPlaceholder(entry.name)) {
+          entry.name = resolvedFriendName;
         }
 
         entry.trips.add(tId);
@@ -263,12 +288,20 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
     const friendsList: FriendContact[] = [];
 
     for (const [, f] of friendMap.entries()) {
+      const prof = f.profileId ? profilesMap.get(f.profileId) : null;
+      const finalResolvedName = getEffectiveContactName({
+        phoneNumber: f.phoneNumber || f.cleanPhone,
+        contactName: f.name,
+        displayName: f.name,
+        profileName: prof?.full_name,
+        fallback: prof?.full_name || f.name || 'Friend',
+      });
       const net = f.owedToYouPaise - f.youOwePaise;
       totalOwedToYouPaise += f.owedToYouPaise;
       totalYouOwePaise += f.youOwePaise;
       friendsList.push({
         id: f.id,
-        name: f.name,
+        name: finalResolvedName,
         phoneNumber: f.phoneNumber,
         cleanPhone: f.cleanPhone,
         profileId: f.profileId,

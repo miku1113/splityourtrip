@@ -15,6 +15,7 @@ import {
 export type { Trip, TripMember, Expense, ExpenseSplit } from '../../types/database';
 import { splitEqual } from '../../services/split';
 import { formatCurrencyAmount } from '../../services/currency';
+import { getContactNameByPhone, getEffectiveContactName } from '../contacts/useContactsStore';
 
 // Helper to generate RFC4122 v4 compliant UUID
 export function generateUUID(): string {
@@ -888,16 +889,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     const extraMembers: TripMember[] = (initialMembers || [])
       .filter(m => m && m.name && m.name.trim().length > 0)
-      .map(m => ({
-        id: generateUUID(),
-        trip_id: tripData.id,
-        display_name: m.name.trim(),
-        phone_number: m.phoneNumber ? m.phoneNumber.trim() : null,
-        role: 'member',
-        status: 'accepted',
-        is_guest: true,
-        created_at: new Date().toISOString(),
-      }));
+      .map(m => {
+        const contactName = getContactNameByPhone(m.phoneNumber);
+        return {
+          id: generateUUID(),
+          trip_id: tripData.id,
+          display_name: contactName || m.name.trim(),
+          phone_number: m.phoneNumber ? m.phoneNumber.trim() : null,
+          role: 'member',
+          status: 'accepted',
+          is_guest: true,
+          created_at: new Date().toISOString(),
+        };
+      });
 
     const allInitialMembers: TripMember[] = [adminMember, ...extraMembers];
 
@@ -1334,12 +1338,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           em => em.id === m.id || (m.profile_id && em.profile_id === m.profile_id)
         );
         const resolvedPhone = pInfo?.phone_number || localMatch?.phone_number || m.phone_number || null;
+        const resolvedDisplayName = getEffectiveContactName({
+          phoneNumber: resolvedPhone,
+          contactName: localMatch?.display_name,
+          displayName: m.display_name,
+          profileName: pInfo?.full_name,
+          fallback: localMatch?.display_name || m.display_name || 'Member',
+        });
         return {
           id: m.id,
           trip_id: m.trip_id,
           profile_id: m.profile_id,
           user_id: m.profile_id,
-          display_name: localMatch?.display_name || pInfo?.full_name || m.display_name || 'Member',
+          display_name: resolvedDisplayName,
           phone_number: resolvedPhone,
           role: m.role || 'member',
           status: 'accepted',
@@ -1752,8 +1763,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   }) => {
     const memberId = generateUUID();
     let finalProfileId = data.profileId || null;
-    let finalDisplayName = data.displayName.trim();
     const finalPhone = data.phoneNumber ? data.phoneNumber.trim() : null;
+    const contactName = getContactNameByPhone(finalPhone);
+    let finalDisplayName = contactName || data.displayName.trim();
 
     // Database lookup: If phoneNumber provided without profileId, check if already in database
     if (finalPhone && !finalProfileId && isSupabaseConfigured) {
@@ -1763,7 +1775,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           if (dbLookup.profileId) {
             finalProfileId = dbLookup.profileId;
           }
-          if (dbLookup.name && (!finalDisplayName || finalDisplayName === finalPhone || finalDisplayName.toLowerCase() === 'guest' || finalDisplayName.toLowerCase() === 'member')) {
+          if (!contactName && dbLookup.name && (!finalDisplayName || finalDisplayName === finalPhone || finalDisplayName.toLowerCase() === 'guest' || finalDisplayName.toLowerCase() === 'member')) {
             finalDisplayName = dbLookup.name;
           }
         }
@@ -1931,6 +1943,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     if (cleanDigits.length < 4) return null;
     const last10 = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
 
+    // 0. Always check device contact name first
+    const localContactName = getContactNameByPhone(rawPhone);
+
     // 1. Check Supabase profiles table (registered app users)
     if (isSupabaseConfigured) {
       try {
@@ -1945,9 +1960,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
         if (profiles && profiles.length > 0 && profiles[0].id) {
           const p = profiles[0];
+          const bestContactName =
+            localContactName ||
+            getContactNameByPhone(p.phone_number) ||
+            (p.full_name && p.full_name.trim() !== 'Split Your Trip User' ? p.full_name : null) ||
+            'Split Your Trip User';
+
           return {
             profileId: p.id,
-            name: p.full_name || 'Split Your Trip User',
+            name: bestContactName,
             phoneNumber: p.phone_number || rawPhone,
             avatarUrl: p.avatar_url || null,
             isAppUser: true,
@@ -1972,9 +1993,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
         if (members && members.length > 0 && members[0].display_name && members[0].display_name.trim() !== 'Member') {
           const m = members[0];
+          const bestContactName =
+            localContactName ||
+            getContactNameByPhone(m.phone_number) ||
+            m.display_name.trim();
+
           return {
             profileId: m.profile_id || undefined,
-            name: m.display_name.trim(),
+            name: bestContactName,
             phoneNumber: m.phone_number || rawPhone,
             isAppUser: Boolean(m.profile_id),
           };
@@ -1999,13 +2025,21 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (matched && matched.name) {
         return {
           profileId: matched.profileId || undefined,
-          name: matched.name,
+          name: localContactName || matched.name,
           phoneNumber: matched.phoneNumber,
           avatarUrl: matched.avatarUrl || null,
           isAppUser: Boolean(matched.profileId || matched.isRegistered),
         };
       }
     } catch {}
+
+    if (localContactName) {
+      return {
+        name: localContactName,
+        phoneNumber: rawPhone,
+        isAppUser: false,
+      };
+    }
 
     return null;
   },
