@@ -143,15 +143,15 @@ const FriendRowItem = React.memo(function FriendRowItem({
               </Text>
             )}
           </View>
-          {toGet > 0 && toGive === 0 && (
+          {Boolean(item.unseenMessagesCount && item.unseenMessagesCount > 0) ? (
+            <View style={[styles.avatarStatusDot, { backgroundColor: '#10B981', borderColor: colors.card }]} />
+          ) : toGet > 0 && toGive === 0 ? (
             <View style={[styles.avatarStatusDot, { backgroundColor: colors.success, borderColor: colors.card }]} />
-          )}
-          {toGive > 0 && toGet === 0 && (
+          ) : toGive > 0 && toGet === 0 ? (
             <View style={[styles.avatarStatusDot, { backgroundColor: colors.danger, borderColor: colors.card }]} />
-          )}
-          {toGet > 0 && toGive > 0 && (
+          ) : toGet > 0 && toGive > 0 ? (
             <View style={[styles.avatarStatusDot, { backgroundColor: '#8B5CF6', borderColor: colors.card }]} />
-          )}
+          ) : null}
         </View>
 
         {/* Friend Info */}
@@ -160,6 +160,13 @@ const FriendRowItem = React.memo(function FriendRowItem({
             <Text style={[styles.friendName, { color: colors.text }]} numberOfLines={1}>
               {displayName}
             </Text>
+            {Boolean(item.unseenMessagesCount && item.unseenMessagesCount > 0) && (
+              <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.unreadBadgeText}>
+                  {item.unseenMessagesCount} new
+                </Text>
+              </View>
+            )}
             {item.isRegistered ? (
               <View
                 style={[
@@ -329,6 +336,7 @@ export default function FriendsScreen() {
   const contacts = useContactsStore(s => s.contacts);
   const friendsSummary = useContactsStore(s => s.friendsSummary);
   const fetchFriendsSummary = useContactsStore(s => s.fetchFriendsSummary);
+  const subscribeFriendsRealtime = useContactsStore(s => s.subscribeFriendsRealtime);
   const isLoading = useContactsStore(s => s.isLoading);
   const inviteFriend = useContactsStore(s => s.inviteFriend);
 
@@ -352,6 +360,11 @@ export default function FriendsScreen() {
     fetchFriendsSummary(user?.id).finally(() => {
       setInitialLoading(false);
     });
+
+    const unsubscribe = subscribeFriendsRealtime(user?.id);
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [user?.id]);
 
   useFocusEffect(
@@ -384,10 +397,11 @@ export default function FriendsScreen() {
     setRefreshing(false);
   };
 
-  // Friends list with pending settlements guaranteed at the very top
+  // Friends list with unseen messages first, then highest pending amounts, then settled
   const activeFriends = useMemo(() => {
     const seenIds = new Set<string>();
     const seenNames = new Set<string>();
+    const unseenList: FriendContact[] = [];
     const pendingList: FriendContact[] = [];
     const otherList: FriendContact[] = [];
 
@@ -399,17 +413,25 @@ export default function FriendsScreen() {
 
       const toGet = c.owedToYouPaise || 0;
       const toGive = c.youOwePaise || 0;
+      const hasUnseen = (c.unseenMessagesCount || 0) > 0;
       const isPending =
         toGet > 0 ||
         toGive > 0 ||
         (c.netBalancePaise !== undefined && c.netBalancePaise !== 0);
 
-      if (isPending) {
+      if (hasUnseen) {
+        unseenList.push(c);
+      } else if (isPending) {
         pendingList.push(c);
       } else {
         otherList.push(c);
       }
     }
+
+    // Sort unseen messages by newest message timestamp first
+    unseenList.sort((a, b) => {
+      return new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime();
+    });
 
     // Sort pending settlements by highest pending amount first
     pendingList.sort((a, b) => {
@@ -418,7 +440,7 @@ export default function FriendsScreen() {
       return bAmt - aAmt;
     });
 
-    return [...pendingList, ...otherList];
+    return [...unseenList, ...pendingList, ...otherList];
   }, [contacts]);
 
   // Aggregate totals calculated accurately from entire database via dedicated API
@@ -467,47 +489,27 @@ export default function FriendsScreen() {
   }, [hasMore, loadingMore]);
 
   const handleOpenFriendChat = useCallback(async (friend: FriendContact) => {
+    const directTripId = friend.defaultTripId || (friend as any).tripId;
+    if (directTripId) {
+      // Direct instant navigation, matching the exact speed of Trips screen! 0ms latency!
+      router.push(`/trip/${directTripId}`);
+      return;
+    }
+
     if (navLockRef.current || openingFriendId) return;
     navLockRef.current = true;
     setOpeningFriendId(friend.id);
 
     try {
-      // Allow UI to paint the loading spinner immediately before work/navigation
-      await new Promise(resolve => setTimeout(resolve, 25));
-
-      // Use canonical friend split trip finder (guarantees both users share the SAME trip!)
       const targetTrip = await findOrCreateFriendSplitTrip(friend);
-
       if (targetTrip) {
-        const targetFriendName = getEffectiveContactName({
-          phoneNumber: friend.phoneNumber || friend.cleanPhone,
-          contactName: friend.name,
-          displayName: friend.name,
-          fallback: friend.name.trim(),
-        });
-
-        router.push({
-          pathname: '/chat/[id]',
-          params: {
-            id: targetTrip.id,
-            friendName: targetFriendName,
-            friendPhone: friend.phoneNumber || '',
-            friendId: friend.id,
-          },
-        });
-      } else {
-        navLockRef.current = false;
-        setOpeningFriendId(null);
+        router.push(`/trip/${targetTrip.id}`);
       }
     } catch (e) {
       console.log('Error opening friend chat:', e);
+    } finally {
       navLockRef.current = false;
       setOpeningFriendId(null);
-    } finally {
-      setTimeout(() => {
-        navLockRef.current = false;
-        setOpeningFriendId(null);
-      }, 1000);
     }
   }, [openingFriendId, findOrCreateFriendSplitTrip, router]);
 
@@ -896,6 +898,16 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   appBadgeText: {
+    fontSize: scaleFont(10),
+    fontWeight: '700',
+  },
+  unreadBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
     fontSize: scaleFont(10),
     fontWeight: '700',
   },

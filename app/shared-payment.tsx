@@ -58,12 +58,14 @@ export default function SharedPaymentScreen() {
   const [isNavigating, setIsNavigating] = useState(false);
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
 
-  // Initialize contacts if empty
+  // Initialize contacts and friends list
   useEffect(() => {
-    if (contacts.length === 0) {
-      initContacts();
+    initContacts();
+    const currentId = user?.id || profile?.id;
+    if (currentId) {
+      useContactsStore.getState().fetchFriendsSummary(currentId);
     }
-  }, []);
+  }, [user?.id, profile?.id]);
 
   // Check for shared image or text from Android SEND Intent or route params
   useEffect(() => {
@@ -215,13 +217,14 @@ export default function SharedPaymentScreen() {
       const targetTrip = await findOrCreateFriendSplitTrip(friend);
 
       if (targetTrip) {
+        const paymentDesc = description || (receiverName ? `Payment to ${receiverName}` : `Payment with ${friend.name}`);
         router.replace({
           pathname: '/trip/[id]/add',
           params: {
             id: targetTrip.id,
             prefillAmount: amountRupees,
-            prefillDescription: description || `Payment to ${receiverName || friend.name}`,
-            prefillReceiver: receiverName || friend.name,
+            prefillDescription: paymentDesc,
+            prefillReceiver: friend.name.trim(),
             prefillCategory: suggestedCategory,
             upiTxnId: upiTxnId,
             paymentApp: detectedApp,

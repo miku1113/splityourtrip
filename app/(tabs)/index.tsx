@@ -24,6 +24,7 @@ import { useTripStore, Trip } from '../../src/features/trips/useTripStore';
 import { useContactsStore, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
+import TripCoverBadge from '../../src/components/TripCoverBadge';
 
 const PAGE_SIZE = 10;
 
@@ -471,17 +472,12 @@ export default function MyTripsScreen() {
                 ]}
                 onPress={() => handleOpenTrip(item.id)}
               >
-                <View style={[styles.tripBadge, { backgroundColor: colors.primaryLight }]}>
-                  {item.image_url ? (
-                    item.image_url.startsWith('emoji:') ? (
-                      <Text style={styles.tripBadgeText}>{item.image_url.replace('emoji:', '')}</Text>
-                    ) : (
-                      <Image source={{ uri: item.image_url }} style={styles.tripBadgeImage} />
-                    )
-                  ) : (
-                    <Text style={styles.tripBadgeText}>🌴</Text>
-                  )}
-                </View>
+                <TripCoverBadge
+                  imageUrl={item.image_url}
+                  size={44}
+                  style={styles.tripBadge}
+                  fallbackEmoji="🌴"
+                />
 
                 <View style={styles.tripInfo}>
                   <Text style={[styles.tripName, { color: colors.text }]} numberOfLines={1}>

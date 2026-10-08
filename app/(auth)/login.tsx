@@ -20,6 +20,7 @@ import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { SUPPORTED_CURRENCIES, CurrencyItem } from '../../src/services/currency';
+import { AppLogo } from '../../src/components/AppLogo';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -278,9 +279,7 @@ export default function LoginScreen() {
       >
         {/* Brand Header */}
         <View style={styles.header}>
-          <View style={[styles.logoBadge, { backgroundColor: colors.primary }]}>
-            <Text style={styles.logoIcon}>✈️</Text>
-          </View>
+          <AppLogo size={80} showGlow style={{ marginBottom: 16 }} />
           <Text style={[styles.title, { color: colors.text }]}>Split Your Trip</Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
             Smarter group expenses, instant UPI share & automated settlements.

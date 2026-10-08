@@ -38,6 +38,7 @@ import { calculateSettlement } from '../../../src/services/settle';
 import { formatCurrencyAmount } from '../../../src/services/currency';
 import { theme } from '../../../src/theme/colors';
 import { useTheme } from '../../../src/theme/useThemeStore';
+import TripCoverBadge from '../../../src/components/TripCoverBadge';
 
 type InfoTabKey = 'expenses' | 'members' | 'balances' | 'settle';
 
@@ -755,14 +756,13 @@ export default function TripInfoScreen() {
               <Text style={[styles.headerAvatarText, { color: colors.primary }]}>
                 {cleanFriendName.charAt(0).toUpperCase()}
               </Text>
-            ) : trip.image_url ? (
-              trip.image_url.startsWith('emoji:') ? (
-                <Text style={{ fontSize: 20 }}>{trip.image_url.replace('emoji:', '')}</Text>
-              ) : (
-                <Image source={{ uri: trip.image_url }} style={{ width: '100%', height: '100%' }} />
-              )
             ) : (
-              <Ionicons name="airplane" size={20} color={colors.primary} />
+              <TripCoverBadge
+                imageUrl={trip.image_url}
+                size={38}
+                borderRadius={19}
+                fallbackEmoji="✈️"
+              />
             )}
           </View>
           <View style={styles.headerTitleCol}>

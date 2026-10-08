@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Split Your Trip &mdash; Splash Screen & Transition</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0B0F19;
+  --card: #161F30;
+  --ind: #6366F1;
+  --ind-glow: rgba(99, 102, 241, 0.4);
+  --sky: #38BDF8;
+  --sky-glow: rgba(56, 189, 248, 0.4);
+  --ok: #34D399;
+  --tx: #EEF2FF;
+  --mut: #94A3B8;
+  --border: #2A3959;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: #05070D;
+  color: var(--tx);
+  font-family: 'Space Grotesk', -apple-system, sans-serif;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Device Shell */
+#device-wrapper {
+  position: relative;
+  width: 100vw;
+  max-width: 412px;
+  height: 100vh;
+  max-height: 890px;
+  background: var(--bg);
+  overflow: hidden;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.8), 0 0 1px 1px rgba(255, 255, 255, 0.08);
+  border-radius: 44px;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 480px) {
+  #device-wrapper {
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/* Status Bar */
+.status-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  z-index: 50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 28px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx);
+  letter-spacing: -0.2px;
+}
+.status-icons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Splash View (Layer 1) */
+#splash-view {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(120% 70% at 50% 35%, #192248 0%, var(--bg) 65%);
+  overflow: hidden;
+  transition: transform 0.85s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.75s ease;
+}
+
+/* Ambient Starlight / Grid */
+#stars-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.glow-orb {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--ind-glow) 0%, transparent 70%);
+  filter: blur(40px);
+  pointer-events: none;
+  animation: pulseGlow 4s ease-in-out infinite alternate;
+}
+@keyframes pulseGlow {
+  0% { transform: scale(0.9); opacity: 0.4; }
+  100% { transform: scale(1.15); opacity: 0.75; }
+}
+
+/* 3D Stage for Vector Logo & Receipt */
+.stage-3d {
+  position: relative;
+  width: 240px;
+  height: 220px;
+  perspective: 800px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-assembly {
+  position: relative;
+  width: 170px;
+  height: 150px;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Foldable Receipt Card */
+.receipt-paper {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100px;
+  height: 120px;
+  margin-left: -50px;
+  margin-top: -60px;
+  background: #E8ECFF;
+  border-radius: 6px;
+  color: #1E293B;
+  padding: 8px 10px;
+  font-family: 'Space Grotesk', monospace;
+  font-size: 8px;
+  line-height: 1.4;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  transform-origin: center center;
+  animation: receiptFold 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+  z-index: 10;
+}
+.receipt-header { font-weight: 700; color: var(--ind); border-bottom: 1px dashed #94A3B8; padding-bottom: 4px; margin-bottom: 4px; }
+.receipt-row { display: flex; justify-content: space-between; }
+.receipt-total { border-top: 1px dashed #94A3B8; margin-top: 4px; padding-top: 2px; font-weight: 700; }
+
+@keyframes receiptFold {
+  0% { transform: translateY(-40px) rotateX(40deg) scale(1); opacity: 0; }
+  25% { transform: translateY(0) rotateX(0deg) scale(1); opacity: 1; }
+  60% { transform: rotateY(70deg) scale(0.85); background: #CBD5E1; }
+  100% { transform: scale(0.1) rotateZ(45deg); opacity: 0; visibility: hidden; }
+}
+
+/* Multi-layer Vector Origami Plane */
+.vector-plane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.65) translateY(20px);
+  animation: planeAssemble 1.4s cubic-bezier(0.2, 1.2, 0.3, 1) 1.2s forwards;
+}
+
+@keyframes planeAssemble {
+  0% { opacity: 0; transform: scale(0.4) translateY(30px) rotateX(30deg); }
+  60% { opacity: 1; transform: scale(1.08) translateY(-6px) rotateX(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.vector-plane svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 14px 28px rgba(99, 102, 241, 0.45));
+}
+
+/* Light beam burst */
+.warp-burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #FFF;
+  box-shadow: 0 0 50px 20px var(--sky), 0 0 100px 40px var(--ind);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Brand Text Section */
+.brand-info {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.brand-title {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  color: var(--tx);
+  opacity: 0;
+  transform: translateY(12px);
+  animation: textFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 1.5s forwards;
+}
+.brand-tagline {
+  font-size: 14px;
+  color: var(--mut);
+  font-weight: 500;
+  max-width: 260px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(12px);
+  animation: textFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 1.7s forwards;
+}
+@keyframes textFadeIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Bottom Loader indicator */
+.splash-loader {
+  position: absolute;
+  bottom: 50px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  animation: textFadeIn 0.6s ease 2s forwards;
+}
+.loading-pills {
+  display: flex;
+  gap: 6px;
+}
+.loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ind);
+  animation: dotPulse 1.2s infinite ease-in-out;
+}
+.loading-dot:nth-child(2) { animation-delay: 0.2s; background: var(--sky); }
+.loading-dot:nth-child(3) { animation-delay: 0.4s; background: var(--ok); }
+@keyframes dotPulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+
+/* =========================================================================
+   NEXT SCREEN VIEW (Layer 2 &mdash; Simulated Destination App Dashboard)
+   ========================================================================= */
+#app-view {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: #0B0F19;
+  display: flex;
+  flex-direction: column;
+  padding-top: 52px;
+  padding-bottom: 24px;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: transform 0.85s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.75s ease;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+#app-view::-webkit-scrollbar { display: none; }
+
+/* Dashboard Header */
+.app-header {
+  padding: 0 24px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.user-greeting { display: flex; flex-direction: column; gap: 2px; }
+.user-name { font-size: 20px; font-weight: 700; color: var(--tx); }
+.user-sub { font-size: 13px; color: var(--mut); }
+.avatar-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--ind), var(--sky));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #FFF;
+  font-size: 16px;
+  box-shadow: 0 4px 12px var(--ind-glow);
+}
+
+/* Total Balance Card */
+.balance-card {
+  margin: 0 20px 20px;
+  background: linear-gradient(145deg, #1A233D, #11182A);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+}
+.balance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.balance-tag {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--mut);
+  text-transform: uppercase;
+}
+.balance-net {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ok);
+}
+.balance-stats {
+  display: flex;
+  gap: 16px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding-top: 12px;
+}
+.stat-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stat-lbl { font-size: 12px; color: var(--mut); }
+.stat-val { font-size: 15px; font-weight: 700; }
+.stat-val.pos { color: var(--ok); }
+.stat-val.neg { color: #F87171; }
+
+/* Quick Action Buttons */
+.action-grid {
+  display: flex;
+  gap: 12px;
+  padding: 0 20px 20px;
+}
+.action-card {
+  flex: 1;
+  background: #141D30;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.action-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--sky);
+}
+.action-title { font-size: 13px; font-weight: 600; color: var(--tx); }
+
+/* Trips List */
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px 12px;
+}
+.sec-title { font-size: 17px; font-weight: 700; color: var(--tx); }
+.sec-link { font-size: 13px; color: var(--sky); font-weight: 600; text-decoration: none; }
+
+.trip-card {
+  margin: 0 20px 12px;
+  background: #151E32;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.trip-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(56, 189, 248, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+.trip-details { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.trip-name { font-size: 15px; font-weight: 700; color: var(--tx); }
+.trip-meta { font-size: 12px; color: var(--mut); }
+.trip-badge {
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Bottom Tab Bar */
+.tab-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 30;
+}
+.tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tab-item.active { color: var(--sky); }
+.tab-icon { font-size: 20px; }
+
+/* =========================================================================
+   ANIMATION TRANSITION STATES
+   ========================================================================= */
+
+/* State: Flying Forward Through Camera */
+.transition-fly #splash-view .vector-plane {
+  animation: planeWarpOut 0.9s cubic-bezier(0.5, 0, 0.7, 1) forwards !important;
+}
+.transition-fly #splash-view .brand-info,
+.transition-fly #splash-view .splash-loader {
+  animation: fadeOutFast 0.4s ease forwards !important;
+}
+.transition-fly #splash-view .warp-burst {
+  animation: warpFlash 0.8s cubic-bezier(0.2, 0.9, 0.3, 1) 0.3s forwards !important;
+}
+.transition-fly #splash-view {
+  opacity: 0;
+  transform: scale(1.15);
+  pointer-events: none;
+}
+.transition-fly #app-view {
+  opacity: 1;
+  transform: scale(1);
+}
+
+@keyframes planeWarpOut {
+  0% { transform: scale(1) translateY(0) rotateX(0deg); }
+  35% { transform: scale(1.15) translateY(-25px) rotateX(-20deg); }
+  100% { transform: scale(5.5) translateY(-140px) translateZ(400px) rotateX(-35deg); opacity: 0; }
+}
+
+@keyframes warpFlash {
+  0% { opacity: 0; transform: scale(0.5); }
+  50% { opacity: 1; transform: scale(25); }
+  100% { opacity: 0; transform: scale(50); }
+}
+
+@keyframes fadeOutFast {
+  to { opacity: 0; transform: translateY(15px); }
+}
+
+/* External Controller Panel for User Interaction */
+#control-deck {
+  margin-top: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+.ctrl-btn {
+  background: #1E293B;
+  color: var(--tx);
+  border: 1px solid var(--border);
+  padding: 10px 18px;
+  border-radius: 99px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.ctrl-btn:hover { background: #2E3E5E; border-color: var(--sky); transform: translateY(-1px); }
+.ctrl-btn.pri { background: linear-gradient(90deg, var(--ind), var(--sky)); color: #FFF; border: none; }
+</style>
+</head>
+<body>
+
+<div id="device-wrapper">
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span>9:41</span>
+    <div class="status-icons">
+      <span>5G</span>
+      <span>100%</span>
+    </div>
+  </div>
+
+  <!-- ==================== SPLASH SCREEN INTRO ==================== -->
+  <div id="splash-view">
+    <canvas id="stars-canvas"></canvas>
+    <div class="glow-orb"></div>
+
+    <div class="stage-3d">
+      <div class="warp-burst"></div>
+
+      <!-- Foldable Receipt -->
+      <div class="receipt-paper">
+        <div class="receipt-header">SPLIT YOUR TRIP</div>
+        <div class="receipt-row"><span>Goa Villa</span><span>&#8377;12,000</span></div>
+        <div class="receipt-row"><span>Dinner</span><span>&#8377;3,400</span></div>
+        <div class="receipt-row"><span>Cab Share</span><span>&#8377;850</span></div>
+        <div class="receipt-total receipt-row"><span>TOTAL</span><span>&#8377;16,250</span></div>
+      </div>
+
+      <!-- Vector Origami Airplane (Exact Brand Shape) -->
+      <div class="vector-plane">
+        <svg viewBox="190 240 870 770">
+          <defs>
+            <linearGradient id="planeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#818CF8" />
+              <stop offset="100%" stop-color="#4F46E5" />
+            </linearGradient>
+            <linearGradient id="wingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#38BDF8" />
+              <stop offset="100%" stop-color="#0284C7" />
+            </linearGradient>
+          </defs>
+
+          <!-- Back shadow/depth path -->
+          <path d="M607 539L629 616L665 556ZM1013 260L1009 257L1003 257L889 297L653 375L473 437L546 495L596 524L597 522L604 523L632 503L850 363L928 315L959 300L961 302L916 346L685 549L680 561L693 564L697 560L700 561L806 653L851 689L854 689L857 687L933 480L1013 268Z" fill="#312E81" opacity="0.6" transform="translate(6, 12)" />
+
+          <!-- Left Ribbon / Wing -->
+          <path d="M693 565L683 562L679 563L660 604L630 653L599 693L563 730L539 750L510 771L454 806L377 847L279 892L273 897L211 988L211 991L378 991L416 971L453 947L515 899L559 856L578 834L607 795L632 753L655 704L673 654L686 606ZM605 530L607 538L666 555L672 544L672 542ZM468 441L468 447L471 451L526 482L524 478L473 438Z" fill="url(#planeGrad)" />
+
+          <!-- Right Ribbon / Wing -->
+          <path d="M736 612L716 637L696 672L686 700L680 736L682 777L687 801L693 820L707 849L728 879L761 914L787 936L831 967L871 990L1041 991L980 897L973 890L917 866L858 835L810 803L794 790L769 765L750 738L740 717L734 696L732 683L732 650L737 616Z" fill="url(#wingGrad)" />
+
+          <!-- Central Fuselage / Jet Fold -->
+          <path d="M607 539L629 616L665 556ZM1013 260L1009 257L1003 257L889 297L653 375L473 437L546 495L596 524L597 522L604 523L632 503L850 363L928 315L959 300L961 302L916 346L685 549L680 561L693 564L697 560L700 561L806 653L851 689L854 689L857 687L933 480L1013 268Z" fill="#EEF2FF" />
+        </svg>
+      </div>
+    </div>
+
+    <!-- Typography -->
+    <div class="brand-info">
+      <h1 class="brand-title">Split Your Trip</h1>
+      <p class="brand-tagline">Smarter group expenses, instant UPI settlements.</p>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div class="splash-loader">
+      <div class="loading-pills">
+        <span class="loading-dot"></span>
+        <span class="loading-dot"></span>
+        <span class="loading-dot"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== DESTINATION SCREEN (APP DASHBOARD) ==================== -->
+  <div id="app-view">
+    <div class="app-header">
+      <div class="user-greeting">
+        <span class="user-sub">Welcome back,</span>
+        <h2 class="user-name">Mihir &bull; Goa Trip</h2>
+      </div>
+      <div class="avatar-btn">M</div>
+    </div>
+
+    <!-- Net Balance -->
+    <div class="balance-card">
+      <div class="balance-row">
+        <span class="balance-tag">Total Balance</span>
+        <span class="trip-badge">&bull; All Trips Active</span>
+      </div>
+      <div class="balance-net">+&#8377;2,450</div>
+      <div class="balance-stats">
+        <div class="stat-item">
+          <span class="stat-lbl">You'll receive</span>
+          <span class="stat-val pos">+&#8377;3,120</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-lbl">You owe</span>
+          <span class="stat-val neg">-&#8377;670</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="action-grid">
+      <div class="action-card">
+        <div class="action-icon">&#10133;</div>
+        <span class="action-title">Add Expense</span>
+      </div>
+      <div class="action-card">
+        <div class="action-icon">&#128247;</div>
+        <span class="action-title">Scan Bill</span>
+      </div>
+      <div class="action-card">
+        <div class="action-icon">&#9889;</div>
+        <span class="action-title">Settle UPI</span>
+      </div>
+    </div>
+
+    <!-- Trips Section -->
+    <div class="section-title-row">
+      <span class="sec-title">Recent Trips</span>
+      <a href="#" class="sec-link">See all</a>
+    </div>
+
+    <div class="trip-card">
+      <div class="trip-thumb">&#127796;</div>
+      <div class="trip-details">
+        <span class="trip-name">Goa Summer 2026</span>
+        <span class="trip-meta">4 members &bull; 8 expenses</span>
+      </div>
+      <span class="trip-badge">Active</span>
+    </div>
+
+    <div class="trip-card">
+      <div class="trip-thumb">&#127958;&#65039;</div>
+      <div class="trip-details">
+        <span class="trip-name">Dumas Beach Drive</span>
+        <span class="trip-meta">3 members &bull; Bill settled</span>
+      </div>
+      <span class="trip-badge" style="color:var(--sky);background:rgba(56,189,248,0.15)">Settled</span>
+    </div>
+
+    <!-- Bottom Tab Bar -->
+    <div class="tab-bar">
+      <div class="tab-item active">
+        <span class="tab-icon">&#127968;</span>
+        <span>Trips</span>
+      </div>
+      <div class="tab-item">
+        <span class="tab-icon">&#128101;</span>
+        <span>Friends</span>
+      </div>
+      <div class="tab-item">
+        <span class="tab-icon">&#128172;</span>
+        <span>Chat</span>
+      </div>
+      <div class="tab-item">
+        <span class="tab-icon">&#9881;&#65039;</span>
+        <span>Settings</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== CONTROLLER DOCK ==================== -->
+<div id="control-deck">
+  <button class="ctrl-btn pri" id="btn-replay">&#9654; Replay Splash &amp; Transition</button>
+  <button class="ctrl-btn" id="btn-trans-now">&#9889; Trigger Transition Now</button>
+  <button class="ctrl-btn" id="btn-toggle-view">&#128260; Toggle Splash / Dashboard</button>
+</div>
+
+<script>
+(function() {
+  var wrapper = document.getElementById('device-wrapper');
+  var splashView = document.getElementById('splash-view');
+  var appView = document.getElementById('app-view');
+  var canvas = document.getElementById('stars-canvas');
+  var ctx = canvas.getContext('2d');
+  var autoTimer = null;
+
+  // Starlight background
+  function resizeCanvas() {
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  var stars = [];
+  for (var i = 0; i < 45; i++) {
+    stars.push({
+      x: Math.random() * 400,
+      y: Math.random() * 800,
+      r: Math.random() * 1.5 + 0.5,
+      alpha: Math.random() * 0.7 + 0.3,
+      speed: Math.random() * 0.02 + 0.005
+    });
+  }
+
+  function drawStars() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#FFF';
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      s.alpha += s.speed;
+      if (s.alpha > 1 || s.alpha < 0.2) s.speed = -s.speed;
+      ctx.globalAlpha = Math.max(0.1, Math.min(1, s.alpha));
+      ctx.beginPath();
+      ctx.arc(s.x * (canvas.width / 400), s.y * (canvas.height / 800), s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    requestAnimationFrame(drawStars);
+  }
+  drawStars();
+
+  // Transition trigger
+  function triggerTransition() {
+    wrapper.classList.add('transition-fly');
+  }
+
+  // Reset to initial splash
+  function resetSplash() {
+    clearTimeout(autoTimer);
+    wrapper.classList.remove('transition-fly');
+
+    // Force restart CSS animations on receipt and vector plane
+    var receipt = document.querySelector('.receipt-paper');
+    var plane = document.querySelector('.vector-plane');
+    var title = document.querySelector('.brand-title');
+    var tag = document.querySelector('.brand-tagline');
+    var loader = document.querySelector('.splash-loader');
+
+    var elements = [receipt, plane, title, tag, loader];
+    elements.forEach(function(el) {
+      if (el) {
+        el.style.animation = 'none';
+        void el.offsetWidth;
+        el.style.animation = '';
+      }
+    });
+
+    // Auto-trigger transition after 2.9 seconds of logo presentation
+    autoTimer = setTimeout(function() {
+      triggerTransition();
+    }, 2900);
+  }
+
+  // Event Listeners
+  document.getElementById('btn-replay').onclick = resetSplash;
+  document.getElementById('btn-trans-now').onclick = triggerTransition;
+  document.getElementById('btn-toggle-view').onclick = function() {
+    if (wrapper.classList.contains('transition-fly')) {
+      wrapper.classList.remove('transition-fly');
+    } else {
+      wrapper.classList.add('transition-fly');
+    }
+  };
+
+  // Start sequence on page load
+  resetSplash();
+})();
+</script>
+</body>
+</html>

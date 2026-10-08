@@ -25,6 +25,7 @@ import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import { useTheme } from '../../../src/theme/useThemeStore';
 import { useContactsStore, FriendContact } from '../../../src/features/contacts/useContactsStore';
 import { SUPPORTED_CURRENCIES, CurrencyItem, getCurrencyInfo } from '../../../src/services/currency';
+import { uploadTripCoverImage } from '../../../src/services/imageUpload';
 
 const TRAVEL_PRESET_ICONS = [
   { label: 'Beach', icon: '🏖️' },
@@ -203,7 +204,15 @@ export default function TripSettingsScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImageUrl(result.assets[0].uri);
+        const localUri = result.assets[0].uri;
+        setImageUrl(localUri);
+        if (id) {
+          uploadTripCoverImage(id, localUri)
+            .then(cloudUrl => {
+              if (cloudUrl) setImageUrl(cloudUrl);
+            })
+            .catch(() => {});
+        }
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not pick photo from gallery.');
@@ -225,7 +234,15 @@ export default function TripSettingsScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImageUrl(result.assets[0].uri);
+        const localUri = result.assets[0].uri;
+        setImageUrl(localUri);
+        if (id) {
+          uploadTripCoverImage(id, localUri)
+            .then(cloudUrl => {
+              if (cloudUrl) setImageUrl(cloudUrl);
+            })
+            .catch(() => {});
+        }
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not take photo.');
@@ -558,7 +575,14 @@ export default function TripSettingsScreen() {
 
           <View style={styles.bannerContainer}>
             {imageUrl && !isEmojiImage ? (
-              <Image source={{ uri: imageUrl }} style={styles.coverImage} />
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.coverImage}
+                onError={() => {
+                  console.warn('Cover preview failed, resetting image');
+                  setImageUrl(null);
+                }}
+              />
             ) : (
               <View style={[styles.coverFallback, { backgroundColor: colors.primaryLight }]}>
                 <Text style={styles.coverEmoji}>{emojiValue}</Text>

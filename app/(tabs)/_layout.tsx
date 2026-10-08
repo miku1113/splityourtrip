@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme/useThemeStore';
@@ -8,16 +8,28 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AddExpenseChoiceModal from '../../src/components/AddExpenseChoiceModal';
 import SidebarDrawer from '../../src/components/SidebarDrawer';
+import NotificationToast from '../../src/components/NotificationToast';
+import NotificationCenterModal from '../../src/components/NotificationCenterModal';
+import SettleUpModal from '../../src/components/SettleUpModal';
+import { useNotificationStore } from '../../src/features/notifications/useNotificationStore';
 import { syncWidgetSummary } from '../../src/services/widgetService';
 
 export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { profile } = useAuthStore();
+  const { user, profile } = useAuthStore();
   const { trips } = useTripStore();
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
+  const [settleUpModalVisible, setSettleUpModalVisible] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [notifModalVisible, setNotifModalVisible] = useState(false);
+  const unreadNotifCount = useNotificationStore(s => s.unreadCount);
+  const loadNotifications = useNotificationStore(s => s.loadNotifications);
+
+  useEffect(() => {
+    loadNotifications(user?.id);
+  }, [user?.id]);
 
   // Sync widget summary whenever trips change
   useEffect(() => {
@@ -88,13 +100,30 @@ export default function TabLayout() {
             </View>
           ),
           headerRight: () => (
-            <TouchableOpacity
-              style={styles.hamburgerBtn}
-              onPress={openSidebar}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="menu-outline" size={26} color={colors.text} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity
+                style={styles.notifBtn}
+                onPress={() => setNotifModalVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="notifications-outline" size={23} color={colors.text} />
+                {unreadNotifCount > 0 && (
+                  <View style={[styles.notifBadge, { backgroundColor: colors.danger }]}>
+                    <Text style={styles.notifBadgeText}>
+                      {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.hamburgerBtn}
+                onPress={openSidebar}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="menu-outline" size={26} color={colors.text} />
+              </TouchableOpacity>
+            </View>
           ),
         }}
       >
@@ -229,6 +258,25 @@ export default function TabLayout() {
       <AddExpenseChoiceModal
         visible={expenseModalVisible}
         onClose={() => setExpenseModalVisible(false)}
+        onOpenSettleUp={() => {
+          setExpenseModalVisible(false);
+          setTimeout(() => setSettleUpModalVisible(true), 200);
+        }}
+      />
+
+      {/* Settle Up / Pay Modal (Cash & UPI) */}
+      <SettleUpModal
+        visible={settleUpModalVisible}
+        onClose={() => setSettleUpModalVisible(false)}
+      />
+
+      {/* In-App Notification Toast Banner */}
+      <NotificationToast />
+
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        visible={notifModalVisible}
+        onClose={() => setNotifModalVisible(false)}
       />
     </>
   );
@@ -244,6 +292,29 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 8,
+  },
+  notifBtn: {
+    padding: 6,
+    marginRight: 6,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  notifBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
+    fontWeight: '800',
   },
   hamburgerBtn: {
     marginRight: 16,

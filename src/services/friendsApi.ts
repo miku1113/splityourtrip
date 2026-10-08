@@ -3,7 +3,7 @@ import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
 import { FriendContact, normalizePhone, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
-import { computeBalances, normalizeExpensesForTrip, findMyMember } from '../features/trips/useTripStore';
+import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload } from '../features/trips/useTripStore';
 
 export interface FriendsApiResult {
   totalOwedToYouPaise: number;
@@ -86,16 +86,18 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       return emptyResult;
     }
 
-    // 3. Concurrently fetch all trips metadata, members, and expenses for these trips
-    const [allTripsRes, allMembersRes, allExpensesRes] = await Promise.all([
+    // Concurrently fetch trips metadata, members, expenses, and recent messages
+    const [allTripsRes, allMembersRes, allExpensesRes, allMessagesRes] = await Promise.all([
       sb.from('trips').select('id, name, trip_type, friend_id, created_by').in('id', tripIds),
       sb.from('trip_members').select('*').in('trip_id', tripIds),
       sb.from('expenses').select('*').in('trip_id', tripIds),
+      sb.from('trip_messages').select('id, trip_id, sender_id, message, created_at').in('trip_id', tripIds).order('created_at', { ascending: false }).limit(400),
     ]);
 
     const remoteTrips = allTripsRes.data || [];
     const remoteMembers = allMembersRes.data || [];
     const remoteExpenses = allExpensesRes.data || [];
+    const remoteMessages = allMessagesRes.data || [];
     const expIds = remoteExpenses.map((e: any) => e.id);
 
     const splitsRes = expIds.length > 0
@@ -107,6 +109,17 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
     const allTripsMap = new Map<string, any>();
     remoteTrips.forEach((t: any) => allTripsMap.set(t.id, t));
     localTrips.forEach(t => allTripsMap.set(t.id, t));
+
+    // Preload last-read timestamps for all trips in parallel
+    const lastReadMap = new Map<string, number>();
+    await Promise.all(
+      tripIds.map(async tId => {
+        try {
+          const lr = await AppStorage.getItem(`@splityourtrip_last_read_${tId}`);
+          if (lr) lastReadMap.set(tId, new Date(lr).getTime());
+        } catch {}
+      })
+    );
 
     // Collect all profile IDs to fetch real profiles (avatar, full name, phone)
     const allProfileIds = new Set<string>();
@@ -134,21 +147,22 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       }
     }
 
-    const friendMap = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        phoneNumber?: string;
-        cleanPhone?: string;
-        profileId?: string;
-        isGuest?: boolean;
-        avatarUrl?: string;
-        owedToYouPaise: number;
-        youOwePaise: number;
-        trips: Set<string>;
-      }
-    >();
+interface FriendMapEntry {
+  id: string;
+  name: string;
+  phoneNumber?: string;
+  cleanPhone?: string;
+  profileId?: string;
+  isGuest?: boolean;
+  avatarUrl?: string;
+  owedToYouPaise: number;
+  youOwePaise: number;
+  trips: Set<string>;
+  unseenMessagesCount: number;
+  lastMessageAt?: string;
+}
+
+    const friendMap = new Map<string, FriendMapEntry>();
 
     // Process each trip independently
     for (const tId of tripIds) {
@@ -174,6 +188,8 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       ];
 
       const tripMeta = allTripsMap.get(tId);
+      const lastReadMs = lastReadMap.get(tId) || 0;
+      const tMessages = remoteMessages.filter((m: any) => m.trip_id === tId);
 
       // Handle friend split trips where member row might not have been created yet
       if (tMembers.length <= 1 && tripMeta && (tripMeta.trip_type === 'friend_split' || tripMeta.name?.toLowerCase().startsWith('split with '))) {
@@ -188,30 +204,57 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
             profileName: prof?.full_name,
             fallback: rawTripFriendName || 'Friend',
           });
-          const friendKey = otherPersonId;
-          const entry = friendMap.get(friendKey) || {
+          const normPhone = normalizePhone(friendPhone);
+          const friendKey = normPhone || otherPersonId;
+          const entry: FriendMapEntry = friendMap.get(friendKey) || {
             id: otherPersonId,
             name: friendName,
             phoneNumber: friendPhone,
-            cleanPhone: normalizePhone(friendPhone) || undefined,
+            cleanPhone: normPhone || undefined,
             profileId: otherPersonId,
             isGuest: false,
             avatarUrl: prof?.avatar_url || undefined,
             owedToYouPaise: 0,
             youOwePaise: 0,
             trips: new Set<string>(),
+            unseenMessagesCount: 0,
+            lastMessageAt: undefined,
           };
           if (!entry.name || entry.name === 'Friend') {
             entry.name = friendName;
           }
           entry.trips.add(tId);
+
+          // Check unseen messages in this trip
+          for (const msg of (tMessages as any[])) {
+            const isSenderOther = msg.sender_id && msg.sender_id !== userId;
+            if (!isSenderOther) continue;
+
+            const parsed = parseMessagePayload(msg.message || msg.content || '');
+            const isSeen = msg.is_seen !== undefined ? !!msg.is_seen : (parsed.is_seen !== undefined ? !!parsed.is_seen : false);
+
+            if (!isSeen) {
+              const msgTime = new Date(msg.created_at).getTime();
+              // Unseen if explicitly is_seen === false, or if created after lastReadMs (when lastReadMs exists)
+              if (parsed.is_seen === false || (lastReadMs > 0 && msgTime > lastReadMs)) {
+                entry.unseenMessagesCount += 1;
+              }
+            }
+            if (!entry.lastMessageAt || msg.created_at > entry.lastMessageAt) {
+              entry.lastMessageAt = msg.created_at;
+            }
+          }
+
           friendMap.set(friendKey, entry);
         }
       }
 
       if (tMembers.length === 0) continue;
 
-      const myMember = findMyMember(tMembers, userId, myUserPhone);
+      let myMember = findMyMember(tMembers, userId, myUserPhone);
+      if (!myMember && tripMeta && tripMeta.created_by === userId) {
+        myMember = tMembers.find(m => m.role === 'admin') || tMembers[0];
+      }
       if (!myMember) continue;
 
       // Attach splits to raw expenses
@@ -243,7 +286,8 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         const friendPhone = prof?.phone_number || otherMember.phone_number || undefined;
         const normPhone = normalizePhone(otherMember.phone_number);
         const resolvedPhone = normalizePhone(friendPhone) || normPhone;
-        const friendKey = otherMember.profile_id || resolvedPhone || otherMember.id;
+        // Primary lookup key: normalized phone if available, then profile_id, then member.id
+        const friendKey = resolvedPhone || otherMember.profile_id || otherMember.id;
 
         const resolvedFriendName = getEffectiveContactName({
           phoneNumber: friendPhone,
@@ -253,7 +297,7 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
           fallback: otherMember.display_name || 'Friend',
         });
 
-        const entry = friendMap.get(friendKey) || {
+        const entry: FriendMapEntry = friendMap.get(friendKey) || {
           id: otherMember.profile_id || otherMember.id,
           name: resolvedFriendName,
           phoneNumber: friendPhone,
@@ -264,13 +308,15 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
           owedToYouPaise: 0,
           youOwePaise: 0,
           trips: new Set<string>(),
+          unseenMessagesCount: 0,
+          lastMessageAt: undefined,
         };
 
         if (prof?.avatar_url && !entry.avatarUrl) {
           entry.avatarUrl = prof.avatar_url;
         }
 
-        // CRITICAL: Prioritize device contact name. If none exists, use profile name!
+        // Prioritize device contact name. If none exists, use profile name
         const matchedContactName = getContactNameByPhone(friendPhone || entry.phoneNumber || entry.cleanPhone);
         if (matchedContactName) {
           entry.name = matchedContactName;
@@ -279,6 +325,29 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         }
 
         entry.trips.add(tId);
+
+        // Check unseen messages from this other member in this trip
+        for (const msg of (tMessages as any[])) {
+          const isSenderOther =
+            msg.sender_id === otherMember.id ||
+            (otherMember.profile_id && msg.sender_id === otherMember.profile_id) ||
+            (tMembers.length === 2 && msg.sender_id !== userId);
+
+          if (!isSenderOther) continue;
+
+          const parsed = parseMessagePayload(msg.message || msg.content || '');
+          const isSeen = msg.is_seen !== undefined ? !!msg.is_seen : (parsed.is_seen !== undefined ? !!parsed.is_seen : false);
+
+          if (!isSeen) {
+            const msgTime = new Date(msg.created_at).getTime();
+            if (parsed.is_seen === false || (lastReadMs > 0 && msgTime > lastReadMs)) {
+              entry.unseenMessagesCount += 1;
+            }
+          }
+          if (!entry.lastMessageAt || msg.created_at > entry.lastMessageAt) {
+            entry.lastMessageAt = msg.created_at;
+          }
+        }
 
         for (const s of settlements) {
           if (s.from === otherMember.id && s.to === myMember.id) {
@@ -297,6 +366,10 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
     const friendsList: FriendContact[] = [];
 
     for (const [, f] of friendMap.entries()) {
+      if (f.profileId && f.profileId === userId) continue;
+      if (myUserPhone && f.phoneNumber && normalizePhone(f.phoneNumber) === normalizePhone(myUserPhone)) continue;
+      if (myUserPhone && f.cleanPhone && normalizePhone(f.cleanPhone) === normalizePhone(myUserPhone)) continue;
+
       const prof = f.profileId ? profilesMap.get(f.profileId) : null;
       const finalResolvedName = getEffectiveContactName({
         phoneNumber: f.phoneNumber || f.cleanPhone,
@@ -308,6 +381,15 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       const net = f.owedToYouPaise - f.youOwePaise;
       totalOwedToYouPaise += f.owedToYouPaise;
       totalYouOwePaise += f.youOwePaise;
+
+      // Select defaultTripId: ONLY assign if a 1-on-1 friend split trip exists!
+      const tripsArray = Array.from(f.trips);
+      const oneOnOneTrip = tripsArray.find(tId => {
+        const meta = allTripsMap.get(tId);
+        return meta && (meta.trip_type === 'friend_split' || meta.name?.toLowerCase().startsWith('split with '));
+      });
+      const defaultTripId = oneOnOneTrip || undefined;
+
       friendsList.push({
         id: f.id,
         name: finalResolvedName,
@@ -321,19 +403,36 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         youOwePaise: f.youOwePaise,
         netBalancePaise: net,
         sharedTripsCount: f.trips.size,
+        defaultTripId,
+        unseenMessagesCount: f.unseenMessagesCount || 0,
+        lastMessageAt: f.lastMessageAt,
       });
     }
 
-    // Sort: Pending settlements FIRST (net !== 0 or owedToYou > 0 or youOwe > 0),
-    // sorted descending by absolute pending balance, then by most shared trips, then alphabetical
+    // Sort Order:
+    // 1. Unseen messages on top (newest message first)
+    // 2. High amount user next (descending by absolute pending balance)
+    // 3. Settled / zero-balance friends
     friendsList.sort((a, b) => {
-      const aPending = (a.netBalancePaise || 0) !== 0 || (a.owedToYouPaise || 0) > 0 || (a.youOwePaise || 0) > 0;
-      const bPending = (b.netBalancePaise || 0) !== 0 || (b.owedToYouPaise || 0) > 0 || (b.youOwePaise || 0) > 0;
+      const aUnseen = (a.unseenMessagesCount || 0) > 0;
+      const bUnseen = (b.unseenMessagesCount || 0) > 0;
+      if (aUnseen && !bUnseen) return -1;
+      if (!aUnseen && bUnseen) return 1;
+      if (aUnseen && bUnseen) {
+        return new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime();
+      }
+
+      const aAmt = Math.abs(a.netBalancePaise || (a.owedToYouPaise || 0) - (a.youOwePaise || 0));
+      const bAmt = Math.abs(b.netBalancePaise || (b.owedToYouPaise || 0) - (b.youOwePaise || 0));
+      const aPending = aAmt > 0 || (a.owedToYouPaise || 0) > 0 || (a.youOwePaise || 0) > 0;
+      const bPending = bAmt > 0 || (b.owedToYouPaise || 0) > 0 || (b.youOwePaise || 0) > 0;
+
       if (aPending && !bPending) return -1;
       if (!aPending && bPending) return 1;
       if (aPending && bPending) {
-        return Math.abs(b.netBalancePaise || 0) - Math.abs(a.netBalancePaise || 0);
+        if (bAmt !== aAmt) return bAmt - aAmt;
       }
+
       const tripDiff = (b.sharedTripsCount || 0) - (a.sharedTripsCount || 0);
       if (tripDiff !== 0) return tripDiff;
       return (a.name || '').localeCompare(b.name || '');

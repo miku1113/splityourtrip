@@ -24,13 +24,14 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '../theme/useThemeStore';
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
-import { supabase, supabaseAdmin } from '../lib/supabase';
+import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
 import {
   useTripStore,
   computeBalances,
   normalizeExpensesForTrip,
   deletedExpenseIdsSet,
   findMyMember,
+  isValidUUID,
 } from '../features/trips/useTripStore';
 import {
   useContactsStore,
@@ -43,8 +44,9 @@ import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
 import { getFriendSettings } from '../services/friendSettings';
-import { TripMessage, TripMember } from '../types/database';
+import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
+import { useNotificationStore } from '../features/notifications/useNotificationStore';
 
 const PAGE_SIZE = 20;
 
@@ -92,6 +94,10 @@ export default function ChatView({
     balances,
     isLoading: tripLoading,
     linkGuestWithContact,
+    markTripMessagesAsSeen,
+    editTripMessage,
+    deleteTripMessage,
+    addExpense,
   } = useTripStore();
   const {
     contacts,
@@ -158,6 +164,10 @@ export default function ChatView({
   );
 
   const [inputText, setInputText] = useState('');
+  const [editingMessage, setEditingMessage] = useState<{ id: string; text: string } | null>(null);
+  const [selectedMessageForAction, setSelectedMessageForAction] = useState<TripMessage | null>(null);
+  const [messageActionModalVisible, setMessageActionModalVisible] = useState(false);
+  const inputRef = useRef<TextInput>(null);
   const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<string | null>(null);
   const [friendNetPaise, setFriendNetPaise] = useState<number>(0);
@@ -199,11 +209,28 @@ export default function ChatView({
   const [loadingMoreLinkContacts, setLoadingMoreLinkContacts] = useState(false);
   const [linkingInProgress, setLinkingInProgress] = useState(false);
 
+  // Pay with Screenshot / Confirmation flow
+  const [payModalVisible, setPayModalVisible] = useState(false);
+  const [payAmountText, setPayAmountText] = useState('');
+  const [payTargetMemberId, setPayTargetMemberId] = useState<string>('');
+  const [payScreenshotUri, setPayScreenshotUri] = useState<string | null>(null);
+  const [payScreenshotBase64, setPayScreenshotBase64] = useState<string | null>(null);
+  const [payNote, setPayNote] = useState('');
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  // Request Money / Select Amount to Receive flow
+  const [requestMoneyModalVisible, setRequestMoneyModalVisible] = useState(false);
+  const [requestAmountText, setRequestAmountText] = useState('');
+  const [requestTargetMemberId, setRequestTargetMemberId] = useState<string>('');
+  const [requestNote, setRequestNote] = useState('');
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
   const didInitialScrollRef = useRef(false);
   const prevMsgCountRef = useRef(0);
 
   const currentTrip = trips.find(t => t.id === tripId);
+  const userCurrency = currentTrip?.currency || 'INR';
   const tripMembers = useMemo(
     () => members.filter(m => !m.trip_id || m.trip_id === tripId),
     [members, tripId]
@@ -252,13 +279,32 @@ export default function ChatView({
           return tripMembers.find(m => m.id !== friendMem.id);
         }
       }
+      // Check by currentTrip.created_by
+      if (user?.id && currentTrip?.created_by) {
+        if (currentTrip.created_by === user.id) {
+          return tripMembers.find(m => m.role === 'admin') || tripMembers[0];
+        } else {
+          return tripMembers.find(m => m.role !== 'admin') || tripMembers[1];
+        }
+      }
     }
     // Only if completely offline or unauthenticated
     if (!user?.id) {
       return tripMembers.find(m => m.role === 'admin') || tripMembers[0];
     }
     return undefined;
-  }, [tripMembers, user?.id, currentUserPhone, isGroup, friendPhone, friendId]);
+  }, [tripMembers, user?.id, currentUserPhone, isGroup, friendPhone, friendId, currentTrip?.created_by]);
+
+  const resolvedSenderName = useMemo(() => {
+    const pName = (profile?.full_name || profile?.name || '').trim();
+    if (pName && pName.toLowerCase() !== 'you') return pName;
+    const emailName = user?.email?.split('@')[0];
+    if (emailName) return emailName;
+    if (myMember?.display_name && myMember.display_name.trim().toLowerCase() !== 'you') {
+      return myMember.display_name.trim();
+    }
+    return 'Member';
+  }, [profile?.full_name, profile?.name, user?.email, myMember?.display_name]);
 
   const otherMember = useMemo(() => {
     if (!tripMembers || tripMembers.length === 0) return undefined;
@@ -279,7 +325,7 @@ export default function ChatView({
       );
       if (byId) return byId;
     }
-    return tripMembers.find(m => m.id !== myMember?.id);
+    return tripMembers.length > 1 ? (tripMembers[1] || tripMembers[0]) : undefined;
   }, [tripMembers, myMember, friendPhone, friendId]);
 
   useEffect(() => {
@@ -362,6 +408,44 @@ export default function ChatView({
     },
     [tripMembers, user?.id, currentUserId, myMember]
   );
+
+  const renderMessageTicks = useCallback((item: TripMessage, isMineBubble: boolean) => {
+    if (!isMineBubble) return null;
+    if (item.is_seen) {
+      return (
+        <Ionicons
+          name="checkmark-done"
+          size={15}
+          color="#22C55E"
+          style={{ marginLeft: 3 }}
+        />
+      );
+    }
+    if (item.is_sent !== false) {
+      return (
+        <Ionicons
+          name="checkmark-done"
+          size={15}
+          color={isMineBubble ? 'rgba(255,255,255,0.7)' : colors.textMuted}
+          style={{ marginLeft: 3 }}
+        />
+      );
+    }
+    return (
+      <Ionicons
+        name="checkmark"
+        size={15}
+        color={isMineBubble ? 'rgba(255,255,255,0.6)' : colors.textMuted}
+        style={{ marginLeft: 3 }}
+      />
+    );
+  }, [colors.textMuted]);
+
+  const handleMessageLongPress = useCallback((item: TripMessage, isMineBubble: boolean) => {
+    if (!isMineBubble) return;
+    setSelectedMessageForAction(item);
+    setMessageActionModalVisible(true);
+  }, []);
 
   // Determine if the current 1-on-1 friend is an unlinked Guest
   const isGuestFriend = useMemo(() => {
@@ -522,7 +606,7 @@ export default function ChatView({
 
       if (tMembers.length === 0) continue;
 
-      const myMember = findMyMember(tMembers, user?.id, currentUserPhone) || tMembers[0];
+      const myMember = findMyMember(tMembers, user?.id, currentUserPhone);
 
       // Find if this friend is a member of trip `t`
       const isDirectFriendTrip =
@@ -657,9 +741,21 @@ export default function ChatView({
   useEffect(() => {
     let isMounted = true;
     didInitialScrollRef.current = false;
+    prevMsgCountRef.current = 0;
     setMessagesVisibleCount(PAGE_SIZE);
 
     if (tripId) {
+      // Mark trip as read and mark messages seen immediately
+      markTripMessagesAsSeen(tripId, currentUserId);
+      AppStorage.setItem(`@splityourtrip_last_read_${tripId}`, new Date().toISOString()).catch(() => {});
+      try {
+        useContactsStore.setState(s => ({
+          contacts: s.contacts.map(c =>
+            c.defaultTripId === tripId ? { ...c, unseenMessagesCount: 0 } : c
+          ),
+        }));
+      } catch {}
+
       const hasLocalTrip = trips.some(t => t.id === tripId);
       const hasLocalMessages = messages && messages.length > 0;
       if (!hasLocalTrip && !hasLocalMessages) {
@@ -670,7 +766,7 @@ export default function ChatView({
 
       const safetyTimer = setTimeout(() => {
         if (isMounted) setIsChatLoading(false);
-      }, 2000);
+      }, 400);
 
       loadTripDetails(tripId)
         .catch(err => console.log('loadTripDetails error in ChatView:', err))
@@ -695,7 +791,18 @@ export default function ChatView({
     } else {
       setIsChatLoading(false);
     }
-  }, [tripId]);
+  }, [tripId, currentUserId, markTripMessagesAsSeen]);
+
+  // Keep seen status synced whenever messages change while chat is active
+  useEffect(() => {
+    if (!tripId) return;
+    const hasUnseen = messages.some(
+      m => (!m.trip_id || m.trip_id === tripId) && m.sender_id !== currentUserId && !m.is_seen
+    );
+    if (hasUnseen) {
+      markTripMessagesAsSeen(tripId, currentUserId);
+    }
+  }, [messages, tripId, currentUserId, markTripMessagesAsSeen]);
 
   useEffect(() => {
     if (!isGroup) {
@@ -718,18 +825,18 @@ export default function ChatView({
 
   // Merge chat messages with expense cards and sort chronologically ascending (oldest -> newest, so last message is at bottom)
   const combinedMessages = useMemo(() => {
+    // Strictly isolate messages to this tripId only to eliminate cross-trip message pollution!
+    const tripScopedMessages = messages.filter(m => !m.trip_id || m.trip_id === tripId);
+
     if (isGroup) {
       const validTripExpenseIds = new Set(
         tripExpenses
-          .filter(e => !deletedExpenseIdsSet.has(e.id))
+          .filter(e => (!e.trip_id || e.trip_id === tripId) && !deletedExpenseIdsSet.has(e.id))
           .map(e => e.id)
       );
 
-      // In group chat: filter out individual messages
-      const validMessages = messages.filter(m => {
-        if (m.chat_type === 'individual' || m.chat_type === 'user') {
-          return false;
-        }
+      // In group chat: retain trip expenses and valid messages
+      const validMessages = tripScopedMessages.filter(m => {
         const expId = m.expense_id || m.expense_data?.id;
         if (expId && (deletedExpenseIdsSet.has(expId) || !validTripExpenseIds.has(expId))) {
           return false;
@@ -747,7 +854,7 @@ export default function ChatView({
       });
 
       const missingGroupExpenseMsgs: TripMessage[] = tripExpenses
-        .filter(e => !deletedExpenseIdsSet.has(e.id) && !existingExpenseIds.has(e.id))
+        .filter(e => (!e.trip_id || e.trip_id === tripId) && !deletedExpenseIdsSet.has(e.id) && !existingExpenseIds.has(e.id))
         .map(exp => ({
           id: `group_exp_${exp.id}`,
           trip_id: tripId,
@@ -787,17 +894,15 @@ export default function ChatView({
         .filter((id): id is string => Boolean(id && !deletedExpenseIdsSet.has(id)))
     );
 
-    // In individual chat: filter out group messages and filter out expenses that don't involve both users
-    const validMessages = messages.filter(m => {
-      if (m.chat_type === 'group' || m.chat_type === 'trip') {
-        return false;
-      }
+    // In individual chat: NEVER drop regular chat messages or expenses belonging directly to this trip!
+    const validMessages = tripScopedMessages.filter(m => {
       const expId = m.expense_id || m.expense_data?.id;
-      if (expId && (deletedExpenseIdsSet.has(expId) || !validSharedExpenseIds.has(expId))) {
+      if (expId && deletedExpenseIdsSet.has(expId)) {
         return false;
       }
       if (m.type === 'expense') {
-        if (!expId || !validSharedExpenseIds.has(expId) || deletedExpenseIdsSet.has(expId)) return false;
+        if (m.trip_id === tripId) return true; // Direct trip expense, always valid!
+        if (!expId || !validSharedExpenseIds.has(expId)) return false;
       }
       return true;
     });
@@ -934,11 +1039,20 @@ export default function ChatView({
   const handleSendText = async () => {
     if (!inputText.trim()) return;
     const textToSend = inputText.trim();
+
+    if (editingMessage) {
+      const msgId = editingMessage.id;
+      setEditingMessage(null);
+      setInputText('');
+      await editTripMessage(tripId, msgId, textToSend);
+      return;
+    }
+
     setInputText('');
     await sendMessage(
       tripId,
       currentUserId,
-      currentUserName,
+      resolvedSenderName,
       textToSend,
       undefined,
       isGroup ? 'group' : 'individual'
@@ -984,7 +1098,7 @@ export default function ChatView({
         await sendMessage(
           tripId,
           currentUserId,
-          currentUserName,
+          resolvedSenderName,
           inputText.trim() || '📷 Photo',
           {
             type: 'image',
@@ -1044,7 +1158,7 @@ export default function ChatView({
         await sendMessage(
           tripId,
           currentUserId,
-          currentUserName,
+          resolvedSenderName,
           inputText.trim() || '📷 Photo',
           {
             type: 'image',
@@ -1077,7 +1191,7 @@ export default function ChatView({
         await sendMessage(
           tripId,
           currentUserId,
-          currentUserName,
+          resolvedSenderName,
           file.name || 'Document',
           {
             type: 'document',
@@ -1102,6 +1216,406 @@ export default function ChatView({
         Alert.alert('Document', 'Unable to open file preview on this device.');
       });
     }
+  };
+
+  // Open Pay Modal (with optional prefill amount)
+  const handleOpenPayModal = (prefillAmt?: number) => {
+    setAttachmentModalVisible(false);
+    let defaultAmount = '';
+    if (prefillAmt !== undefined && prefillAmt > 0) {
+      defaultAmount = (prefillAmt / 100).toString();
+    } else if (friendNetPaise < 0) {
+      defaultAmount = (Math.abs(friendNetPaise) / 100).toString();
+    }
+    setPayAmountText(defaultAmount);
+    const defaultTargetId = otherMember?.id || tripMembers.find(m => m.id !== myMember?.id)?.id || '';
+    setPayTargetMemberId(defaultTargetId);
+    setPayScreenshotUri(null);
+    setPayScreenshotBase64(null);
+    setPayNote('');
+    setPayModalVisible(true);
+  };
+
+  // Open Request Money Modal (with optional prefill amount)
+  const handleOpenRequestMoneyModal = (prefillAmt?: number) => {
+    setAttachmentModalVisible(false);
+    let defaultAmount = '';
+    if (prefillAmt !== undefined && prefillAmt > 0) {
+      defaultAmount = (prefillAmt / 100).toString();
+    } else if (friendNetPaise > 0) {
+      defaultAmount = (friendNetPaise / 100).toString();
+    }
+    setRequestAmountText(defaultAmount);
+    const defaultTargetId = otherMember?.id || tripMembers.find(m => m.id !== myMember?.id)?.id || '';
+    setRequestTargetMemberId(defaultTargetId);
+    setRequestNote('');
+    setRequestMoneyModalVisible(true);
+  };
+
+  const handlePickPaymentScreenshot = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+        base64: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setPayScreenshotUri(result.assets[0].uri);
+        setPayScreenshotBase64(result.assets[0].base64 || null);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not pick screenshot');
+    }
+  };
+
+  const handleTakePaymentScreenshotPhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Camera Permission', 'Please enable camera permission in device settings.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        quality: 0.8,
+        base64: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setPayScreenshotUri(result.assets[0].uri);
+        setPayScreenshotBase64(result.assets[0].base64 || null);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not capture photo');
+    }
+  };
+
+  const handleSubmitPayment = async () => {
+    const numAmt = parseFloat(payAmountText);
+    if (!numAmt || numAmt <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount.');
+      return;
+    }
+    if (!payScreenshotUri) {
+      Alert.alert('Screenshot Required', 'Please attach your payment confirmation screenshot.');
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    try {
+      const amountPaise = Math.round(numAmt * 100);
+      let remoteUrl = payScreenshotUri;
+
+      if (payScreenshotBase64) {
+        try {
+          const client = supabaseAdmin || supabase;
+          const storagePath = `settlements/${tripId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const arrayBuffer = decodeBase64ToArrayBuffer(payScreenshotBase64);
+          const { data: uploadData } = await client.storage
+            .from('attachments')
+            .upload(storagePath, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
+          if (uploadData?.path) {
+            const { data: pubData } = client.storage.from('attachments').getPublicUrl(uploadData.path);
+            if (pubData?.publicUrl) {
+              remoteUrl = pubData.publicUrl;
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('Screenshot upload fallback to local URI:', uploadErr);
+        }
+      }
+
+      const targetMem = tripMembers.find(m => m.id === payTargetMemberId) || otherMember || tripMembers[0];
+      const targetName = targetMem?.display_name || 'Member';
+
+      const payload = {
+        type: 'payment_settlement',
+        amountPaise,
+        payerId: currentUserId,
+        payerMemberId: myMember?.id,
+        payerName: resolvedSenderName,
+        receiverId: targetMem?.profile_id || targetMem?.id,
+        receiverMemberId: targetMem?.id,
+        receiverName: targetName,
+        mediaUrl: remoteUrl,
+        screenshotUrl: remoteUrl,
+        note: payNote.trim() || undefined,
+        status: 'pending',
+      };
+
+      await sendMessage(
+        tripId,
+        currentUserId,
+        resolvedSenderName,
+        JSON.stringify(payload),
+        {
+          type: 'image',
+          url: remoteUrl,
+          name: 'Payment_Screenshot.jpg',
+        },
+        isGroup ? 'group' : 'individual'
+      );
+
+      // Trigger high-priority notification to receiver
+      useNotificationStore.getState().addNotification({
+        type: 'payment_claim',
+        title: `💰 Payment Claim: ₹${(amountPaise / 100).toFixed(0)}`,
+        message: `${resolvedSenderName} paid ${formatCurrencyAmount(amountPaise, userCurrency)} to your account. Tap to verify screenshot and accept.`,
+        tripId,
+        amountPaise,
+        senderId: currentUserId,
+        senderName: resolvedSenderName,
+        screenshotUrl: remoteUrl,
+      });
+
+      setPayModalVisible(false);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not submit payment');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleSubmitRequestMoney = async () => {
+    const numAmt = parseFloat(requestAmountText);
+    if (!numAmt || numAmt <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount.');
+      return;
+    }
+
+    setIsSubmittingRequest(true);
+    try {
+      const amountPaise = Math.round(numAmt * 100);
+      const targetMem = tripMembers.find(m => m.id === requestTargetMemberId) || otherMember || tripMembers[0];
+      const targetName = targetMem?.display_name || 'Member';
+
+      const payload = {
+        type: 'payment_request',
+        amountPaise,
+        requesterId: currentUserId,
+        requesterMemberId: myMember?.id,
+        requesterName: resolvedSenderName,
+        targetId: targetMem?.profile_id || targetMem?.id,
+        targetMemberId: targetMem?.id,
+        targetName,
+        note: requestNote.trim() || undefined,
+        status: 'requested',
+      };
+
+      await sendMessage(
+        tripId,
+        currentUserId,
+        resolvedSenderName,
+        JSON.stringify(payload),
+        undefined,
+        isGroup ? 'group' : 'individual'
+      );
+
+      useNotificationStore.getState().addNotification({
+        type: 'payment_request',
+        title: `💸 Payment Request: ₹${(amountPaise / 100).toFixed(0)}`,
+        message: `${resolvedSenderName} requested ${formatCurrencyAmount(amountPaise, userCurrency)} from you.`,
+        tripId,
+        amountPaise,
+        senderId: currentUserId,
+        senderName: resolvedSenderName,
+      });
+
+      setRequestMoneyModalVisible(false);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not send payment request');
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  };
+
+  const handleAcceptPayment = async (item: TripMessage) => {
+    let payload: any = item.payload;
+    if (!payload && item.content && item.content.startsWith('{')) {
+      try { payload = JSON.parse(item.content); } catch {}
+    }
+    if (!payload && item.message && item.message.startsWith('{')) {
+      try { payload = JSON.parse(item.message); } catch {}
+    }
+    payload = payload || {};
+
+    const amountPaise = Number(payload.amountPaise || payload.amount_paise) || 0;
+    if (amountPaise <= 0) return;
+
+    try {
+      let payerMember = tripMembers.find(
+        m => m.id === payload.payerMemberId || m.id === payload.payerId || m.profile_id === payload.payerId || (m as any).user_id === payload.payerId
+      );
+      if (!payerMember && otherMember) payerMember = otherMember;
+      if (!payerMember) payerMember = tripMembers[0];
+
+      let receiverMember = tripMembers.find(
+        m => m.id === payload.receiverMemberId || m.id === payload.receiverId || m.profile_id === payload.receiverId || (m as any).user_id === payload.receiverId
+      );
+      if (!receiverMember && myMember) receiverMember = myMember;
+      if (!receiverMember) receiverMember = tripMembers[1] || tripMembers[0];
+
+      const payerName = payload.payerName || payerMember?.display_name || 'Member';
+      const receiverName = payload.receiverName || receiverMember?.display_name || 'Member';
+
+      const mode = (payload.paymentMode || 'cash') as PaymentMode;
+      const targetTripId = payload.tripId || tripId;
+      const targetDesc = `${mode === 'cash' ? '💵 Cash' : '📱 UPI'} Settlement: ${payerName} paid ${receiverName}`;
+
+      // 1. Record settlement expense which mathematically offsets and deducts from debt/amount to receive!
+      await addExpense({
+        tripId: targetTripId,
+        amountPaise,
+        description: targetDesc,
+        category: 'settlement',
+        paidByMemberId: payerMember.id,
+        paymentMode: mode,
+        splitType: 'exact',
+        participantMemberIds: [receiverMember.id],
+        customSplits: [{ memberId: receiverMember.id, shareAmount: amountPaise }],
+        attachmentUrl: payload.mediaUrl || payload.screenshotUrl || item.media_url,
+        userId: currentUserId,
+      });
+
+      // 2. Also insert into public.settlement_payments table in Supabase
+      if (isSupabaseConfigured && isValidUUID(targetTripId)) {
+        try {
+          const client = supabaseAdmin || supabase;
+          await client.from('settlement_payments').insert({
+            trip_id: targetTripId,
+            from_member: payerMember.id,
+            to_member: receiverMember.id,
+            amount: amountPaise,
+            method: mode,
+            note: payload.note || (mode === 'cash' ? 'Settled in cash' : 'Paid via UPI'),
+            paid_at: new Date().toISOString(),
+          });
+        } catch (spErr) {
+          console.log('settlement_payments insert notice:', spErr);
+        }
+      }
+
+      const updatedPayload = {
+        ...payload,
+        status: 'accepted',
+        acceptedAt: new Date().toISOString(),
+      };
+      await editTripMessage(tripId, item.id, JSON.stringify(updatedPayload));
+
+      // Also update matching claim in linked 1-on-1 / group chats if claimId present
+      if (payload.claimId) {
+        const storeMessages = useTripStore.getState().messages;
+        const matchingMsgs = storeMessages.filter(
+          m => m.id !== item.id && (m.content?.includes(payload.claimId) || (m.payload as any)?.claimId === payload.claimId)
+        );
+        for (const mm of matchingMsgs) {
+          await editTripMessage(mm.trip_id, mm.id, JSON.stringify(updatedPayload)).catch(() => {});
+        }
+      }
+
+      const amtStr = formatCurrencyAmount(amountPaise, userCurrency);
+      await sendMessage(
+        tripId,
+        currentUserId,
+        resolvedSenderName,
+        `✅ Payment of ${amtStr} accepted and deducted from balance!`,
+        undefined,
+        isGroup ? 'group' : 'individual'
+      );
+
+      useNotificationStore.getState().addNotification({
+        type: 'payment_accepted',
+        title: '✅ Payment Accepted',
+        message: `${resolvedSenderName} accepted your payment of ${amtStr}. Balance updated!`,
+        tripId,
+        amountPaise,
+        senderId: currentUserId,
+        senderName: resolvedSenderName,
+      });
+
+      await loadTripDetails(tripId);
+      if (!isGroup) {
+        useContactsStore.getState().fetchFriendsSummary(currentUserId);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not accept payment');
+    }
+  };
+
+  const handleRejectPayment = async (item: TripMessage) => {
+    let payload: any = item.payload;
+    if (!payload && item.content && item.content.startsWith('{')) {
+      try { payload = JSON.parse(item.content); } catch {}
+    }
+    if (!payload && item.message && item.message.startsWith('{')) {
+      try { payload = JSON.parse(item.message); } catch {}
+    }
+    payload = payload || {};
+
+    const amountPaise = Number(payload.amountPaise || payload.amount_paise) || 0;
+    const amtStr = formatCurrencyAmount(amountPaise, userCurrency);
+
+    Alert.alert(
+      'Reject Payment Claim?',
+      `Are you sure you want to reject this payment claim of ${amtStr}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const updatedPayload = {
+                ...payload,
+                status: 'rejected',
+                rejectedAt: new Date().toISOString(),
+              };
+              await editTripMessage(tripId, item.id, JSON.stringify(updatedPayload));
+
+              // Also update matching claim in linked 1-on-1 / group chats if claimId present
+              if (payload.claimId) {
+                const storeMessages = useTripStore.getState().messages;
+                const matchingMsgs = storeMessages.filter(
+                  m => m.id !== item.id && (m.content?.includes(payload.claimId) || (m.payload as any)?.claimId === payload.claimId)
+                );
+                for (const mm of matchingMsgs) {
+                  await editTripMessage(mm.trip_id, mm.id, JSON.stringify(updatedPayload)).catch(() => {});
+                }
+              }
+
+              await sendMessage(
+                tripId,
+                currentUserId,
+                resolvedSenderName,
+                `❌ Payment claim of ${amtStr} was rejected.`,
+                undefined,
+                isGroup ? 'group' : 'individual'
+              );
+
+              useNotificationStore.getState().addNotification({
+                type: 'payment_rejected',
+                title: '❌ Payment Claim Rejected',
+                message: `${resolvedSenderName} rejected the payment claim of ${amtStr}.`,
+                tripId,
+                amountPaise,
+                senderId: currentUserId,
+                senderName: resolvedSenderName,
+              });
+
+              await loadTripDetails(tripId);
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Could not reject payment');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const effectiveSubtitle = isGroup
@@ -1433,12 +1947,19 @@ export default function ChatView({
           }
           renderItem={({ item }) => {
           // Reliably identify if message was sent by active user
-          const isMine = Boolean(
+          const isSenderOther = Boolean(
+            otherMember &&
+            (
+              (item.sender_id && (item.sender_id === otherMember.id || item.sender_id === otherMember.profile_id || item.sender_id === (otherMember as any).user_id)) ||
+              (item.sender_name && otherMember.display_name && item.sender_name.trim().toLowerCase() === otherMember.display_name.trim().toLowerCase())
+            )
+          );
+
+          const isMine = !isSenderOther && Boolean(
             (user?.id && (item.sender_id === user.id || (item as any).sender_profile_id === user.id)) ||
             (currentUserId && item.sender_id === currentUserId) ||
             (myMember && (item.sender_id === myMember.id || item.sender_id === myMember.profile_id || item.sender_id === (myMember as any).user_id)) ||
-            (item.sender_name && item.sender_name.trim().toLowerCase() === 'you') ||
-            (item.sender_name && currentUserName && item.sender_name.trim().toLowerCase() === currentUserName.trim().toLowerCase() && (!otherMember?.display_name || item.sender_name.trim().toLowerCase() !== otherMember.display_name.trim().toLowerCase()))
+            (item.sender_name && currentUserName && currentUserName !== 'You' && item.sender_name.trim().toLowerCase() === currentUserName.trim().toLowerCase())
           );
 
           const isFromOther = !isGroup ? !isMine : false;
@@ -1470,6 +1991,8 @@ export default function ChatView({
                   <TouchableOpacity
                     activeOpacity={0.9}
                     onPress={() => setSelectedPhotoPreview(item.media_url || null)}
+                    onLongPress={() => handleMessageLongPress(item, isMine)}
+                    delayLongPress={280}
                   >
                     <Image source={{ uri: item.media_url }} style={styles.messageImage} />
                   </TouchableOpacity>
@@ -1484,7 +2007,7 @@ export default function ChatView({
                     <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
-                    {isMine && <Ionicons name="checkmark-done" size={15} color="#E0E7FF" style={{ marginLeft: 3 }} />}
+                    {isMine && renderMessageTicks(item, isMine)}
                   </View>
                 </View>
               </View>
@@ -1511,6 +2034,8 @@ export default function ChatView({
                   ]}
                   activeOpacity={0.8}
                   onPress={() => handleOpenDoc(item.media_url)}
+                  onLongPress={() => handleMessageLongPress(item, isMine)}
+                  delayLongPress={280}
                 >
                   {isGroup && !isMine && (
                     <Text style={[styles.senderNameHeader, { color: colors.primary, marginBottom: 4 }]}>
@@ -1537,7 +2062,7 @@ export default function ChatView({
                     <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
-                    {isMine && <Ionicons name="checkmark-done" size={15} color="#E0E7FF" style={{ marginLeft: 3 }} />}
+                    {isMine && renderMessageTicks(item, isMine)}
                   </View>
                 </TouchableOpacity>
               </View>
@@ -1653,7 +2178,319 @@ export default function ChatView({
             );
           }
 
-          // 4. Standard Text Message Bubble
+          // 4. Payment Settlement / Claim Card
+          const isSettlementMsg =
+            item.type === 'payment_settlement' ||
+            item.type === 'payment_claim' ||
+            (item.content && (item.content.includes('"type":"payment_settlement"') || item.content.includes('"type":"payment_claim"')));
+
+          if (isSettlementMsg) {
+            let pData: any = item.payload;
+            if (!pData && item.content && item.content.startsWith('{')) {
+              try { pData = JSON.parse(item.content); } catch {}
+            }
+            if (!pData && item.message && item.message.startsWith('{')) {
+              try { pData = JSON.parse(item.message); } catch {}
+            }
+            pData = pData || {};
+
+            const amountPaise = Number(pData.amountPaise || pData.amount_paise) || 0;
+            const amtStr = formatCurrencyAmount(amountPaise, userCurrency);
+            const status = pData.status || 'pending';
+            const screenshotUrl = pData.mediaUrl || pData.screenshotUrl || pData.screenshot_url || item.media_url;
+            const payerName = pData.payerName || item.sender_name || 'Member';
+            const receiverName = pData.receiverName || 'Receiver';
+            const note = pData.note;
+
+            const isPayer = Boolean(
+              isMine ||
+              (pData.payerId && (
+                pData.payerId === currentUserId ||
+                pData.payerId === user?.id ||
+                (myMember && (myMember.id === pData.payerId || myMember.profile_id === pData.payerId || (myMember as any).user_id === pData.payerId))
+              )) ||
+              (pData.payerPhone && (
+                (myMember?.phone_number && myMember.phone_number.replace(/[^0-9]/g, '').slice(-10) === pData.payerPhone.replace(/[^0-9]/g, '').slice(-10)) ||
+                (currentUserPhone && currentUserPhone.replace(/[^0-9]/g, '').slice(-10) === pData.payerPhone.replace(/[^0-9]/g, '').slice(-10))
+              ))
+            );
+
+            const isReceiver = !isPayer && Boolean(
+              (pData.receiverId && (
+                pData.receiverId === currentUserId ||
+                pData.receiverId === user?.id ||
+                (myMember && (
+                  myMember.id === pData.receiverId ||
+                  myMember.profile_id === pData.receiverId ||
+                  (myMember as any).user_id === pData.receiverId
+                ))
+              )) ||
+              (pData.receiverMemberId && myMember && myMember.id === pData.receiverMemberId) ||
+              (pData.receiverPhone && (
+                (myMember?.phone_number && myMember.phone_number.replace(/[^0-9]/g, '').slice(-10) === pData.receiverPhone.replace(/[^0-9]/g, '').slice(-10)) ||
+                (currentUserPhone && currentUserPhone.replace(/[^0-9]/g, '').slice(-10) === pData.receiverPhone.replace(/[^0-9]/g, '').slice(-10))
+              )) ||
+              (pData.receiverName && (
+                (currentUserName && currentUserName !== 'You' && currentUserName.trim().toLowerCase() === pData.receiverName.trim().toLowerCase()) ||
+                (myMember?.display_name && myMember.display_name !== 'You' && myMember.display_name.trim().toLowerCase() === pData.receiverName.trim().toLowerCase())
+              )) ||
+              (!isGroup && !isMine)
+            );
+
+            const isAccepted = status === 'accepted';
+            const isRejected = status === 'rejected';
+            const isPending = status === 'pending';
+
+            return (
+              <View style={styles.settlementCardContainer}>
+                <View
+                  style={[
+                    styles.settlementCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: isAccepted ? colors.success : isRejected ? colors.danger : colors.border,
+                      borderWidth: isAccepted || isRejected ? 1.5 : 1,
+                    },
+                  ]}
+                >
+                  <View style={styles.settleCardHeaderRow}>
+                    <View
+                      style={[
+                        styles.settleIconBox,
+                        {
+                          backgroundColor: isAccepted
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : isRejected
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : pData.paymentMode === 'cash'
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : 'rgba(99, 102, 241, 0.15)',
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={isAccepted ? 'checkmark-circle' : isRejected ? 'close-circle' : pData.paymentMode === 'cash' ? 'cash' : 'card'}
+                        size={20}
+                        color={isAccepted ? colors.success : isRejected ? colors.danger : pData.paymentMode === 'cash' ? colors.success : colors.primary}
+                      />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[styles.settleCardTitle, { color: colors.text }]}>
+                          Payment: {amtStr}
+                        </Text>
+                        <View
+                          style={{
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 6,
+                            backgroundColor: pData.paymentMode === 'cash' ? '#DCFCE7' : '#EEF2FF',
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: pData.paymentMode === 'cash' ? '#15803D' : '#4F46E5',
+                            }}
+                          >
+                            {pData.paymentMode === 'cash' ? '💵 CASH' : '📱 UPI'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.settleCardSub, { color: colors.textSecondary }]}>
+                        {payerName} ➔ {receiverName}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.settleStatusBadge,
+                        {
+                          backgroundColor: isAccepted
+                            ? 'rgba(16, 185, 129, 0.15)'
+                            : isRejected
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : 'rgba(245, 158, 11, 0.15)',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.settleStatusText,
+                          {
+                            color: isAccepted ? colors.success : isRejected ? colors.danger : '#D97706',
+                          },
+                        ]}
+                      >
+                        {isAccepted ? 'Accepted' : isRejected ? 'Rejected' : 'Pending'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Payment Screenshot Thumbnail */}
+                  {screenshotUrl ? (
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={() => setSelectedPhotoPreview(screenshotUrl)}
+                      style={styles.settleScreenshotWrapper}
+                    >
+                      <Image source={{ uri: screenshotUrl }} style={styles.settleScreenshotImage} resizeMode="cover" />
+                      <View style={styles.settleScreenshotOverlay}>
+                        <Ionicons name="expand" size={15} color="#FFFFFF" />
+                        <Text style={styles.settleScreenshotLabel}>View Payment Screenshot</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  {note ? (
+                    <Text style={[styles.settleNoteText, { color: colors.textSecondary }]}>
+                      Note: {note}
+                    </Text>
+                  ) : null}
+
+                  {/* Accept / Reject Action Buttons for Receiver */}
+                  {isPending && isReceiver && (
+                    <View style={styles.settleActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.settleRejectBtn, { borderColor: colors.danger }]}
+                        onPress={() => handleRejectPayment(item)}
+                      >
+                        <Ionicons name="close" size={16} color={colors.danger} style={{ marginRight: 4 }} />
+                        <Text style={[styles.settleRejectText, { color: colors.danger }]}>Reject</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.settleAcceptBtn, { backgroundColor: colors.success }]}
+                        onPress={() => handleAcceptPayment(item)}
+                      >
+                        <Ionicons name="checkmark" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
+                        <Text style={styles.settleAcceptText}>Accept & Deduct</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {isPending && !isReceiver && (
+                    <View style={[styles.settlePendingNotice, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
+                      <Ionicons name="time-outline" size={15} color={colors.textMuted} style={{ marginRight: 6 }} />
+                      <Text style={[styles.settlePendingText, { color: colors.textMuted }]}>
+                        Waiting for {receiverName} to verify and accept.
+                      </Text>
+                    </View>
+                  )}
+
+                  {isAccepted && (
+                    <View style={[styles.settleSuccessNotice, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : '#ECFDF5' }]}>
+                      <Ionicons name="checkmark-done" size={15} color={colors.success} style={{ marginRight: 6 }} />
+                      <Text style={[styles.settleSuccessText, { color: colors.success }]}>
+                        Payment accepted! {amtStr} deducted from pending balance.
+                      </Text>
+                    </View>
+                  )}
+
+                  {isRejected && (
+                    <View style={[styles.settleRejectedNotice, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2' }]}>
+                      <Ionicons name="alert-circle-outline" size={15} color={colors.danger} style={{ marginRight: 6 }} />
+                      <Text style={[styles.settleRejectedText, { color: colors.danger }]}>
+                        Payment claim was rejected. No balance was deducted.
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={[styles.settleCardBottom, { borderTopColor: colors.borderLight }]}>
+                    <Text style={[styles.timestampText, { color: colors.textMuted }]}>
+                      {formatTime(item.created_at)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            );
+          }
+
+          // 5. Payment Request Card
+          const isRequestMsg =
+            item.type === 'payment_request' ||
+            (item.content && item.content.includes('"type":"payment_request"'));
+
+          if (isRequestMsg) {
+            let pData: any = item.payload;
+            if (!pData && item.content && item.content.startsWith('{')) {
+              try { pData = JSON.parse(item.content); } catch {}
+            }
+            if (!pData && item.message && item.message.startsWith('{')) {
+              try { pData = JSON.parse(item.message); } catch {}
+            }
+            pData = pData || {};
+
+            const amountPaise = Number(pData.amountPaise || pData.amount_paise) || 0;
+            const amtStr = formatCurrencyAmount(amountPaise, userCurrency);
+            const requesterName = pData.requesterName || item.sender_name || 'Member';
+            const targetName = pData.targetName || 'Member';
+            const note = pData.note;
+
+            const isTargetMe = Boolean(
+              (pData.targetId && (pData.targetId === currentUserId || (myMember && (myMember.id === pData.targetId || myMember.profile_id === pData.targetId)))) ||
+              (!isGroup && !isMine)
+            );
+
+            return (
+              <View style={styles.settlementCardContainer}>
+                <View
+                  style={[
+                    styles.settlementCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.primary,
+                      borderWidth: 1.2,
+                    },
+                  ]}
+                >
+                  <View style={styles.settleCardHeaderRow}>
+                    <View style={[styles.settleIconBox, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
+                      <Ionicons name="cash" size={20} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={[styles.settleCardTitle, { color: colors.text }]}>
+                        Payment Request: {amtStr}
+                      </Text>
+                      <Text style={[styles.settleCardSub, { color: colors.textSecondary }]}>
+                        From {requesterName} to {targetName}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {note ? (
+                    <Text style={[styles.settleNoteText, { color: colors.textSecondary }]}>
+                      Note: {note}
+                    </Text>
+                  ) : null}
+
+                  {isTargetMe ? (
+                    <TouchableOpacity
+                      style={[styles.payNowActionBtn, { backgroundColor: colors.primary }]}
+                      onPress={() => handleOpenPayModal(amountPaise)}
+                    >
+                      <Ionicons name="card" size={17} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.payNowActionBtnText}>Pay & Upload Screenshot</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.settlePendingNotice, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
+                      <Text style={[styles.settlePendingText, { color: colors.textMuted }]}>
+                        Requested from {targetName}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={[styles.settleCardBottom, { borderTopColor: colors.borderLight }]}>
+                    <Text style={[styles.timestampText, { color: colors.textMuted }]}>
+                      {formatTime(item.created_at)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            );
+          }
+
+          // 6. Standard Text Message Bubble
           return (
             <View
               style={[
@@ -1661,7 +2498,10 @@ export default function ChatView({
                 isMine ? styles.bubbleRight : styles.bubbleLeft,
               ]}
             >
-              <View
+              <TouchableOpacity
+                activeOpacity={0.88}
+                onLongPress={() => handleMessageLongPress(item, isMine)}
+                delayLongPress={280}
                 style={[
                   styles.textBubble,
                   {
@@ -1679,23 +2519,61 @@ export default function ChatView({
                 </Text>
 
                 <View style={styles.bubbleMetaRow}>
+                  {item.is_edited ? (
+                    <Text
+                      style={[
+                        styles.editedBadgeText,
+                        { color: isMine ? 'rgba(255,255,255,0.65)' : colors.textMuted },
+                      ]}
+                    >
+                      edited{' '}
+                    </Text>
+                  ) : null}
                   <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
                     {formatTime(item.created_at)}
                   </Text>
-                  {isMine && (
-                    <Ionicons
-                      name="checkmark-done"
-                      size={15}
-                      color="#E0E7FF"
-                      style={{ marginLeft: 3 }}
-                    />
-                  )}
+                  {isMine && renderMessageTicks(item, isMine)}
                 </View>
-              </View>
+              </TouchableOpacity>
             </View>
           );
         }}
       />
+      )}
+
+      {/* Editing Message Banner */}
+      {editingMessage && (
+        <View
+          style={[
+            styles.editingBanner,
+            {
+              backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+            <View style={[styles.editIconBadge, { backgroundColor: colors.primary + '25' }]}>
+              <Ionicons name="pencil" size={14} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.editingTitle, { color: colors.primary }]}>Editing message</Text>
+              <Text style={[styles.editingSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                {editingMessage.text}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              setEditingMessage(null);
+              setInputText('');
+            }}
+            style={styles.cancelEditBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Composer Bottom Bar */}
@@ -1722,7 +2600,7 @@ export default function ChatView({
             {
               backgroundColor: colors.card,
               borderTopColor: colors.border,
-              borderTopWidth: 1,
+              borderTopWidth: editingMessage ? 0 : 1,
               paddingBottom: isKeyboardVisible
                 ? 8
                 : Math.max(insets.bottom, 8),
@@ -1748,8 +2626,9 @@ export default function ChatView({
           </TouchableOpacity>
 
           <TextInput
+            ref={inputRef}
             style={[styles.textInputField, { color: colors.text }]}
-            placeholder="Type a message..."
+            placeholder={editingMessage ? 'Edit your message...' : 'Type a message...'}
             placeholderTextColor={colors.textMuted}
             value={inputText}
             onChangeText={setInputText}
@@ -1776,10 +2655,10 @@ export default function ChatView({
           onPress={inputText.trim() ? handleSendText : handleTakePhoto}
         >
           <Ionicons
-            name={inputText.trim() ? 'send' : 'mic'}
+            name={editingMessage ? 'checkmark' : (inputText.trim() ? 'send' : 'mic')}
             size={20}
             color="#FFFFFF"
-            style={{ marginLeft: inputText.trim() ? 2 : 0 }}
+            style={{ marginLeft: (!editingMessage && inputText.trim()) ? 2 : 0 }}
           />
         </TouchableOpacity>
       </View>
@@ -2019,11 +2898,329 @@ export default function ChatView({
                 </View>
                 <Text style={[styles.attachLabel, { color: colors.text }]}>Split Bill</Text>
               </TouchableOpacity>
+
+              {/* Pay & Share Screenshot */}
+              <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenPayModal()}>
+                <View style={[styles.attachCircle, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.18)' : '#D1FAE5' }]}>
+                  <Ionicons name="card" size={24} color={colors.success} />
+                </View>
+                <Text style={[styles.attachLabel, { color: colors.text }]}>Pay / Proof</Text>
+              </TouchableOpacity>
+
+              {/* Request Money */}
+              <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenRequestMoneyModal()}>
+                <View style={[styles.attachCircle, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF' }]}>
+                  <Ionicons name="cash" size={24} color={colors.primary} />
+                </View>
+                <Text style={[styles.attachLabel, { color: colors.text }]}>Request Money</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       </Modal>
       )}
+
+      {/* 1. Pay with Screenshot Modal */}
+      <Modal
+        visible={payModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPayModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.payModalBackdrop}
+        >
+          <View style={[styles.payModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.payModalHeader}>
+              <View>
+                <Text style={[styles.payModalTitle, { color: colors.text }]}>Pay / Settle Up</Text>
+                <Text style={[styles.payModalSubtitle, { color: colors.textSecondary }]}>
+                  Attach payment screenshot for receiver to accept
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setPayModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Amount Input */}
+            <View style={styles.payInputGroup}>
+              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Amount Paid (₹)</Text>
+              <View style={[styles.payAmountInputWrapper, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}>
+                <Text style={[styles.payCurrencySymbol, { color: colors.primary }]}>₹</Text>
+                <TextInput
+                  style={[styles.payAmountTextInput, { color: colors.text }]}
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  value={payAmountText}
+                  onChangeText={setPayAmountText}
+                />
+              </View>
+
+              {/* Quick Suggestion Chips */}
+              <View style={styles.quickChipsRow}>
+                {friendNetPaise < 0 && (
+                  <TouchableOpacity
+                    style={[styles.quickChip, { backgroundColor: colors.primaryLight }]}
+                    onPress={() => setPayAmountText((Math.abs(friendNetPaise) / 100).toString())}
+                  >
+                    <Text style={[styles.quickChipText, { color: colors.primary }]}>
+                      Full Debt: ₹{(Math.abs(friendNetPaise) / 100).toFixed(0)}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {friendNetPaise < 0 && Math.abs(friendNetPaise) > 1000 && (
+                  <TouchableOpacity
+                    style={[styles.quickChip, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}
+                    onPress={() => setPayAmountText((Math.abs(friendNetPaise) / 200).toFixed(0))}
+                  >
+                    <Text style={[styles.quickChipText, { color: colors.text }]}>
+                      Half: ₹{(Math.abs(friendNetPaise) / 200).toFixed(0)}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* If Group Trip: Member Picker */}
+            {isGroup && tripMembers.length > 2 && (
+              <View style={styles.payInputGroup}>
+                <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Paid To Member</Text>
+                <View style={styles.memberPickerRow}>
+                  {tripMembers.filter(m => m.id !== myMember?.id).map(m => {
+                    const isSelected = payTargetMemberId === m.id;
+                    return (
+                      <TouchableOpacity
+                        key={m.id}
+                        onPress={() => setPayTargetMemberId(m.id)}
+                        style={[
+                          styles.memberChip,
+                          {
+                            backgroundColor: isSelected ? colors.primary : isDark ? '#1E293B' : '#F1F5F9',
+                            borderColor: isSelected ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.memberChipText, { color: isSelected ? '#FFFFFF' : colors.text }]}>
+                          {m.display_name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Screenshot Attachment Area */}
+            <View style={styles.payInputGroup}>
+              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Payment Proof / Screenshot</Text>
+              {payScreenshotUri ? (
+                <View style={styles.screenshotPreviewBox}>
+                  <Image source={{ uri: payScreenshotUri }} style={styles.screenshotThumb} resizeMode="cover" />
+                  <View style={styles.screenshotOverlayActions}>
+                    <TouchableOpacity
+                      style={styles.changeScreenshotBtn}
+                      onPress={handlePickPaymentScreenshot}
+                    >
+                      <Ionicons name="images" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
+                      <Text style={styles.changeScreenshotText}>Change</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.removeScreenshotBtn}
+                      onPress={() => {
+                        setPayScreenshotUri(null);
+                        setPayScreenshotBase64(null);
+                      }}
+                    >
+                      <Ionicons name="trash" size={16} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.attachScreenshotButtonsRow}>
+                  <TouchableOpacity
+                    style={[styles.attachScreenshotBtn, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}
+                    onPress={handlePickPaymentScreenshot}
+                  >
+                    <Ionicons name="images-outline" size={22} color={colors.primary} />
+                    <Text style={[styles.attachScreenshotText, { color: colors.text }]}>From Gallery</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.attachScreenshotBtn, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}
+                    onPress={handleTakePaymentScreenshotPhoto}
+                  >
+                    <Ionicons name="camera-outline" size={22} color={colors.secondary} />
+                    <Text style={[styles.attachScreenshotText, { color: colors.text }]}>Take Photo</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Optional Note */}
+            <View style={styles.payInputGroup}>
+              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Note (Optional)</Text>
+              <TextInput
+                style={[styles.payNoteInput, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border, color: colors.text }]}
+                placeholder="UPI Ref ID, GPay, Bank..."
+                placeholderTextColor={colors.textMuted}
+                value={payNote}
+                onChangeText={setPayNote}
+              />
+            </View>
+
+            {/* Submit Button */}
+            <TouchableOpacity
+              style={[styles.submitPayBtn, { backgroundColor: colors.success, opacity: isSubmittingPayment ? 0.7 : 1 }]}
+              onPress={handleSubmitPayment}
+              disabled={isSubmittingPayment}
+            >
+              {isSubmittingPayment ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.submitPayBtnText}>Submit Payment Proof</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* 2. Request Money / Select Amount to Receive Modal */}
+      <Modal
+        visible={requestMoneyModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRequestMoneyModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.payModalBackdrop}
+        >
+          <View style={[styles.payModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.payModalHeader}>
+              <View>
+                <Text style={[styles.payModalTitle, { color: colors.text }]}>Request Money</Text>
+                <Text style={[styles.payModalSubtitle, { color: colors.textSecondary }]}>
+                  Select amount you are going to receive
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setRequestMoneyModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Amount Input */}
+            <View style={styles.payInputGroup}>
+              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Amount to Receive (₹)</Text>
+              <View style={[styles.payAmountInputWrapper, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}>
+                <Text style={[styles.payCurrencySymbol, { color: colors.primary }]}>₹</Text>
+                <TextInput
+                  style={[styles.payAmountTextInput, { color: colors.text }]}
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                  value={requestAmountText}
+                  onChangeText={setRequestAmountText}
+                />
+              </View>
+
+              {/* Quick Suggestion Chips */}
+              <View style={styles.quickChipsRow}>
+                {friendNetPaise > 0 && (
+                  <TouchableOpacity
+                    style={[styles.quickChip, { backgroundColor: colors.primaryLight }]}
+                    onPress={() => setRequestAmountText((friendNetPaise / 100).toString())}
+                  >
+                    <Text style={[styles.quickChipText, { color: colors.primary }]}>
+                      Total Owed: ₹{(friendNetPaise / 100).toFixed(0)}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.quickChip, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}
+                  onPress={() => setRequestAmountText('200')}
+                >
+                  <Text style={[styles.quickChipText, { color: colors.text }]}>₹200</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.quickChip, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}
+                  onPress={() => setRequestAmountText('500')}
+                >
+                  <Text style={[styles.quickChipText, { color: colors.text }]}>₹500</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* If Group Trip: Target Member Picker */}
+            {isGroup && tripMembers.length > 2 && (
+              <View style={styles.payInputGroup}>
+                <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Request From</Text>
+                <View style={styles.memberPickerRow}>
+                  {tripMembers.filter(m => m.id !== myMember?.id).map(m => {
+                    const isSelected = requestTargetMemberId === m.id;
+                    return (
+                      <TouchableOpacity
+                        key={m.id}
+                        onPress={() => setRequestTargetMemberId(m.id)}
+                        style={[
+                          styles.memberChip,
+                          {
+                            backgroundColor: isSelected ? colors.primary : isDark ? '#1E293B' : '#F1F5F9',
+                            borderColor: isSelected ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.memberChipText, { color: isSelected ? '#FFFFFF' : colors.text }]}>
+                          {m.display_name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Optional Note */}
+            <View style={styles.payInputGroup}>
+              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Note (Optional)</Text>
+              <TextInput
+                style={[styles.payNoteInput, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border, color: colors.text }]}
+                placeholder="For cabs, dinner, hotel..."
+                placeholderTextColor={colors.textMuted}
+                value={requestNote}
+                onChangeText={setRequestNote}
+              />
+            </View>
+
+            {/* Submit Button */}
+            <TouchableOpacity
+              style={[styles.submitPayBtn, { backgroundColor: colors.primary, opacity: isSubmittingRequest ? 0.7 : 1 }]}
+              onPress={handleSubmitRequestMoney}
+              disabled={isSubmittingRequest}
+            >
+              {isSubmittingRequest ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="paper-plane" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.submitPayBtnText}>Send Payment Request</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Photo Full-Screen Modal Preview */}
       {Boolean(selectedPhotoPreview) && (
@@ -2356,6 +3553,103 @@ export default function ChatView({
           </View>
         </Modal>
       )}
+
+      {/* Long-Press Message Actions Modal */}
+      <Modal
+        visible={messageActionModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMessageActionModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setMessageActionModalVisible(false)}
+        >
+          <View
+            style={[
+              styles.actionSheetContent,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.actionSheetHandle} />
+            <View style={styles.actionSheetHeader}>
+              <Text style={[styles.actionSheetTitle, { color: colors.textSecondary }]}>
+                Message Options
+              </Text>
+              {selectedMessageForAction?.message ? (
+                <Text
+                  style={[styles.actionSheetSnippet, { color: colors.text }]}
+                  numberOfLines={2}
+                >
+                  "{selectedMessageForAction.message}"
+                </Text>
+              ) : null}
+            </View>
+
+            {/* Edit Option (only for text messages) */}
+            {selectedMessageForAction?.type === 'text' && (
+              <TouchableOpacity
+                style={[styles.actionSheetItem, { borderBottomColor: colors.border }]}
+                onPress={() => {
+                  if (!selectedMessageForAction) return;
+                  const item = selectedMessageForAction;
+                  setMessageActionModalVisible(false);
+                  setEditingMessage({ id: item.id, text: item.message || '' });
+                  setInputText(item.message || '');
+                  setTimeout(() => {
+                    inputRef.current?.focus();
+                  }, 180);
+                }}
+              >
+                <Ionicons name="pencil-outline" size={20} color={colors.primary} />
+                <Text style={[styles.actionSheetItemText, { color: colors.text }]}>
+                  Edit Message
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Delete Option */}
+            <TouchableOpacity
+              style={[styles.actionSheetItem, { borderBottomColor: colors.border }]}
+              onPress={() => {
+                if (!selectedMessageForAction) return;
+                const msgId = selectedMessageForAction.id;
+                setMessageActionModalVisible(false);
+                Alert.alert(
+                  'Delete Message',
+                  'Are you sure you want to delete this message for everyone?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: async () => {
+                        await deleteTripMessage(tripId, msgId);
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              <Text style={[styles.actionSheetItemText, { color: colors.danger }]}>
+                Delete Message
+              </Text>
+            </TouchableOpacity>
+
+            {/* Cancel Button */}
+            <TouchableOpacity
+              style={styles.actionSheetCancelBtn}
+              onPress={() => setMessageActionModalVisible(false)}
+            >
+              <Text style={[styles.actionSheetCancelText, { color: colors.textSecondary }]}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -3091,5 +4385,428 @@ const styles = StyleSheet.create({
   fullScreenPhoto: {
     width: '100%',
     height: '85%',
+  },
+  editingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+  },
+  editIconBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  editingTitle: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  editingSubtitle: {
+    fontSize: scaleFont(12),
+    marginTop: 1,
+  },
+  cancelEditBtn: {
+    padding: 4,
+  },
+  editedBadgeText: {
+    fontSize: scaleFont(10),
+    fontStyle: 'italic',
+    marginRight: 2,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  actionSheetContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 28,
+    paddingTop: 10,
+  },
+  actionSheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(150,150,150,0.4)',
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  actionSheetHeader: {
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  actionSheetTitle: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  actionSheetSnippet: {
+    fontSize: scaleFont(13),
+    fontStyle: 'italic',
+    marginTop: 4,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
+  actionSheetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  actionSheetItemText: {
+    fontSize: scaleFont(15),
+    fontWeight: '600',
+    marginLeft: 12,
+  },
+  actionSheetCancelBtn: {
+    marginTop: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  actionSheetCancelText: {
+    fontSize: scaleFont(15),
+    fontWeight: '600',
+  },
+
+  // Payment settlement & Request card styles
+  settlementCardContainer: {
+    paddingHorizontal: 12,
+    marginVertical: 6,
+    alignItems: 'center',
+    width: '100%',
+  },
+  settlementCard: {
+    width: '92%',
+    borderRadius: 16,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  settleCardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  settleIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settleCardTitle: {
+    fontSize: scaleFont(15),
+    fontWeight: '700',
+  },
+  settleCardSub: {
+    fontSize: scaleFont(12),
+    marginTop: 1,
+  },
+  settleStatusBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  settleStatusText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  settleScreenshotWrapper: {
+    width: '100%',
+    height: 160,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    marginVertical: 8,
+    backgroundColor: '#000000',
+  },
+  settleScreenshotImage: {
+    width: '100%',
+    height: '100%',
+  },
+  settleScreenshotOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    gap: 6,
+  },
+  settleScreenshotLabel: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(11.5),
+    fontWeight: '600',
+  },
+  settleNoteText: {
+    fontSize: scaleFont(13),
+    fontStyle: 'italic',
+    marginBottom: 8,
+    marginTop: 2,
+  },
+  settleActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 10,
+  },
+  settleRejectBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.2,
+  },
+  settleRejectText: {
+    fontSize: scaleFont(13.5),
+    fontWeight: '700',
+  },
+  settleAcceptBtn: {
+    flex: 1.4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  settleAcceptText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(13.5),
+    fontWeight: '700',
+  },
+  settlePendingNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  settlePendingText: {
+    fontSize: scaleFont(12),
+    fontStyle: 'italic',
+  },
+  settleSuccessNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  settleSuccessText: {
+    fontSize: scaleFont(12.5),
+    fontWeight: '600',
+  },
+  settleRejectedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  settleRejectedText: {
+    fontSize: scaleFont(12.5),
+    fontWeight: '600',
+  },
+  settleCardBottom: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-end',
+  },
+  payNowActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    borderRadius: 12,
+    marginTop: 10,
+  },
+  payNowActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(13.5),
+    fontWeight: '700',
+  },
+
+  // Modal styles
+  payModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  payModalCard: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  payModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  payModalTitle: {
+    fontSize: scaleFont(18),
+    fontWeight: '800',
+  },
+  payModalSubtitle: {
+    fontSize: scaleFont(12.5),
+    marginTop: 2,
+  },
+  payInputGroup: {
+    marginBottom: 14,
+  },
+  payInputLabel: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  payAmountInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    height: 52,
+  },
+  payCurrencySymbol: {
+    fontSize: scaleFont(20),
+    fontWeight: '800',
+    marginRight: 8,
+  },
+  payAmountTextInput: {
+    flex: 1,
+    fontSize: scaleFont(18),
+    fontWeight: '700',
+  },
+  quickChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  quickChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  quickChipText: {
+    fontSize: scaleFont(11.5),
+    fontWeight: '600',
+  },
+  memberPickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  memberChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  memberChipText: {
+    fontSize: scaleFont(12.5),
+    fontWeight: '600',
+  },
+  attachScreenshotButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  attachScreenshotBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+  },
+  attachScreenshotText: {
+    fontSize: scaleFont(13),
+    fontWeight: '600',
+  },
+  screenshotPreviewBox: {
+    width: '100%',
+    height: 140,
+    borderRadius: 14,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#000000',
+  },
+  screenshotThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  screenshotOverlayActions: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  changeScreenshotBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  changeScreenshotText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+  },
+  removeScreenshotBtn: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 6,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  payNoteInput: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: scaleFont(13.5),
+  },
+  submitPayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 16,
+    marginTop: 6,
+  },
+  submitPayBtnText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(15),
+    fontWeight: '700',
   },
 });

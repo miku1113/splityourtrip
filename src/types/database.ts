@@ -128,12 +128,13 @@ export interface TripMessage {
   sender_name?: string;
   message?: string;
   content?: string;
-  type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'document';
+  type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'document' | 'payment_settlement' | 'payment_claim' | 'payment_request';
   chat_type?: 'group' | 'individual' | 'trip' | 'user';
   media_url?: string;
   media_name?: string;
   media_size?: string;
   expense_id?: string;
+  payload?: any;
   expense_data?: {
     id: string;
     trip_id?: string;
@@ -152,6 +153,10 @@ export interface TripMessage {
     dispute_reason?: string;
     disputed_by?: string;
   };
+  is_sent?: boolean;
+  is_seen?: boolean;
+  is_edited?: boolean;
+  seen_at?: string;
   created_at: string;
 }
 

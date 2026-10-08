@@ -13,6 +13,7 @@ import {
   Platform,
   Image,
   KeyboardAvoidingView,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -27,6 +28,8 @@ import { theme } from '../../../src/theme/colors';
 import { useTheme } from '../../../src/theme/useThemeStore';
 import { getCurrencyInfo } from '../../../src/services/currency';
 import { extractPaymentFromScreenshot } from '../../../src/services/receiptOcr';
+import { AppStorage } from '../../../src/lib/storage';
+import { sendAutomatedWhatsAppExpenseAlert } from '../../../src/services/whatsappService';
 
 const CATEGORIES = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
 
@@ -117,7 +120,7 @@ export default function AddExpenseScreen() {
     (existingExpense?.split_type as SplitType) || 'equal'
   );
   const [paidBy, setPaidBy] = useState<string>(
-    existingExpense?.paid_by || members[0]?.id || ''
+    existingExpense?.paid_by || ''
   );
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>(() => {
     if (existingExpense?.splits && existingExpense.splits.length > 0) {
@@ -317,9 +320,13 @@ export default function AddExpenseScreen() {
 
   React.useEffect(() => {
     if (members.length > 0 && !existingExpense) {
+      const myMember = findMyMember(members, user?.id, currentUserPhone);
       if (!paidBy || !members.some(m => m.id === paidBy)) {
-        const myMember = findMyMember(members, user?.id, currentUserPhone) || members[0];
-        setPaidBy(myMember.id);
+        if (myMember) {
+          setPaidBy(myMember.id);
+        } else {
+          setPaidBy(members[0].id);
+        }
       }
       if (
         selectedParticipants.length === 0 ||
@@ -328,7 +335,7 @@ export default function AddExpenseScreen() {
         setSelectedParticipants(members.map(m => m.id));
       }
     }
-  }, [members, id, existingExpense]);
+  }, [members, id, existingExpense, user?.id, currentUserPhone]);
 
   const toggleParticipant = (memberId: string) => {
     if (selectedParticipants.includes(memberId)) {
@@ -477,6 +484,33 @@ export default function AddExpenseScreen() {
 
     setSaving(false);
     if (success) {
+      // Automatically dispatch WhatsApp notification in background without leaving the app
+      const trip = currentTrip || trips.find(t => t.id === id);
+      const payerMem = members.find(m => m.id === targetPaidBy);
+      const payerName = payerMem?.display_name || 'You';
+      const tripTitle = trip?.name || 'Split Your Trip';
+
+      const recipientPhones: string[] = [];
+      const recipientNames: string[] = [];
+      members.forEach(m => {
+        if (m.id !== targetPaidBy) {
+          if (m.phone_number) recipientPhones.push(m.phone_number);
+          recipientNames.push(m.display_name);
+        }
+      });
+
+      sendAutomatedWhatsAppExpenseAlert({
+        tripId: id as string,
+        tripName: tripTitle,
+        expenseDescription: description.trim(),
+        amountPaise,
+        currency: trip?.currency || 'INR',
+        payerName,
+        category,
+        recipientPhones,
+        recipientNames,
+      }).catch(() => {});
+
       setTimeout(() => {
         const trip = currentTrip || trips.find(t => t.id === id);
         const isSingleSplit =
@@ -484,14 +518,17 @@ export default function AddExpenseScreen() {
           trip?.name?.toLowerCase().startsWith('split with ');
 
         if (isSingleSplit) {
-          const otherMember =
-            members.find(m => !user?.id || (m.profile_id !== user.id && m.user_id !== user.id)) ||
-            members.find(m => m.role !== 'admin') ||
-            members[0];
+          const myMem = findMyMember(members, user?.id, currentUserPhone);
+          const otherMember = myMem
+            ? members.find(m => m.id !== myMem.id)
+            : members.find(m => user?.id && m.profile_id !== user.id && m.user_id !== user.id) ||
+              members.find(m => m.role !== 'admin');
 
           const friendDisplayName =
-            otherMember?.display_name ||
-            (trip?.name ? trip.name.replace(/^split with\s+/i, '').trim() : prefillReceiver || 'Friend');
+            (otherMember?.display_name && otherMember.display_name.trim().toLowerCase() !== 'you' ? otherMember.display_name : null) ||
+            (trip?.name ? trip.name.replace(/^split with\s+/i, '').trim() : null) ||
+            prefillReceiver ||
+            'Friend';
 
           router.replace({
             pathname: '/chat/[id]',

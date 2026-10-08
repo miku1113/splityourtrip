@@ -28,11 +28,12 @@ const PAGE_SIZE = 10;
 interface AddExpenseChoiceModalProps {
   visible: boolean;
   onClose: () => void;
+  onOpenSettleUp?: () => void;
 }
 
 type StepMode = 'choose_type' | 'select_trip' | 'select_friend';
 
-export default function AddExpenseChoiceModal({ visible, onClose }: AddExpenseChoiceModalProps) {
+export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp }: AddExpenseChoiceModalProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
@@ -398,6 +399,43 @@ export default function AddExpenseChoiceModal({ visible, onClose }: AddExpenseCh
                   </View>
                   <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
                     Auto-detect amount, receiver & UPI from GPay, PhonePe, Paytm
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* Option 4: Settle Up / Pay (Cash or UPI) */}
+              <TouchableOpacity
+                style={[
+                  styles.choiceCard,
+                  {
+                    backgroundColor: isDark ? 'rgba(168, 85, 247, 0.12)' : '#FAF5FF',
+                    borderColor: isDark ? colors.border : '#F3E8FF',
+                  },
+                ]}
+                onPress={() => {
+                  if (onOpenSettleUp) {
+                    onOpenSettleUp();
+                  } else {
+                    handleClose();
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: '#A855F7' }]}>
+                  <Ionicons name="wallet" size={24} color="#FFFFFF" />
+                </View>
+                <View style={styles.choiceTextContainer}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.choiceTitle, { color: colors.text }]}>
+                      Settle Up / Pay
+                    </Text>
+                    <View style={[styles.ocrChoiceBadge, { backgroundColor: '#A855F7' }]}>
+                      <Text style={styles.ocrChoiceBadgeText}>CASH & UPI</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
+                    Pay someone via Cash or UPI & record settlement
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
