@@ -85,6 +85,9 @@ export default function ProfileScreen() {
 
   const handlePickFromGallery = async () => {
     setPhotoPickerVisible(false);
+    if (Platform.OS === 'ios') {
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -109,6 +112,9 @@ export default function ProfileScreen() {
 
   const handleTakePhoto = async () => {
     setPhotoPickerVisible(false);
+    if (Platform.OS === 'ios') {
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {

@@ -1064,6 +1064,9 @@ export default function ChatView({
 
   const handlePickImage = async () => {
     setAttachmentModalVisible(false);
+    if (Platform.OS === 'ios') {
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -1120,6 +1123,9 @@ export default function ChatView({
 
   const handleTakePhoto = async () => {
     setAttachmentModalVisible(false);
+    if (Platform.OS === 'ios') {
+      await new Promise(resolve => setTimeout(resolve, 450));
+    }
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
