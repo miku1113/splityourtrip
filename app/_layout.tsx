@@ -1,5 +1,6 @@
 import { useFonts } from 'expo-font';
-import { Stack, ThemeProvider, DarkTheme, DefaultTheme, useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo } from 'react';
 import 'react-native-reanimated';

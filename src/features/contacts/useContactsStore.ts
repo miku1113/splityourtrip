@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import * as Contacts from 'expo-contacts/legacy';
+import * as Contacts from 'expo-contacts';
 import { Share, Linking } from 'react-native';
 import { AppStorage } from '../../lib/storage';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';

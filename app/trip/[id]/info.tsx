@@ -20,7 +20,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Contacts from 'expo-contacts/legacy';
+import * as Contacts from 'expo-contacts';
 import {
   useTripStore,
   normalizeExpensesForTrip,
