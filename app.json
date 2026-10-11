@@ -20,7 +20,25 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "SEND",
+          "data": [
+            { "mimeType": "image/*" },
+            { "mimeType": "text/plain" },
+            { "mimeType": "*/*" }
+          ],
+          "category": ["DEFAULT"]
+        },
+        {
+          "action": "SEND_MULTIPLE",
+          "data": [
+            { "mimeType": "image/*" }
+          ],
+          "category": ["DEFAULT"]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",

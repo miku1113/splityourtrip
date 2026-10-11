@@ -162,6 +162,8 @@ interface TripStoreState {
     isGuest?: boolean;
   }) => Promise<TripMember | null>;
   removeMember: (tripId: string, memberId: string) => Promise<boolean>;
+  updateMemberRole: (tripId: string, memberId: string, role: 'admin' | 'member') => Promise<boolean>;
+  leaveTrip: (tripId: string, userId: string) => Promise<boolean>;
   findContactByPhone: (
     phoneNumber: string
   ) => Promise<{
@@ -819,7 +821,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 description: tripToSync.description || '',
                 trip_type: tripToSync.trip_type || 'group',
                 friend_id: tripToSync.friend_id || null,
-                image_url: tripToSync.image_url || null,
+                image_url: (tripToSync.image_url && !tripToSync.image_url.startsWith('file:') && !tripToSync.image_url.startsWith('content:')) ? tripToSync.image_url : null,
                 currency: tripToSync.currency || 'INR',
                 status: tripToSync.status || 'active',
                 invite_code: inviteCode,
@@ -1050,13 +1052,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           } catch {}
         }
 
+        const cloudImageUrl = (finalImageUrl && !finalImageUrl.startsWith('file:') && !finalImageUrl.startsWith('content:'))
+          ? finalImageUrl
+          : null;
+
         const tripPayload = {
           id: newTripId,
           name: name.trim(),
           description: description || '',
           trip_type: tripType,
           friend_id: friendId || null,
-          image_url: imageUrl || null,
+          image_url: cloudImageUrl,
           currency: 'INR',
           status: 'active',
           invite_code: inviteCode,
@@ -1132,7 +1138,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     let finalImageUrl = updates.image_url !== undefined ? updates.image_url : target.image_url;
     if (finalImageUrl && (finalImageUrl.startsWith('file:') || finalImageUrl.startsWith('content:') || finalImageUrl.startsWith('ph:'))) {
       try {
-        finalImageUrl = await uploadTripCoverImage(tripId, finalImageUrl);
+        const cloudUrl = await uploadTripCoverImage(tripId, finalImageUrl);
+        if (cloudUrl && !cloudUrl.startsWith('file:') && !cloudUrl.startsWith('content:')) {
+          finalImageUrl = cloudUrl;
+        } else if (target.image_url && !target.image_url.startsWith('file:')) {
+          finalImageUrl = target.image_url;
+        }
       } catch (err) {
         console.warn('Trip cover image upload notice on update:', err);
       }
@@ -1187,7 +1198,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           status: updatedTrip.status || 'active',
           trip_type: updatedTrip.trip_type || 'group',
           friend_id: updatedTrip.friend_id || null,
-          image_url: updatedTrip.image_url || null,
+          image_url: (updatedTrip.image_url && !updatedTrip.image_url.startsWith('file:') && !updatedTrip.image_url.startsWith('content:')) ? updatedTrip.image_url : null,
+          start_date: updatedTrip.start_date || null,
+          end_date: updatedTrip.end_date || null,
           updated_at: new Date().toISOString(),
         };
 
@@ -1230,25 +1243,28 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
+        const client = supabaseAdmin || supabase;
         // Cascade delete child entities first
-        await withTimeout(supabaseAdmin.from('trip_messages').delete().eq('trip_id', tripId), 3000).catch(() => null);
-        await withTimeout(supabaseAdmin.from('expense_splits').delete().eq('trip_id', tripId), 3000).catch(() => null);
-        await withTimeout(supabaseAdmin.from('expenses').delete().eq('trip_id', tripId), 3000).catch(() => null);
-        await withTimeout(supabaseAdmin.from('trip_members').delete().eq('trip_id', tripId), 3000).catch(() => null);
-        await withTimeout(supabaseAdmin.from('invites').delete().eq('trip_id', tripId), 3000).catch(() => null);
+        await withTimeout(client.from('trip_messages').delete().eq('trip_id', tripId), 3000).catch(() => null);
+        
+        // Find expenses to delete expense_splits by expense_id
+        try {
+          const { data: expRows } = await client.from('expenses').select('id').eq('trip_id', tripId);
+          if (expRows && expRows.length > 0) {
+            const expIds = expRows.map(e => e.id);
+            await withTimeout(client.from('expense_splits').delete().in('expense_id', expIds), 3000).catch(() => null);
+          }
+        } catch {}
+
+        await withTimeout(client.from('expenses').delete().eq('trip_id', tripId), 3000).catch(() => null);
+        await withTimeout(client.from('trip_members').delete().eq('trip_id', tripId), 3000).catch(() => null);
+        await withTimeout(client.from('invites').delete().eq('trip_id', tripId), 3000).catch(() => null);
 
         // Delete trip record
         const adminRes = await withTimeout(
-          supabaseAdmin.from('trips').delete().eq('id', tripId),
+          client.from('trips').delete().eq('id', tripId),
           3500
         ).catch(() => null);
-
-        if (!adminRes || adminRes.error) {
-          await withTimeout(
-            supabase.from('trips').delete().eq('id', tripId),
-            3000
-          ).catch(() => null);
-        }
       } catch (e) {
         console.warn('Supabase deleteTrip notice:', e);
       }
@@ -1385,8 +1401,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (tripData) {
         // Merge Supabase data with local trip to preserve local-only fields
         // (trip_type, friend_id, currency, etc. that Supabase schema may not have)
+        const effectiveImg = (tripData as any).image_url || (localTrip?.image_url && !localTrip.image_url.startsWith('file:') ? localTrip.image_url : null);
         mergedActiveTrip = {
           ...(tripData as Trip),
+          image_url: effectiveImg,
           trip_type: (tripData as any).trip_type || localTrip?.trip_type,
           friend_id: (tripData as any).friend_id || localTrip?.friend_id,
           currency: (tripData as any).currency || localTrip?.currency,
@@ -1947,12 +1965,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // Filter out if duplicate already exists
     const isDuplicate = existingTripMembers.some(
       m => (finalProfileId && m.profile_id === finalProfileId) ||
+           (finalPhone && m.phone_number && normalizePhone(m.phone_number) === normalizePhone(finalPhone)) ||
            (m.id === newMember.id)
     );
     if (isDuplicate) {
       return null;
     }
 
+    const otherMembers = get().members.filter(m => m.trip_id !== data.tripId);
     const currentMembers = [...existingTripMembers, newMember];
     const currentExpenses = normalizeExpensesForTrip(
       storedDetails.expenses || get().expenses.filter(e => e.trip_id === data.tripId),
@@ -1965,7 +1985,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       currentExpenses.flatMap((e: any) => e.splits || [])
     );
 
-    set({ members: currentMembers, expenses: currentExpenses, balances: newBalances });
+    set({ members: [...otherMembers, ...currentMembers], expenses: currentExpenses, balances: newBalances });
 
     // Persist locally immediately
     try {
@@ -2054,16 +2074,77 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(storedDetails));
     } catch {}
 
-    if (isSupabaseConfigured && isValidUUID(memberId)) {
+    if (isSupabaseConfigured) {
       try {
+        const client = supabaseAdmin || supabase;
+        if (isValidUUID(memberId)) {
+          await withTimeout(
+            client.from('trip_members').delete().eq('id', memberId),
+            3500
+          ).catch(() => null);
+        }
         await withTimeout(
-          supabaseAdmin.from('trip_members').delete().eq('id', memberId),
+          client.from('trip_members').delete().match({ trip_id: tripId, profile_id: memberId }),
           3500
         ).catch(() => null);
       } catch (e) {
         console.warn('removeMember Supabase notice:', e);
       }
     }
+
+    return true;
+  },
+
+  updateMemberRole: async (tripId: string, memberId: string, role: 'admin' | 'member') => {
+    const allMembers = get().members;
+    const updatedMembers = allMembers.map(m => (m.id === memberId ? { ...m, role } : m));
+    set({ members: updatedMembers });
+
+    try {
+      const raw = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
+      if (raw) {
+        const details = JSON.parse(raw);
+        if (Array.isArray(details.members)) {
+          details.members = details.members.map((m: any) => (m.id === memberId ? { ...m, role } : m));
+          await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+        }
+      }
+    } catch {}
+
+    if (isSupabaseConfigured) {
+      try {
+        const client = supabaseAdmin || supabase;
+        if (isValidUUID(memberId)) {
+          await client.from('trip_members').update({ role }).eq('id', memberId);
+        } else {
+          await client.from('trip_members').update({ role }).match({ trip_id: tripId, profile_id: memberId });
+        }
+      } catch (e) {
+        console.warn('updateMemberRole Supabase notice:', e);
+      }
+    }
+
+    return true;
+  },
+
+  leaveTrip: async (tripId: string, userId: string) => {
+    const currentMembers = get().members.filter(m => m.trip_id === tripId);
+    const myMember = findMyMember(currentMembers, userId);
+    if (!myMember) return false;
+
+    await get().removeMember(tripId, myMember.id);
+    const newTrips = get().trips.filter(t => t.id !== tripId);
+    set({
+      trips: newTrips,
+      activeTrip: get().activeTrip?.id === tripId ? null : get().activeTrip,
+    });
+
+    const authUser = useAuthStore.getState().user;
+    try {
+      const userTripsKey = getUserTripsStorageKey(authUser?.id);
+      await AppStorage.setItem(userTripsKey, JSON.stringify(newTrips));
+      await AppStorage.removeItem(`@splityourtrip_local_details_${tripId}`);
+    } catch {}
 
     return true;
   },
@@ -2237,6 +2318,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   },
 
   generateInviteCode: async (tripId: string, _userId: string) => {
+    const trip = get().trips.find(t => t.id === tripId) || (get().activeTrip?.id === tripId ? get().activeTrip : null);
+    if (trip && trip.invite_code) {
+      return trip.invite_code;
+    }
+    if (isSupabaseConfigured && isValidUUID(tripId)) {
+      try {
+        const client = supabaseAdmin || supabase;
+        const { data } = await client.from('trips').select('invite_code').eq('id', tripId).maybeSingle();
+        if (data?.invite_code) {
+          return data.invite_code;
+        }
+      } catch {}
+    }
     return tripId.replace(/-/g, '').substring(0, 6).toUpperCase();
   },
 
@@ -2244,10 +2338,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     if (!isSupabaseConfigured || !isValidUUID(userId)) return true;
 
     try {
-      const { data: matchingTrips } = await supabase
+      const cleanUpper = code.toUpperCase().trim();
+      const cleanLower = code.toLowerCase().trim();
+      const client = supabaseAdmin || supabase;
+      const { data: matchingTrips } = await client
         .from('trips')
-        .select('id')
-        .ilike('id', `${code.toLowerCase().trim()}%`)
+        .select('id, name, invite_code')
+        .or(`invite_code.eq.${cleanUpper},id.ilike.${cleanLower}%,id.eq.${code.trim()}`)
         .limit(1);
 
       if (!matchingTrips || matchingTrips.length === 0) {
@@ -3553,14 +3650,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 memberPayload.user_id = newProfileId;
               }
 
+              const client = supabaseAdmin || supabase;
               if (guestMemberId && isValidUUID(guestMemberId)) {
                 await withTimeout(
-                  supabaseAdmin.from('trip_members').update(memberPayload).eq('id', guestMemberId),
+                  client.from('trip_members').update(memberPayload).eq('id', guestMemberId),
                   3500
                 ).catch(() => null);
               } else {
                 await withTimeout(
-                  supabaseAdmin.from('trip_members').update(memberPayload).eq('trip_id', t.id).eq('display_name', cleanGuestName),
+                  client.from('trip_members').update(memberPayload).eq('trip_id', t.id).ilike('display_name', cleanGuestName),
                   3500
                 ).catch(() => null);
               }

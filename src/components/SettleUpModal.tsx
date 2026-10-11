@@ -21,7 +21,7 @@ import * as FileSystem from 'expo-file-system';
 import { useTheme } from '../theme/useThemeStore';
 import { useTripStore, Trip, TripMember } from '../features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../features/contacts/useContactsStore';
-import { useAuthStore } from '../features/auth/useAuthStore';
+import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
 import { formatCurrencyAmount } from '../services/currency';
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
@@ -202,17 +202,12 @@ export default function SettleUpModal({
           const base64Data = await FileSystem.readAsStringAsync(screenshotUri, {
             encoding: FileSystem.EncodingType.Base64,
           });
-          const byteChars = atob(base64Data);
-          const byteNums = new Array(byteChars.length);
-          for (let i = 0; i < byteChars.length; i++) {
-            byteNums[i] = byteChars.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNums);
+          const arrayBuffer = decodeBase64ToArrayBuffer(base64Data);
 
           const client = supabaseAdmin || supabase;
           const { data: upData, error: upErr } = await client.storage
             .from('attachments')
-            .upload(storagePath, byteArray.buffer, {
+            .upload(storagePath, arrayBuffer, {
               contentType: ext === 'png' ? 'image/png' : 'image/jpeg',
               upsert: true,
             });

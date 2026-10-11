@@ -56,6 +56,7 @@ export const supabase = createClient(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: Platform.OS === 'web',
+      flowType: 'pkce',
     },
   }
 );
@@ -74,5 +75,10 @@ export const supabaseAdmin = createClient(
     },
   }
 );
+
+export const GOOGLE_WEB_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+  '597031180305-6ulmsoapmeneas46oam4ss593rfuep4l.apps.googleusercontent.com';
+
 
 

@@ -3,9 +3,22 @@ import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { AppStorage } from '../../lib/storage';
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, supabaseAdmin, isSupabaseConfigured, GOOGLE_WEB_CLIENT_ID } from '../../lib/supabase';
 import { Profile } from '../../types/database';
 import { getUserCurrencyPreference, setUserCurrencyPreference } from '../../services/currency';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+
+// Configure Google Sign-In with Web Client ID for native account selector bottom-sheet
+if (Platform.OS !== 'web') {
+  try {
+    GoogleSignin.configure({
+      webClientId: GOOGLE_WEB_CLIENT_ID,
+      scopes: ['profile', 'email'],
+    });
+  } catch (e) {
+    console.warn('GoogleSignin.configure warning:', e);
+  }
+}
 
 // Complete any auth session started in the browser
 WebBrowser.maybeCompleteAuthSession();
@@ -57,27 +70,28 @@ const isValidUUID = (str?: string | null): boolean => {
 };
 
 export function decodeBase64ToUint8Array(base64Str: string): Uint8Array {
-  const clean = base64Str.replace(/^data:image\/[a-zA-Z]+;base64,/, '').trim();
+  const clean = base64Str.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '').replace(/[\r\n\s]/g, '');
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let bufferLength = Math.floor(clean.length * 0.75);
   if (clean.endsWith('==')) bufferLength -= 2;
   else if (clean.endsWith('=')) bufferLength -= 1;
-  const bytes = new Uint8Array(bufferLength);
+  const bytes = new Uint8Array(Math.max(0, bufferLength));
   let p = 0;
   for (let i = 0; i < clean.length; i += 4) {
     const encoded1 = chars.indexOf(clean[i]);
     const encoded2 = chars.indexOf(clean[i + 1]);
     const encoded3 = chars.indexOf(clean[i + 2]);
     const encoded4 = chars.indexOf(clean[i + 3]);
+    if (encoded1 === -1 || encoded2 === -1) break;
     bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);
-    if (encoded3 !== -1 && encoded3 !== 64) {
+    if (encoded3 !== -1 && encoded3 !== 64 && p < bytes.length) {
       bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
     }
-    if (encoded4 !== -1 && encoded4 !== 64) {
+    if (encoded4 !== -1 && encoded4 !== 64 && p < bytes.length) {
       bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);
     }
   }
-  return bytes;
+  return bytes.subarray(0, p);
 }
 
 export function decodeBase64ToArrayBuffer(base64Str: string): ArrayBuffer {
@@ -93,24 +107,12 @@ function parseAuthUrlParams(url: string): Record<string, string> {
   if (!url) return params;
 
   try {
-    // 1. Extract from query string (?...)
-    const queryStart = url.indexOf('?');
-    const hashStart = url.indexOf('#');
-
-    if (queryStart !== -1) {
-      const queryEnd = hashStart > queryStart ? hashStart : url.length;
-      const queryString = url.slice(queryStart + 1, queryEnd);
-      const searchParams = new URLSearchParams(queryString);
+    const parts = url.split(/[?#]/);
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i];
+      if (!part) continue;
+      const searchParams = new URLSearchParams(part);
       searchParams.forEach((value, key) => {
-        params[key] = value;
-      });
-    }
-
-    // 2. Extract from hash fragment (#...)
-    if (hashStart !== -1) {
-      const hashString = url.slice(hashStart + 1);
-      const hashParams = new URLSearchParams(hashString);
-      hashParams.forEach((value, key) => {
         params[key] = value;
       });
     }
@@ -715,8 +717,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 1. PKCE Authorization Code Exchange
     if (params.code) {
       const { data: exData, error: exError } = await supabase.auth.exchangeCodeForSession(params.code);
-      if (exError) return { success: false, error: new Error(exError.message) };
-      if (exData?.user) {
+      if (exError) {
+        console.warn('PKCE exchange warning:', exError.message);
+        // If code exchange failed (e.g. already consumed), check if live session is active
+        const { data: sData } = await supabase.auth.getSession();
+        if (sData?.session?.user) {
+          const prevUser = get().user;
+          if (!prevUser || prevUser.id !== sData.session.user.id) {
+            resetUserStores();
+          }
+          const profile = await get().ensureProfile(
+            sData.session.user.id,
+            sData.session.user.user_metadata?.full_name || sData.session.user.user_metadata?.name
+          );
+          set({ user: sData.session.user, profile, isLoading: false });
+          syncUserData(sData.session.user.id).catch(() => {});
+          return { success: true, error: null };
+        }
+        if (!params.access_token) {
+          return { success: false, error: new Error(exError.message) };
+        }
+      } else if (exData?.user) {
         const prevUser = get().user;
         if (!prevUser || prevUser.id !== exData.user.id) {
           resetUserStores();
@@ -753,6 +774,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
 
+    // 3. Fallback: check if session is already established
+    const { data: curSession } = await supabase.auth.getSession();
+    if (curSession?.session?.user) {
+      const prevUser = get().user;
+      if (!prevUser || prevUser.id !== curSession.session.user.id) {
+        resetUserStores();
+      }
+      const profile = await get().ensureProfile(
+        curSession.session.user.id,
+        curSession.session.user.user_metadata?.full_name || curSession.session.user.user_metadata?.name
+      );
+      set({ user: curSession.session.user, profile, isLoading: false });
+      syncUserData(curSession.session.user.id).catch(() => {});
+      return { success: true, error: null };
+    }
+
     return { success: false, error: new Error('No authentication tokens found in redirect URL') };
   },
 
@@ -762,6 +799,99 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
+      // 1. Mobile (Android/iOS): Native Google Account Chooser bottom sheet
+      if (Platform.OS !== 'web') {
+        try {
+          await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+          // Clear any cached credentials so account picker popup is always presented
+          try {
+            await GoogleSignin.signOut();
+          } catch {}
+
+          const signInRes = await GoogleSignin.signIn();
+
+          if (signInRes.type === 'cancelled') {
+            return { error: new Error('Google Sign-In was cancelled') };
+          }
+
+          const idToken = signInRes.data?.idToken || (signInRes as any).idToken;
+          if (!idToken) {
+            return { error: new Error('Google did not return an identity token. Please try again.') };
+          }
+
+          // Directly authenticate with Supabase using the Google ID Token (no browser redirects!)
+          const { data: sData, error: sErr } = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: idToken,
+          });
+
+          if (sErr) {
+            return { error: new Error(sErr.message) };
+          }
+
+          if (sData?.user) {
+            const u = sData.user;
+            const prevUser = get().user;
+            if (!prevUser || prevUser.id !== u.id) {
+              resetUserStores();
+            }
+
+            const googlePhoto =
+              signInRes.data?.user?.photo ||
+              u.user_metadata?.avatar_url ||
+              u.user_metadata?.picture ||
+              null;
+            const googlePhone =
+              (u as any).phone ||
+              u.user_metadata?.phone_number ||
+              u.user_metadata?.phone ||
+              null;
+
+            const profile = await get().ensureProfile(
+              u.id,
+              u.user_metadata?.full_name ||
+                u.user_metadata?.name ||
+                signInRes.data?.user?.name ||
+                'Traveler'
+            );
+
+            // Sync avatar or phone number to user profile if available
+            if (profile && (googlePhoto || googlePhone)) {
+              const updates: any = {};
+              if (!profile.avatar_url && googlePhoto) updates.avatar_url = googlePhoto;
+              if (!profile.phone_number && googlePhone) updates.phone_number = googlePhone;
+              if (Object.keys(updates).length > 0) {
+                await get().updateProfile(updates);
+              }
+            }
+
+            set({ user: u, profile: get().profile || profile, isLoading: false });
+            syncUserData(u.id).catch(() => {});
+            return { error: null };
+          }
+
+          return { error: new Error('Could not establish user session with Google.') };
+        } catch (nativeErr: any) {
+          console.warn('Native Google Sign-In notice:', nativeErr);
+          if (
+            nativeErr?.code === statusCodes.SIGN_IN_CANCELLED ||
+            nativeErr?.message?.toLowerCase().includes('cancel') ||
+            nativeErr?.type === 'cancelled'
+          ) {
+            return { error: new Error('Google Sign-In was cancelled') };
+          }
+          if (nativeErr?.code === statusCodes.IN_PROGRESS) {
+            return { error: new Error('Google Sign-In is already in progress') };
+          }
+          if (nativeErr?.code !== statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+            return { error: new Error(nativeErr?.message || 'Google Sign-In failed') };
+          }
+          // If Google Play Services is missing or unavailable, fallback to browser session below
+        }
+      }
+
+      // 2. Web or fallback: Browser OAuth with PKCE
       const redirectUrl = 'splityourtrip://';
 
       if (Platform.OS === 'web') {
@@ -775,7 +905,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return { error: null };
       }
 
-      // Mobile (iOS/Android): Use WebBrowser with PKCE and Implicit fallback
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -790,7 +919,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Set up deep link listener in case Android handles the redirect via native Intent
       let capturedUrl: string | null = null;
       const urlSubscription = Linking.addEventListener('url', event => {
-        if (event.url && event.url.startsWith('splityourtrip:')) {
+        if (
+          event.url &&
+          (event.url.startsWith('splityourtrip:') ||
+            event.url.includes('access_token=') ||
+            event.url.includes('code='))
+        ) {
           capturedUrl = event.url;
           try {
             WebBrowser.dismissBrowser();
@@ -803,15 +937,63 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         let finalUrl = res.type === 'success' && res.url ? res.url : capturedUrl;
 
-        // If not received yet and custom tab dismissed, wait briefly for any queued intent
-        if (!finalUrl && res.type === 'dismiss') {
-          await new Promise(resolve => setTimeout(resolve, 800));
-          finalUrl = capturedUrl;
+        // Poll for capturedUrl, initial URL, or already active session (essential on Android Custom Tabs)
+        const startWait = Date.now();
+        while (!finalUrl && Date.now() - startWait < 4000) {
+          if (capturedUrl) {
+            finalUrl = capturedUrl;
+            break;
+          }
+          try {
+            const initialUrl = await Linking.getInitialURL();
+            if (
+              initialUrl &&
+              (initialUrl.startsWith('splityourtrip:') ||
+                initialUrl.includes('access_token=') ||
+                initialUrl.includes('code='))
+            ) {
+              finalUrl = initialUrl;
+              break;
+            }
+          } catch {}
+
+          try {
+            const { data: sData } = await supabase.auth.getSession();
+            if (sData?.session?.user) {
+              const u = sData.session.user;
+              const prevUser = get().user;
+              if (!prevUser || prevUser.id !== u.id) {
+                resetUserStores();
+              }
+              const profile = await get().ensureProfile(
+                u.id,
+                u.user_metadata?.full_name || u.user_metadata?.name
+              );
+              set({ user: u, profile, isLoading: false });
+              syncUserData(u.id).catch(() => {});
+              return { error: null };
+            }
+          } catch {}
+
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
 
         if (finalUrl) {
           const authRes = await get().handleAuthUrl(finalUrl);
           if (authRes.error) return { error: authRes.error };
+          return { error: null };
+        }
+
+        // Final fallback: check if user session was established
+        const { data: lastCheck } = await supabase.auth.getSession();
+        if (lastCheck?.session?.user) {
+          const u = lastCheck.session.user;
+          const profile = await get().ensureProfile(
+            u.id,
+            u.user_metadata?.full_name || u.user_metadata?.name
+          );
+          set({ user: u, profile, isLoading: false });
+          syncUserData(u.id).catch(() => {});
           return { error: null };
         }
 
@@ -956,57 +1138,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Remote sync to Supabase (explicitly awaited for reliable persistence)
     if (isSupabaseConfigured && isValidUUID(effectiveUserId)) {
       // 1. Storage upload if base64 or file
-      if (newAvatar && newAvatar.startsWith('data:image')) {
+      if (newAvatar && (newAvatar.startsWith('data:image') || newAvatar.startsWith('file:') || newAvatar.startsWith('content:'))) {
         try {
-          const ext = newAvatar.includes('image/png') ? 'png' : 'jpg';
-          const fileName = `${effectiveUserId}/avatar_${Date.now()}.${ext}`;
-          const arrayBuffer = decodeBase64ToArrayBuffer(newAvatar);
-
-          const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
-            .from('avatars')
-            .upload(fileName, arrayBuffer, {
-              contentType: ext === 'png' ? 'image/png' : 'image/jpeg',
-              upsert: true,
-            });
-
-          if (!uploadErr && uploadData?.path) {
-            const { data: pubData } = supabaseAdmin.storage
-              .from('avatars')
-              .getPublicUrl(uploadData.path);
-            if (pubData?.publicUrl) {
-              cloudAvatar = pubData.publicUrl;
-            }
-          } else if (uploadErr) {
-            console.error('Avatar base64 upload error:', uploadErr.message);
-          }
-        } catch (uploadErr) {
-          console.error('Avatar base64 storage error:', uploadErr);
-        }
-      } else if (newAvatar && (newAvatar.startsWith('file:') || newAvatar.startsWith('content:'))) {
-        try {
-          const ext = newAvatar.split('.').pop()?.split('?')[0] || 'jpg';
-          const fileName = `${effectiveUserId}/avatar_${Date.now()}.${ext.length <= 4 ? ext : 'jpg'}`;
-          const formData = new FormData();
-          formData.append('file', {
-            uri: newAvatar,
-            name: `avatar.${ext}`,
-            type: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
-          } as any);
-
-          const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
-            .from('avatars')
-            .upload(fileName, formData, {
-              contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
-              upsert: true,
-            });
-
-          if (!uploadErr && uploadData?.path) {
-            const { data: pubData } = supabaseAdmin.storage
-              .from('avatars')
-              .getPublicUrl(uploadData.path);
-            if (pubData?.publicUrl) {
-              cloudAvatar = pubData.publicUrl;
-            }
+          const { uploadImageToSupabase } = require('../../services/imageUpload');
+          const ext = newAvatar.includes('image/png') ? 'png' : newAvatar.split('.').pop()?.split('?')[0] || 'jpg';
+          const cleanExt = ext.length <= 4 ? ext.toLowerCase() : 'jpg';
+          const fileName = `avatar_${effectiveUserId}_${Date.now()}.${cleanExt}`;
+          const mime = cleanExt === 'png' ? 'image/png' : 'image/jpeg';
+          const uploaded = await uploadImageToSupabase('avatars', `user_avatars/${fileName}`, newAvatar, mime);
+          if (uploaded && !uploaded.startsWith('file:') && !uploaded.startsWith('content:')) {
+            cloudAvatar = uploaded;
           }
         } catch (uploadErr) {
           console.error('Avatar storage upload error:', uploadErr);

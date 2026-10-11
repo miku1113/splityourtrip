@@ -74,10 +74,14 @@ export default function SharedPaymentScreen() {
       let currentText = params.sharedText || null;
 
       if (!currentUri && !currentText) {
-        const { getNativeSharedData } = await import('../src/services/receiptOcr');
+        const { getNativeSharedData, clearNativeSharedData } = await import('../src/services/receiptOcr');
         const nativeData = await getNativeSharedData();
         if (nativeData.imageUri) currentUri = nativeData.imageUri;
         if (nativeData.sharedText) currentText = nativeData.sharedText;
+        await clearNativeSharedData();
+      } else {
+        const { clearNativeSharedData } = await import('../src/services/receiptOcr');
+        await clearNativeSharedData();
       }
 
       if (currentUri) {

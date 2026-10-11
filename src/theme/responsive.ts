@@ -26,18 +26,29 @@ export const moderateScale = (size: number, factor = 0.5): number => {
 
 /**
  * Responsive font scale with strict boundary clamping.
- * - On small devices (e.g. 320px - 360px), smoothly scales down so long numbers/labels never wrap.
- * - On large devices / tablets (420px+), scales up moderately without ballooning.
- * - Minimum clamp of 0.82x and max clamp of 1.22x preserves pixel-perfect proportions across all Android/iOS screens.
+ * - On small/older devices (e.g. 320px - 360px), smoothly scales down so long numbers/labels never wrap.
+ * - Neutralizes excessive OS fontScale inflation (> 1.0) so text never balloons.
+ * - Minimum clamp of 0.78x and max clamp of 1.10x preserves pixel-perfect proportions across all Android/iOS screens.
  */
-export const scaleFont = (size: number, factor = 0.35): number => {
-  const scaled = size + (scale(size) - size) * factor;
-  const ratio = scaled / size;
-  const clampedRatio = Math.max(0.82, Math.min(1.22, ratio));
-  const finalSize = Math.round(size * clampedRatio);
-  // Ensure font is aligned to physical pixels
-  return Math.round(PixelRatio.roundToNearestPixel(finalSize));
+export const scaleFont = (size: number, factor = 0.45): number => {
+  const fontScale = PixelRatio.getFontScale() || 1.0;
+  const widthRatio = SCREEN_WIDTH / BASE_WIDTH;
+  
+  // On devices narrower than 375 (e.g. 320px - 360px old phones), gently scale down so layouts never break
+  const widthScaled = size * (1 + (widthRatio - 1) * factor);
+  
+  // If the OS fontScale is > 1.0, counteract the excess multiplier so text doesn't balloon
+  const compensated = fontScale > 1.0 ? widthScaled / fontScale : widthScaled;
+  
+  // Strict clamp: min 78% on ultra-compact screens, max 110% on large tablets
+  const clamped = Math.max(size * 0.78, Math.min(size * 1.10, compensated));
+  return Math.round(PixelRatio.roundToNearestPixel(clamped));
 };
+
+export const defaultFontProps = {
+  allowFontScaling: false,
+  maxFontSizeMultiplier: 1.0,
+} as const;
 
 // Percentage of screen width
 export const wp = (percentage: number): number => {

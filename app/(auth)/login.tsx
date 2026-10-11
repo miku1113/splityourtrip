@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const {
+    user,
     signInWithPassword,
     signUpWithPassword,
     signInWithGoogle,
@@ -36,6 +37,13 @@ export default function LoginScreen() {
     isConfigured,
   } = useAuthStore();
   const fetchTrips = useTripStore(state => state.fetchTrips);
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchTrips(user.id).catch(() => {});
+      router.replace('/(tabs)');
+    }
+  }, [user]);
 
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [fullName, setFullName] = useState('');
@@ -65,6 +73,7 @@ export default function LoginScreen() {
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
@@ -232,25 +241,34 @@ export default function LoginScreen() {
 
   const handleGoogleSignIn = async () => {
     setErrorMsg(null);
-    setLoading(true);
-    const { error } = await signInWithGoogle();
-    setLoading(false);
+    setGoogleLoading(true);
+    try {
+      const { error } = await signInWithGoogle();
 
-    if (error) {
-      if (
-        error.message.toLowerCase().includes('cancelled') ||
-        error.message.toLowerCase().includes('canceled')
-      ) {
+      if (error) {
+        if (
+          error.message.toLowerCase().includes('cancelled') ||
+          error.message.toLowerCase().includes('canceled')
+        ) {
+          return;
+        }
+        setErrorMsg(error.message);
         return;
       }
-      setErrorMsg(error.message);
-      return;
-    }
 
-    const currentUser = useAuthStore.getState().user;
-    if (currentUser) {
-      await fetchTrips(currentUser.id);
-      router.replace('/(tabs)');
+      const currentUser = useAuthStore.getState().user;
+      if (currentUser) {
+        // If the user entered their phone number on the signup/login form, sync it to their profile
+        const cleanPhone = phoneNumber.trim() ? `${selectedCurrency.dialCode} ${phoneNumber.trim()}` : '';
+        if (cleanPhone) {
+          await useAuthStore.getState().updateProfile({ phone_number: cleanPhone });
+        }
+
+        await fetchTrips(currentUser.id);
+        router.replace('/(tabs)');
+      }
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -653,10 +671,10 @@ export default function LoginScreen() {
                 style={[
                   styles.primaryBtn,
                   { backgroundColor: colors.primary },
-                  loading && styles.btnDisabled,
+                  (loading || googleLoading) && styles.btnDisabled,
                 ]}
                 onPress={activeTab === 'signin' ? handleSignIn : handleSignUp}
-                disabled={loading}
+                disabled={loading || googleLoading}
               >
                 {loading ? (
                   <ActivityIndicator color="#fff" />
@@ -682,15 +700,26 @@ export default function LoginScreen() {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
                   },
-                  loading && styles.btnDisabled,
+                  (loading || googleLoading) && styles.btnDisabled,
                 ]}
                 onPress={handleGoogleSignIn}
-                disabled={loading}
+                disabled={loading || googleLoading}
               >
-                <Ionicons name="logo-google" size={18} color="#EA4335" style={{ marginRight: 10 }} />
-                <Text style={[styles.googleBtnText, { color: colors.text }]}>
-                  Continue with Google
-                </Text>
+                {googleLoading ? (
+                  <>
+                    <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 10 }} />
+                    <Text style={[styles.googleBtnText, { color: colors.text }]}>
+                      Connecting to Google...
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="logo-google" size={18} color="#EA4335" style={{ marginRight: 10 }} />
+                    <Text style={[styles.googleBtnText, { color: colors.text }]}>
+                      Continue with Google
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           )}

@@ -1,7 +1,8 @@
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import { parseUpiReceipt, ParsedPayment } from './upiParser';
 
 const { SplitOcr } = NativeModules;
+const splitOcrEmitter = SplitOcr && Platform.OS === 'android' ? new NativeEventEmitter(SplitOcr) : null;
 
 export interface OcrResult {
   rawText: string;
@@ -52,6 +53,34 @@ export async function getNativeSharedData(): Promise<{ imageUri: string | null; 
     console.log('[receiptOcr] Error reading native shared data:', e);
     return { imageUri: null, sharedText: null };
   }
+}
+
+export async function clearNativeSharedData(): Promise<void> {
+  if (Platform.OS !== 'android' || !SplitOcr?.clearSharedData) {
+    return;
+  }
+  try {
+    await SplitOcr.clearSharedData();
+  } catch (e) {
+    console.log('[receiptOcr] Error clearing native shared data:', e);
+  }
+}
+
+export function subscribeToSharedData(
+  callback: (data: { imageUri: string | null; sharedText: string | null }) => void
+): () => void {
+  if (!splitOcrEmitter) {
+    return () => {};
+  }
+  const subscription = splitOcrEmitter.addListener('onSharedDataReceived', (data: any) => {
+    callback({
+      imageUri: data?.imageUri || null,
+      sharedText: data?.sharedText || null,
+    });
+  });
+  return () => {
+    subscription.remove();
+  };
 }
 
 /**

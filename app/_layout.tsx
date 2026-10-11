@@ -1,5 +1,5 @@
 import { useFonts } from 'expo-font';
-import { Stack, ThemeProvider, DarkTheme, DefaultTheme } from 'expo-router';
+import { Stack, ThemeProvider, DarkTheme, DefaultTheme, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useMemo } from 'react';
 import 'react-native-reanimated';
@@ -7,18 +7,22 @@ import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, useThemeStore } from '../src/theme/useThemeStore';
 import { useContactsStore } from '../src/features/contacts/useContactsStore';
+import { subscribeToSharedData } from '../src/services/receiptOcr';
 import { Platform, StatusBar, View, Text, TextInput } from 'react-native';
+import * as Linking from 'expo-linking';
 
 // Standardize responsive font behavior across devices (prevents accessibility zoom layout breakage)
 if ((Text as any).defaultProps == null) {
   (Text as any).defaultProps = {};
 }
-(Text as any).defaultProps.maxFontSizeMultiplier = 1.25;
+(Text as any).defaultProps.allowFontScaling = false;
+(Text as any).defaultProps.maxFontSizeMultiplier = 1.0;
 
 if ((TextInput as any).defaultProps == null) {
   (TextInput as any).defaultProps = {};
 }
-(TextInput as any).defaultProps.maxFontSizeMultiplier = 1.25;
+(TextInput as any).defaultProps.allowFontScaling = false;
+(TextInput as any).defaultProps.maxFontSizeMultiplier = 1.0;
 
 export {
   ErrorBoundary,
@@ -41,6 +45,8 @@ export default function RootLayout() {
   const initTrips = useTripStore(state => state.initTrips);
   const initContacts = useContactsStore(state => state.initContacts);
 
+  const router = useRouter();
+
   useEffect(() => {
     initTheme();
     initializeAuth().then(() => {
@@ -48,6 +54,55 @@ export default function RootLayout() {
     });
     initTrips();
     initContacts();
+
+    // Global listener for OAuth deep links (e.g. splityourtrip://...)
+    const handleDeepLink = async (event: { url: string }) => {
+      const url = event?.url;
+      if (
+        url &&
+        (url.startsWith('splityourtrip:') ||
+          url.includes('access_token=') ||
+          url.includes('code='))
+      ) {
+        console.log('[RootLayout] Deep link received:', url);
+        try {
+          const authRes = await useAuthStore.getState().handleAuthUrl(url);
+          if (authRes?.success) {
+            const loggedInUser = useAuthStore.getState().user;
+            if (loggedInUser?.id) {
+              await useTripStore.getState().fetchTrips(loggedInUser.id);
+            }
+            router.replace('/(tabs)');
+          }
+        } catch (err) {
+          console.warn('[RootLayout] Deep link auth handler error:', err);
+        }
+      }
+    };
+
+    const urlSub = Linking.addEventListener('url', handleDeepLink);
+    Linking.getInitialURL().then(initialUrl => {
+      if (initialUrl) handleDeepLink({ url: initialUrl });
+    }).catch(() => {});
+
+    // Listen for incoming share intents (e.g. screenshot or text shared into Split Your Trip)
+    const unsubscribeShared = subscribeToSharedData(shared => {
+      if (shared.imageUri || shared.sharedText) {
+        console.log('[RootLayout] Shared data event received:', shared);
+        router.push({
+          pathname: '/shared-payment',
+          params: {
+            imageUri: shared.imageUri || undefined,
+            sharedText: shared.sharedText || undefined,
+          },
+        });
+      }
+    });
+
+    return () => {
+      urlSub.remove();
+      unsubscribeShared();
+    };
   }, []);
 
   useEffect(() => {

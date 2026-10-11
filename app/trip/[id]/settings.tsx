@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,9 +23,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTripStore, TripMember } from '../../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import { useTheme } from '../../../src/theme/useThemeStore';
-import { useContactsStore, FriendContact } from '../../../src/features/contacts/useContactsStore';
-import { SUPPORTED_CURRENCIES, CurrencyItem, getCurrencyInfo } from '../../../src/services/currency';
+import { useContactsStore } from '../../../src/features/contacts/useContactsStore';
+import { SUPPORTED_CURRENCIES, getCurrencyInfo } from '../../../src/services/currency';
 import { uploadTripCoverImage } from '../../../src/services/imageUpload';
+import { scaleFont } from '../../../src/theme/responsive';
 
 const TRAVEL_PRESET_ICONS = [
   { label: 'Beach', icon: '🏖️' },
@@ -35,7 +36,7 @@ const TRAVEL_PRESET_ICONS = [
   { label: 'Roadtrip', icon: '🚗' },
   { label: 'City', icon: '🌆' },
   { label: 'Tropical', icon: '🌴' },
-  { label: 'Food & Dining', icon: '🍕' },
+  { label: 'Dining', icon: '🍕' },
   { label: 'Party', icon: '🎉' },
 ];
 
@@ -55,6 +56,8 @@ export default function TripSettingsScreen() {
     generateInviteCode,
     addMember,
     removeMember,
+    updateMemberRole,
+    leaveTrip,
     findContactByPhone,
     linkGuestWithContact,
     searchRegisteredUsers,
@@ -68,9 +71,10 @@ export default function TripSettingsScreen() {
   const currentMember = tripMembers.find(
     m => user?.id && (m.profile_id === user.id || m.user_id === user.id)
   );
+  const isTripCreator = trip?.created_by === user?.id;
   const isAdmin =
     currentMember?.role === 'admin' ||
-    trip?.created_by === user?.id ||
+    isTripCreator ||
     tripMembers.length === 0;
 
   const [tripName, setTripName] = useState(trip?.name || '');
@@ -78,10 +82,14 @@ export default function TripSettingsScreen() {
   const [imageUrl, setImageUrl] = useState<string | null>(trip?.image_url || null);
   const [currency, setCurrency] = useState(trip?.currency || 'INR');
   const [status, setStatus] = useState<'active' | 'settled' | 'archived'>(trip?.status || 'active');
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState(trip?.start_date || '');
+  const [endDate, setEndDate] = useState(trip?.end_date || '');
+  const [inviteCode, setInviteCode] = useState<string | null>(trip?.invite_code || null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [photoPickerVisible, setPhotoPickerVisible] = useState(false);
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
@@ -119,6 +127,9 @@ export default function TripSettingsScreen() {
       setImageUrl(trip.image_url || null);
       setCurrency(trip.currency || 'INR');
       setStatus(trip.status || 'active');
+      if (trip.start_date !== undefined) setStartDate(trip.start_date || '');
+      if (trip.end_date !== undefined) setEndDate(trip.end_date || '');
+      if (trip.invite_code) setInviteCode(trip.invite_code);
     }
   }, [trip]);
 
@@ -201,17 +212,25 @@ export default function TripSettingsScreen() {
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const localUri = result.assets[0].uri;
         setImageUrl(localUri);
         if (id) {
+          setIsUploadingPhoto(true);
           uploadTripCoverImage(id, localUri)
-            .then(cloudUrl => {
-              if (cloudUrl) setImageUrl(cloudUrl);
+            .then(async cloudUrl => {
+              if (cloudUrl && !cloudUrl.startsWith('file:')) {
+                setImageUrl(cloudUrl);
+                await updateTrip(id, { image_url: cloudUrl });
+              }
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => {
+              setIsUploadingPhoto(false);
+            });
         }
       }
     } catch (e: any) {
@@ -231,17 +250,25 @@ export default function TripSettingsScreen() {
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const localUri = result.assets[0].uri;
         setImageUrl(localUri);
         if (id) {
+          setIsUploadingPhoto(true);
           uploadTripCoverImage(id, localUri)
-            .then(cloudUrl => {
-              if (cloudUrl) setImageUrl(cloudUrl);
+            .then(async cloudUrl => {
+              if (cloudUrl && !cloudUrl.startsWith('file:')) {
+                setImageUrl(cloudUrl);
+                await updateTrip(id, { image_url: cloudUrl });
+              }
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => {
+              setIsUploadingPhoto(false);
+            });
         }
       }
     } catch (e: any) {
@@ -249,9 +276,24 @@ export default function TripSettingsScreen() {
     }
   };
 
-  const handleSelectPresetIcon = (emoji: string) => {
+  const handleSelectPresetIcon = async (emoji: string) => {
     setPhotoPickerVisible(false);
-    setImageUrl(`emoji:${emoji}`);
+    const emojiVal = `emoji:${emoji}`;
+    setImageUrl(emojiVal);
+    if (id) {
+      try {
+        await updateTrip(id, { image_url: emojiVal });
+      } catch {}
+    }
+  };
+
+  const handleRemoveCover = async () => {
+    setImageUrl(null);
+    if (id) {
+      try {
+        await updateTrip(id, { image_url: null });
+      } catch {}
+    }
   };
 
   const handleShareInvite = async () => {
@@ -261,6 +303,33 @@ export default function TripSettingsScreen() {
         message: `Join my trip "${tripName}" on Split Your Trip! Use invite code: ${code}\nOr open the app to join now.`,
       });
     } catch {}
+  };
+
+  const handleQuickStartDate = (offsetDays: number = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    const iso = d.toISOString().split('T')[0];
+    setStartDate(iso);
+    if (!endDate || endDate < iso) {
+      const ed = new Date(d);
+      ed.setDate(ed.getDate() + 3);
+      setEndDate(ed.toISOString().split('T')[0]);
+    }
+  };
+
+  const handleQuickDuration = (days: number) => {
+    const base = startDate ? new Date(startDate) : new Date();
+    const ed = new Date(base);
+    ed.setDate(ed.getDate() + days);
+    if (!startDate) {
+      setStartDate(base.toISOString().split('T')[0]);
+    }
+    setEndDate(ed.toISOString().split('T')[0]);
+  };
+
+  const handleClearDates = () => {
+    setStartDate('');
+    setEndDate('');
   };
 
   const handleToggleCompleteTrip = () => {
@@ -321,12 +390,30 @@ export default function TripSettingsScreen() {
     setIsSaving(true);
 
     try {
+      let finalCover = imageUrl;
+      if (finalCover && (finalCover.startsWith('file:') || finalCover.startsWith('content:'))) {
+        setIsUploadingPhoto(true);
+        try {
+          const cloud = await uploadTripCoverImage(id, finalCover);
+          if (cloud && !cloud.startsWith('file:') && !cloud.startsWith('content:')) {
+            finalCover = cloud;
+            setImageUrl(cloud);
+          }
+        } catch (uploadErr) {
+          console.warn('Cover upload notice:', uploadErr);
+        } finally {
+          setIsUploadingPhoto(false);
+        }
+      }
+
       const updated = await updateTrip(id, {
         name: tripName.trim(),
         description: description.trim(),
-        image_url: imageUrl,
+        image_url: finalCover,
         currency,
         status,
+        start_date: startDate.trim() || null,
+        end_date: endDate.trim() || null,
       });
 
       setIsSaving(false);
@@ -365,6 +452,65 @@ export default function TripSettingsScreen() {
               setIsDeleting(false);
             }
           },
+        },
+      ]
+    );
+  };
+
+  const handleLeaveTrip = () => {
+    if (!id || !user?.id) return;
+    Alert.alert(
+      'Leave Trip',
+      `Are you sure you want to leave "${tripName}"? You will be removed as a member and will no longer have access to this trip.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave Trip',
+          style: 'destructive',
+          onPress: async () => {
+            setIsLeaving(true);
+            try {
+              await leaveTrip(id, user.id);
+              Alert.alert('Left Trip', `You have left "${tripName}".`);
+              router.replace('/(tabs)');
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Could not leave trip.');
+              setIsLeaving(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleMemberRoleAction = (member: TripMember) => {
+    const isSelf = user?.id && (member.profile_id === user.id || member.user_id === user.id);
+    if (!id || !isAdmin || isSelf) return;
+
+    const isMemberAdmin = member.role === 'admin';
+    const nextRole = isMemberAdmin ? 'member' : 'admin';
+    const roleActionText = isMemberAdmin ? 'Demote to Member' : 'Promote to Admin';
+
+    Alert.alert(
+      `Manage ${member.display_name}`,
+      `Choose an action for ${member.display_name}:`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: roleActionText,
+          onPress: async () => {
+            try {
+              await updateMemberRole(id, member.id, nextRole);
+              Alert.alert('Role Updated', `"${member.display_name}" is now ${nextRole === 'admin' ? 'an Admin' : 'a Member'}.`);
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Could not change member role.');
+            }
+          },
+        },
+        {
+          text: 'Remove from Trip',
+          style: 'destructive',
+          onPress: () => handleRemoveMember(member),
         },
       ]
     );
@@ -478,7 +624,7 @@ export default function TripSettingsScreen() {
   const emojiValue = isEmojiImage ? imageUrl?.replace('emoji:', '') : '✈️';
 
   // Filter contacts for Add Member modal
-  const filteredContacts = React.useMemo(() => {
+  const filteredContacts = useMemo(() => {
     const q = addMemberSearch.trim().toLowerCase();
     const qDigits = q.replace(/[^0-9]/g, '');
     if (!q) return storeContacts.slice(0, 30);
@@ -492,7 +638,7 @@ export default function TripSettingsScreen() {
   }, [storeContacts, addMemberSearch]);
 
   // Filter contacts for Link modal
-  const filteredLinkContacts = React.useMemo(() => {
+  const filteredLinkContacts = useMemo(() => {
     const q = linkSearchQuery.trim().toLowerCase();
     const qDigits = q.replace(/[^0-9]/g, '');
     if (!q) return storeContacts.slice(0, 30);
@@ -509,7 +655,7 @@ export default function TripSettingsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Header Bar matching Chat & Info screens */}
+      {/* Header Bar */}
       <View
         style={[
           styles.headerBar,
@@ -528,10 +674,10 @@ export default function TripSettingsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1} allowFontScaling={false}>
             Trip Settings
           </Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1}>
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1} allowFontScaling={false}>
             {tripName || 'Manage Trip'}
           </Text>
         </View>
@@ -543,7 +689,7 @@ export default function TripSettingsScreen() {
           {isSaving ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.headerSaveBtnText}>Save</Text>
+            <Text style={styles.headerSaveBtnText} allowFontScaling={false}>Save</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -558,493 +704,643 @@ export default function TripSettingsScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-        {/* Cover / Banner Section */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Trip Cover & Photo</Text>
-          <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-            Personalize your trip with a scenic photo or custom travel icon.
-          </Text>
-
-          <View style={styles.bannerContainer}>
-            {imageUrl && !isEmojiImage ? (
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.coverImage}
-                onError={() => {
-                  console.warn('Cover preview failed, resetting image');
-                  setImageUrl(null);
-                }}
-              />
-            ) : (
-              <View style={[styles.coverFallback, { backgroundColor: colors.primaryLight }]}>
-                <Text style={styles.coverEmoji}>{emojiValue}</Text>
-                <Text style={[styles.coverFallbackText, { color: colors.primary }]}>
-                  {tripName || 'Trip'}
-                </Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={[styles.editCoverBadge, { backgroundColor: colors.card }]}
-              onPress={() => setPhotoPickerVisible(true)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="camera" size={16} color={colors.primary} />
-              <Text style={[styles.editCoverBadgeText, { color: colors.text }]}>
-                {imageUrl ? 'Change Photo' : 'Add Cover Photo'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Quick Preset Selector */}
-          <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-            Or Choose a Quick Travel Preset:
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
-            {TRAVEL_PRESET_ICONS.map((p, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={[
-                  styles.presetChip,
-                  {
-                    backgroundColor:
-                      isEmojiImage && emojiValue === p.icon
-                        ? colors.primaryLight
-                        : colors.inputBackground,
-                    borderColor:
-                      isEmojiImage && emojiValue === p.icon ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => handleSelectPresetIcon(p.icon)}
-              >
-                <Text style={styles.presetChipEmoji}>{p.icon}</Text>
-                <Text
-                  style={[
-                    styles.presetChipLabel,
-                    {
-                      color:
-                        isEmojiImage && emojiValue === p.icon ? colors.primary : colors.text,
-                    },
-                  ]}
-                >
-                  {p.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          {imageUrl && (
-            <TouchableOpacity
-              style={[styles.removeCoverBtn, { borderColor: colors.border }]}
-              onPress={() => setImageUrl(null)}
-            >
-              <Ionicons name="trash-outline" size={16} color={colors.danger} />
-              <Text style={[styles.removeCoverText, { color: colors.danger }]}>
-                Remove Cover Image
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Trip Details Form */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Trip Details</Text>
-
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Trip Name</Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-            value={tripName}
-            onChangeText={setTripName}
-            placeholder="e.g. Goa Trip 2026"
-            placeholderTextColor={colors.textMuted}
-          />
-
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-            Description / Itinerary Notes
-          </Text>
-          <TextInput
-            style={[
-              styles.input,
-              styles.textArea,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Add destinations, hotel bookings, flight details, or packing tips..."
-            placeholderTextColor={colors.textMuted}
-            multiline
-            numberOfLines={3}
-          />
-
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Base Currency</Text>
-          <TouchableOpacity
-            style={[
-              styles.currencySelectorBtn,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={() => setCurrencyModalVisible(true)}
-          >
-            <View style={styles.currencyBtnContent}>
-              <Text style={styles.currencyFlag}>{getCurrencyInfo(currency).flag}</Text>
-              <Text style={[styles.currencyText, { color: colors.text }]}>
-                {getCurrencyInfo(currency).code} ({getCurrencyInfo(currency).name})
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Trip Status</Text>
-          <View style={styles.statusSegmentRow}>
-            {(['active', 'settled', 'archived'] as const).map(s => {
-              const isSelected = status === s;
-              return (
-                <TouchableOpacity
-                  key={s}
-                  style={[
-                    styles.statusSegmentBtn,
-                    {
-                      backgroundColor: isSelected ? colors.primary : colors.inputBackground,
-                      borderColor: isSelected ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setStatus(s)}
-                >
-                  <Text
-                    style={[
-                      styles.statusSegmentText,
-                      { color: isSelected ? '#FFFFFF' : colors.textSecondary },
-                    ]}
-                  >
-                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* Invite & Members Card */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <View style={styles.cardHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-              Members ({tripMembers.length})
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              <TouchableOpacity
-                style={[styles.shareInvitePill, { backgroundColor: colors.primary }]}
-                onPress={() => setAddMemberModalVisible(true)}
-              >
-                <Ionicons name="person-add-outline" size={14} color="#FFFFFF" />
-                <Text style={[styles.shareInviteText, { color: '#FFFFFF' }]}>+ Add</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.shareInvitePill, { backgroundColor: colors.primaryLight }]}
-                onPress={handleShareInvite}
-              >
-                <Ionicons name="share-social-outline" size={14} color={colors.primary} />
-                <Text style={[styles.shareInviteText, { color: colors.primary }]}>Share Invite</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {inviteCode && (
-            <View style={[styles.inviteCodeBanner, { backgroundColor: colors.inputBackground }]}>
-              <Text style={[styles.inviteCodeLabel, { color: colors.textSecondary }]}>
-                Invite Code:
-              </Text>
-              <Text style={[styles.inviteCodeValue, { color: colors.primary }]}>{inviteCode}</Text>
-            </View>
-          )}
-
-          {tripMembers.map((m, idx) => {
-            const isSelf = user?.id && (m.profile_id === user.id || m.user_id === user.id);
-            const isAppUser = Boolean(m.profile_id);
-            const isUnlinked = Boolean(m.is_guest && !m.profile_id);
-
-            return (
-              <View
-                key={m.id || idx}
-                style={[
-                  styles.memberRow,
-                  { borderBottomColor: colors.borderLight },
-                  idx === tripMembers.length - 1 && { borderBottomWidth: 0 },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.memberAvatar,
-                    {
-                      backgroundColor: isAppUser ? colors.primary : isDark ? '#334155' : '#E2E8F0',
-                      overflow: 'hidden',
-                    },
-                  ]}
-                >
-                  {(isSelf && profile?.avatar_url) || (m as any).avatar_url ? (
-                    <Image
-                      source={{
-                        uri: (isSelf ? profile?.avatar_url : (m as any).avatar_url) || '',
-                      }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Text style={[styles.memberAvatarText, { color: isAppUser ? '#FFFFFF' : colors.text }]}>
-                      {(m.display_name || 'U').charAt(0).toUpperCase()}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.memberName, { color: colors.text }]}>
-                    {m.display_name} {isSelf && '(You)'}
-                  </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
-                    {m.phone_number && m.phone_number !== 'Linked Contact' ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                        <Ionicons name="call-outline" size={11} color={colors.textSecondary} />
-                        <Text style={{ fontSize: 11, color: colors.textSecondary }}>{m.phone_number}</Text>
-                      </View>
-                    ) : null}
-                    <View
-                      style={[
-                        styles.memberTypeBadge,
-                        {
-                          backgroundColor: isAppUser
-                            ? (isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF')
-                            : !isUnlinked
-                            ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5')
-                            : (isDark ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7'),
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          fontWeight: '700',
-                          color: isAppUser
-                            ? (isDark ? '#818CF8' : '#4F46E5')
-                            : !isUnlinked
-                            ? (isDark ? '#6EE7B7' : '#059669')
-                            : (isDark ? '#FBBF24' : '#D97706'),
-                        }}
-                      >
-                        {isAppUser ? '✨ App User' : !isUnlinked ? '📱 Contact' : '👤 Guest'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Member action buttons: Link Guest or Remove */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {isUnlinked && (
-                    <TouchableOpacity
-                      style={[styles.memberActionBtn, { backgroundColor: colors.primary }]}
-                      onPress={() => openLinkModal(m)}
-                    >
-                      <Ionicons name="link-outline" size={13} color="#FFFFFF" />
-                      <Text style={styles.memberActionBtnText}>Link</Text>
-                    </TouchableOpacity>
-                  )}
-                  {m.role === 'admin' ? (
-                    <View style={[styles.adminBadge, { backgroundColor: colors.warningBg }]}>
-                      <Text style={[styles.adminBadgeText, { color: colors.warning }]}>Admin</Text>
-                    </View>
-                  ) : isAdmin && !isSelf ? (
-                    <TouchableOpacity
-                      style={[styles.removeMemberIconBtn, { backgroundColor: colors.dangerBg }]}
-                      onPress={() => handleRemoveMember(m)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="trash-outline" size={15} color={colors.danger} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Admin Trip Actions / Complete Trip Card */}
-        {isAdmin && (
+          {/* Cover / Banner Section */}
           <View
             style={[
               styles.card,
               {
                 backgroundColor: colors.card,
-                borderColor: status === 'settled' ? colors.success : colors.primary,
-                borderWidth: 1.5,
+                borderColor: colors.border,
               },
             ]}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: status === 'settled' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#D1FAE5') : colors.primaryLight,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Ionicons
-                    name={status === 'settled' ? 'checkmark-done-circle' : 'shield-checkmark-outline'}
-                    size={20}
-                    color={status === 'settled' ? colors.success : colors.primary}
-                  />
-                </View>
-                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                  Trip Administration
-                </Text>
-              </View>
-              <View style={[styles.adminBadge, { backgroundColor: colors.primaryLight }]}>
-                <Text style={[styles.adminBadgeText, { color: colors.primary }]}>Admin Only</Text>
-              </View>
-            </View>
-
-            <Text style={[styles.sectionSub, { color: colors.textSecondary, marginBottom: 14 }]}>
-              {status === 'settled'
-                ? 'This trip is currently marked as Completed & Settled in the database. All members can view the finalized balances.'
-                : 'As an admin, you can mark this trip as completed once all expenses are settled. This is saved directly to the database.'}
+            <Text style={[styles.sectionTitle, { color: colors.text }]} allowFontScaling={false}>Trip Cover & Photo</Text>
+            <Text style={[styles.sectionSub, { color: colors.textSecondary }]} allowFontScaling={false}>
+              Personalize your trip with a scenic photo or custom travel icon.
             </Text>
 
-            <TouchableOpacity
-              style={[
-                styles.adminActionBtn,
-                {
-                  backgroundColor: status === 'settled'
-                    ? (isDark ? '#334155' : '#F1F5F9')
-                    : colors.success,
-                  borderColor: status === 'settled' ? colors.border : colors.success,
-                  borderWidth: 1,
-                },
-              ]}
-              onPress={handleToggleCompleteTrip}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <ActivityIndicator size="small" color={status === 'settled' ? colors.text : '#FFFFFF'} />
+            <View style={styles.bannerContainer}>
+              {imageUrl && !isEmojiImage ? (
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={styles.coverImage}
+                  onError={() => {
+                    console.warn('Cover preview failed, resetting image');
+                    setImageUrl(null);
+                  }}
+                />
               ) : (
-                <View style={styles.btnRow}>
-                  <Ionicons
-                    name={status === 'settled' ? 'refresh-outline' : 'checkmark-circle-outline'}
-                    size={19}
-                    color={status === 'settled' ? colors.text : '#FFFFFF'}
-                  />
-                  <Text
-                    style={[
-                      styles.adminActionBtnText,
-                      { color: status === 'settled' ? colors.text : '#FFFFFF' },
-                    ]}
-                  >
-                    {status === 'settled' ? 'Reopen Trip (Set Active in DB)' : 'Complete Trip (Save to DB)'}
+                <View style={[styles.coverFallback, { backgroundColor: colors.primaryLight }]}>
+                  <Text style={styles.coverEmoji} allowFontScaling={false}>{emojiValue}</Text>
+                  <Text style={[styles.coverFallbackText, { color: colors.primary }]} allowFontScaling={false}>
+                    {tripName || 'Trip'}
                   </Text>
                 </View>
               )}
-            </TouchableOpacity>
+
+              {isUploadingPhoto && (
+                <View style={styles.uploadingOverlay}>
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text style={styles.uploadingText} allowFontScaling={false}>Uploading Cover...</Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.editCoverBadge, { backgroundColor: colors.card }]}
+                onPress={() => setPhotoPickerVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="camera" size={16} color={colors.primary} />
+                <Text style={[styles.editCoverBadgeText, { color: colors.text }]} allowFontScaling={false}>
+                  {imageUrl ? 'Change Photo' : 'Add Cover Photo'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Quick Preset Selector */}
+            <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]} allowFontScaling={false}>
+              Or Choose a Quick Travel Preset:
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
+              {TRAVEL_PRESET_ICONS.map((p, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[
+                    styles.presetChip,
+                    {
+                      backgroundColor:
+                        isEmojiImage && emojiValue === p.icon
+                          ? colors.primaryLight
+                          : colors.inputBackground,
+                      borderColor:
+                        isEmojiImage && emojiValue === p.icon ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => handleSelectPresetIcon(p.icon)}
+                >
+                  <Text style={styles.presetChipEmoji} allowFontScaling={false}>{p.icon}</Text>
+                  <Text
+                    style={[
+                      styles.presetChipLabel,
+                      {
+                        color:
+                          isEmojiImage && emojiValue === p.icon ? colors.primary : colors.text,
+                      },
+                    ]}
+                    allowFontScaling={false}
+                  >
+                    {p.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {imageUrl && (
+              <TouchableOpacity
+                style={[styles.removeCoverBtn, { borderColor: colors.border }]}
+                onPress={handleRemoveCover}
+              >
+                <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                <Text style={[styles.removeCoverText, { color: colors.danger }]} allowFontScaling={false}>
+                  Remove Cover Image
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
-        )}
 
-        {/* Danger Zone */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.danger,
-              borderWidth: 1,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionTitle, { color: colors.danger }]}>Danger Zone</Text>
-          <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
-            Deleting this trip permanently purges all records, expenses, splits, and messages from the cloud database.
-          </Text>
-
-          <TouchableOpacity
-            style={[styles.deleteBtn, { backgroundColor: colors.dangerBg }]}
-            onPress={handleDeleteTrip}
-            disabled={isDeleting}
+          {/* Trip Details Form */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
           >
-            {isDeleting ? (
-              <ActivityIndicator color={colors.danger} />
+            <Text style={[styles.sectionTitle, { color: colors.text }]} allowFontScaling={false}>Trip Details</Text>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>Trip Name *</Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              value={tripName}
+              onChangeText={setTripName}
+              placeholder="e.g. Goa Trip 2026"
+              placeholderTextColor={colors.textMuted}
+              allowFontScaling={false}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>
+              Description / Itinerary Notes
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                styles.textArea,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Add destinations, hotel bookings, flight details, or packing tips..."
+              placeholderTextColor={colors.textMuted}
+              multiline
+              numberOfLines={3}
+              allowFontScaling={false}
+            />
+
+            {/* Trip Dates Setting */}
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>
+              Trip Dates & Duration
+            </Text>
+            <View style={styles.dateRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.subLabel, { color: colors.textSecondary }]} allowFontScaling={false}>Start Date</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.border,
+                      color: colors.text,
+                      marginBottom: 6,
+                    },
+                  ]}
+                  value={startDate}
+                  onChangeText={setStartDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textMuted}
+                  allowFontScaling={false}
+                />
+              </View>
+              <View style={{ width: 12 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.subLabel, { color: colors.textSecondary }]} allowFontScaling={false}>End Date</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.border,
+                      color: colors.text,
+                      marginBottom: 6,
+                    },
+                  ]}
+                  value={endDate}
+                  onChangeText={setEndDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textMuted}
+                  allowFontScaling={false}
+                />
+              </View>
+            </View>
+
+            {/* Quick Date Shortcuts */}
+            <View style={styles.quickDateChipsRow}>
+              <TouchableOpacity
+                style={[styles.quickDateChip, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
+                onPress={() => handleQuickStartDate(0)}
+              >
+                <Text style={[styles.quickDateChipText, { color: colors.text }]} allowFontScaling={false}>Starts Today</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.quickDateChip, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
+                onPress={() => handleQuickDuration(3)}
+              >
+                <Text style={[styles.quickDateChipText, { color: colors.text }]} allowFontScaling={false}>+3 Days</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.quickDateChip, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
+                onPress={() => handleQuickDuration(7)}
+              >
+                <Text style={[styles.quickDateChipText, { color: colors.text }]} allowFontScaling={false}>1 Week</Text>
+              </TouchableOpacity>
+              {(startDate || endDate) && (
+                <TouchableOpacity
+                  style={[styles.quickDateChip, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}
+                  onPress={handleClearDates}
+                >
+                  <Text style={[styles.quickDateChipText, { color: colors.danger }]} allowFontScaling={false}>Clear</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]} allowFontScaling={false}>Base Currency</Text>
+            <TouchableOpacity
+              style={[
+                styles.currencySelectorBtn,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={() => setCurrencyModalVisible(true)}
+            >
+              <View style={styles.currencyBtnContent}>
+                <Text style={styles.currencyFlag} allowFontScaling={false}>{getCurrencyInfo(currency).flag}</Text>
+                <Text style={[styles.currencyText, { color: colors.text }]} allowFontScaling={false}>
+                  {getCurrencyInfo(currency).code} ({getCurrencyInfo(currency).name})
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>Trip Status</Text>
+            <View style={styles.statusSegmentRow}>
+              {(['active', 'settled', 'archived'] as const).map(s => {
+                const isSelected = status === s;
+                return (
+                  <TouchableOpacity
+                    key={s}
+                    style={[
+                      styles.statusSegmentBtn,
+                      {
+                        backgroundColor: isSelected ? colors.primary : colors.inputBackground,
+                        borderColor: isSelected ? colors.primary : colors.border,
+                      },
+                    ]}
+                    onPress={() => setStatus(s)}
+                  >
+                    <Text
+                      style={[
+                        styles.statusSegmentText,
+                        { color: isSelected ? '#FFFFFF' : colors.textSecondary },
+                      ]}
+                      allowFontScaling={false}
+                    >
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Invite & Members Card */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.cardHeaderRow}>
+              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]} allowFontScaling={false}>
+                Members ({tripMembers.length})
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={[styles.shareInvitePill, { backgroundColor: colors.primary }]}
+                  onPress={() => setAddMemberModalVisible(true)}
+                >
+                  <Ionicons name="person-add-outline" size={14} color="#FFFFFF" />
+                  <Text style={[styles.shareInviteText, { color: '#FFFFFF' }]} allowFontScaling={false}>+ Add</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.shareInvitePill, { backgroundColor: colors.primaryLight }]}
+                  onPress={handleShareInvite}
+                >
+                  <Ionicons name="share-social-outline" size={14} color={colors.primary} />
+                  <Text style={[styles.shareInviteText, { color: colors.primary }]} allowFontScaling={false}>Share Invite</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {inviteCode && (
+              <View style={[styles.inviteCodeBanner, { backgroundColor: colors.inputBackground }]}>
+                <View>
+                  <Text style={[styles.inviteCodeLabel, { color: colors.textSecondary }]} allowFontScaling={false}>
+                    Trip Invite Code:
+                  </Text>
+                  <Text style={[styles.inviteCodeValue, { color: colors.primary }]} allowFontScaling={false}>{inviteCode}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.smallCopyBtn, { backgroundColor: colors.primaryLight }]}
+                  onPress={handleShareInvite}
+                >
+                  <Ionicons name="copy-outline" size={14} color={colors.primary} />
+                  <Text style={[styles.smallCopyText, { color: colors.primary }]} allowFontScaling={false}>Share</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {tripMembers.map((m, idx) => {
+              const isSelf = Boolean(user?.id && (m.profile_id === user.id || m.user_id === user.id));
+              const isAppUser = Boolean(m.profile_id);
+              const isUnlinked = Boolean(m.is_guest && !m.profile_id);
+
+              return (
+                <View
+                  key={m.id || idx}
+                  style={[
+                    styles.memberRow,
+                    { borderBottomColor: colors.borderLight },
+                    idx === tripMembers.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.memberAvatar,
+                      {
+                        backgroundColor: isAppUser ? colors.primary : isDark ? '#334155' : '#E2E8F0',
+                        overflow: 'hidden',
+                      },
+                    ]}
+                  >
+                    {(isSelf && profile?.avatar_url) || (m as any).avatar_url ? (
+                      <Image
+                        source={{
+                          uri: (isSelf ? profile?.avatar_url : (m as any).avatar_url) || '',
+                        }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={[styles.memberAvatarText, { color: isAppUser ? '#FFFFFF' : colors.text }]} allowFontScaling={false}>
+                        {(m.display_name || 'U').charAt(0).toUpperCase()}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.memberName, { color: colors.text }]} allowFontScaling={false}>
+                      {m.display_name} {isSelf && '(You)'}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                      {m.phone_number && m.phone_number !== 'Linked Contact' ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                          <Ionicons name="call-outline" size={11} color={colors.textSecondary} />
+                          <Text style={{ fontSize: scaleFont(11), color: colors.textSecondary }} allowFontScaling={false}>{m.phone_number}</Text>
+                        </View>
+                      ) : null}
+                      <View
+                        style={[
+                          styles.memberTypeBadge,
+                          {
+                            backgroundColor: isAppUser
+                              ? (isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF')
+                              : !isUnlinked
+                              ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5')
+                              : (isDark ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7'),
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            fontSize: scaleFont(10),
+                            fontWeight: '700',
+                            color: isAppUser
+                              ? (isDark ? '#818CF8' : '#4F46E5')
+                              : !isUnlinked
+                              ? (isDark ? '#6EE7B7' : '#059669')
+                              : (isDark ? '#FBBF24' : '#D97706'),
+                          }}
+                          allowFontScaling={false}
+                        >
+                          {isAppUser ? '✨ App User' : !isUnlinked ? '📱 Contact' : '👤 Guest'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Member action buttons */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {isUnlinked && (
+                      <TouchableOpacity
+                        style={[styles.memberActionBtn, { backgroundColor: colors.primary }]}
+                        onPress={() => openLinkModal(m)}
+                      >
+                        <Ionicons name="link-outline" size={13} color="#FFFFFF" />
+                        <Text style={styles.memberActionBtnText} allowFontScaling={false}>Link</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* Role badge with admin management tap */}
+                    <TouchableOpacity
+                      style={[
+                        styles.adminBadge,
+                        {
+                          backgroundColor: m.role === 'admin' ? colors.warningBg : colors.inputBackground,
+                          borderColor: m.role === 'admin' ? colors.warning : colors.border,
+                          borderWidth: 1,
+                        },
+                      ]}
+                      onPress={() => handleMemberRoleAction(m)}
+                      disabled={!isAdmin || isSelf}
+                    >
+                      <Text
+                        style={[
+                          styles.adminBadgeText,
+                          { color: m.role === 'admin' ? colors.warning : colors.textSecondary },
+                        ]}
+                        allowFontScaling={false}
+                      >
+                        {m.role === 'admin' ? 'Admin' : 'Member'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {isAdmin && !isSelf && (
+                      <TouchableOpacity
+                        style={[styles.removeMemberIconBtn, { backgroundColor: colors.dangerBg }]}
+                        onPress={() => handleRemoveMember(m)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="trash-outline" size={15} color={colors.danger} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Admin Trip Actions / Complete Trip Card */}
+          {isAdmin && (
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: status === 'settled' ? colors.success : colors.primary,
+                  borderWidth: 1.5,
+                },
+              ]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: status === 'settled' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#D1FAE5') : colors.primaryLight,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Ionicons
+                      name={status === 'settled' ? 'checkmark-done-circle' : 'shield-checkmark-outline'}
+                      size={20}
+                      color={status === 'settled' ? colors.success : colors.primary}
+                    />
+                  </View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]} allowFontScaling={false}>
+                    Trip Administration
+                  </Text>
+                </View>
+                <View style={[styles.adminBadge, { backgroundColor: colors.primaryLight }]}>
+                  <Text style={[styles.adminBadgeText, { color: colors.primary }]} allowFontScaling={false}>Admin Only</Text>
+                </View>
+              </View>
+
+              <Text style={[styles.sectionSub, { color: colors.textSecondary, marginBottom: 14 }]} allowFontScaling={false}>
+                {status === 'settled'
+                  ? 'This trip is currently marked as Completed & Settled in the database. All members can view the finalized balances.'
+                  : 'As an admin, you can mark this trip as completed once all expenses are settled. This is saved directly to the database.'}
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.adminActionBtn,
+                  {
+                    backgroundColor: status === 'settled'
+                      ? (isDark ? '#334155' : '#F1F5F9')
+                      : colors.success,
+                    borderColor: status === 'settled' ? colors.border : colors.success,
+                    borderWidth: 1,
+                  },
+                ]}
+                onPress={handleToggleCompleteTrip}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color={status === 'settled' ? colors.text : '#FFFFFF'} />
+                ) : (
+                  <View style={styles.btnRow}>
+                    <Ionicons
+                      name={status === 'settled' ? 'refresh-outline' : 'checkmark-circle-outline'}
+                      size={19}
+                      color={status === 'settled' ? colors.text : '#FFFFFF'}
+                    />
+                    <Text
+                      style={[
+                        styles.adminActionBtnText,
+                        { color: status === 'settled' ? colors.text : '#FFFFFF' },
+                      ]}
+                      allowFontScaling={false}
+                    >
+                      {status === 'settled' ? 'Reopen Trip (Set Active in DB)' : 'Complete Trip (Save to DB)'}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Danger Zone / Leave Trip */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.danger,
+                borderWidth: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.danger }]} allowFontScaling={false}>Danger Zone</Text>
+
+            {/* Leave Trip (For non-creator or multi-member trips) */}
+            {user?.id && (!isTripCreator || tripMembers.length > 1) && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[styles.sectionSub, { color: colors.textSecondary, marginBottom: 8 }]} allowFontScaling={false}>
+                  Want to leave this trip? You will no longer see updates or expenses from this group.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.leaveBtn, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}
+                  onPress={handleLeaveTrip}
+                  disabled={isLeaving}
+                >
+                  {isLeaving ? (
+                    <ActivityIndicator color={colors.warning} size="small" />
+                  ) : (
+                    <View style={styles.btnRow}>
+                      <Ionicons name="exit-outline" size={17} color={colors.warning} />
+                      <Text style={[styles.leaveBtnText, { color: colors.warning }]} allowFontScaling={false}>
+                        Leave Trip
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Delete Trip Permanently (Creator / Admin only) */}
+            {isAdmin && (
+              <View>
+                <Text style={[styles.sectionSub, { color: colors.textSecondary, marginBottom: 8 }]} allowFontScaling={false}>
+                  Deleting this trip permanently purges all records, expenses, splits, and messages from the cloud database.
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.deleteBtn, { backgroundColor: colors.dangerBg }]}
+                  onPress={handleDeleteTrip}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <ActivityIndicator color={colors.danger} />
+                  ) : (
+                    <View style={styles.btnRow}>
+                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                      <Text style={[styles.deleteBtnText, { color: colors.danger }]} allowFontScaling={false}>
+                        Delete Trip Permanently (From DB)
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          {/* Bottom Save Action */}
+          <TouchableOpacity
+            style={[
+              styles.mainSaveBtn,
+              { backgroundColor: savedSuccess ? colors.success : colors.primary },
+              isSaving && { opacity: 0.75 },
+            ]}
+            onPress={handleSave}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <View style={styles.btnRow}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.mainSaveBtnText} allowFontScaling={false}>Saving changes to database...</Text>
+              </View>
+            ) : savedSuccess ? (
+              <View style={styles.btnRow}>
+                <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+                <Text style={styles.mainSaveBtnText} allowFontScaling={false}>Trip Updated in Database!</Text>
+              </View>
             ) : (
               <View style={styles.btnRow}>
-                <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                <Text style={[styles.deleteBtnText, { color: colors.danger }]}>
-                  Delete Trip Permanently (From DB)
-                </Text>
+                <Ionicons name="save-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.mainSaveBtnText} allowFontScaling={false}>Save Trip Changes to Database</Text>
               </View>
             )}
           </TouchableOpacity>
-        </View>
-
-        {/* Bottom Save Action */}
-        <TouchableOpacity
-          style={[
-            styles.mainSaveBtn,
-            { backgroundColor: savedSuccess ? colors.success : colors.primary },
-            isSaving && { opacity: 0.75 },
-          ]}
-          onPress={handleSave}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <View style={styles.btnRow}>
-              <ActivityIndicator color="#FFFFFF" size="small" />
-              <Text style={styles.mainSaveBtnText}>Saving changes to database...</Text>
-            </View>
-          ) : savedSuccess ? (
-            <View style={styles.btnRow}>
-              <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-              <Text style={styles.mainSaveBtnText}>Trip Updated in Database!</Text>
-            </View>
-          ) : (
-            <View style={styles.btnRow}>
-              <Ionicons name="save-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.mainSaveBtnText}>Save Trip Changes to Database</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
       </KeyboardAvoidingView>
 
       {/* Photo Picker Modal */}
@@ -1060,7 +1356,7 @@ export default function TripSettingsScreen() {
             ]}
           >
             <View style={styles.modalHeaderRow}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Trip Cover Photo</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>Trip Cover Photo</Text>
               <TouchableOpacity onPress={() => setPhotoPickerVisible(false)}>
                 <Ionicons name="close-circle" size={24} color={colors.textMuted} />
               </TouchableOpacity>
@@ -1071,10 +1367,10 @@ export default function TripSettingsScreen() {
                 <Ionicons name="images-outline" size={22} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.actionTitle, { color: colors.text }]}>
+                <Text style={[styles.actionTitle, { color: colors.text }]} allowFontScaling={false}>
                   Choose from Photos
                 </Text>
-                <Text style={[styles.actionSub, { color: colors.textSecondary }]}>
+                <Text style={[styles.actionSub, { color: colors.textSecondary }]} allowFontScaling={false}>
                   Pick a landscape banner or photo from library
                 </Text>
               </View>
@@ -1086,8 +1382,8 @@ export default function TripSettingsScreen() {
                 <Ionicons name="camera-outline" size={22} color={colors.text} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.actionTitle, { color: colors.text }]}>Take Photo</Text>
-                <Text style={[styles.actionSub, { color: colors.textSecondary }]}>
+                <Text style={[styles.actionTitle, { color: colors.text }]} allowFontScaling={false}>Take Photo</Text>
+                <Text style={[styles.actionSub, { color: colors.textSecondary }]} allowFontScaling={false}>
                   Use camera to capture trip surroundings
                 </Text>
               </View>
@@ -1110,7 +1406,7 @@ export default function TripSettingsScreen() {
             ]}
           >
             <View style={styles.modalHeaderRow}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>
                 Select Trip Currency
               </Text>
               <TouchableOpacity
@@ -1136,6 +1432,7 @@ export default function TripSettingsScreen() {
               placeholderTextColor={colors.textMuted}
               value={currencySearch}
               onChangeText={setCurrencySearch}
+              allowFontScaling={false}
             />
 
             <FlatList
@@ -1162,12 +1459,12 @@ export default function TripSettingsScreen() {
                       setCurrencySearch('');
                     }}
                   >
-                    <Text style={styles.currencyRowFlag}>{item.flag}</Text>
+                    <Text style={styles.currencyRowFlag} allowFontScaling={false}>{item.flag}</Text>
                     <View style={styles.currencyRowInfo}>
-                      <Text style={[styles.currencyRowCountry, { color: colors.text }]}>
+                      <Text style={[styles.currencyRowCountry, { color: colors.text }]} allowFontScaling={false}>
                         {item.country} ({item.name})
                       </Text>
-                      <Text style={[styles.currencyRowSub, { color: colors.textSecondary }]}>
+                      <Text style={[styles.currencyRowSub, { color: colors.textSecondary }]} allowFontScaling={false}>
                         Symbol: {item.symbol} • Code: {item.code}
                       </Text>
                     </View>
@@ -1199,8 +1496,8 @@ export default function TripSettingsScreen() {
           >
             <View style={styles.modalHeaderRow}>
               <View>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Add Member to Trip</Text>
-                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>Add Member to Trip</Text>
+                <Text style={{ fontSize: scaleFont(12), color: colors.textSecondary, marginTop: 2 }} allowFontScaling={false}>
                   Add from contacts, search app users, or add guest
                 </Text>
               </View>
@@ -1223,6 +1520,7 @@ export default function TripSettingsScreen() {
                     styles.tabSegmentText,
                     { color: addMemberTab === 'contacts' ? '#FFFFFF' : colors.textSecondary },
                   ]}
+                  allowFontScaling={false}
                 >
                   Contacts & App Users
                 </Text>
@@ -1239,6 +1537,7 @@ export default function TripSettingsScreen() {
                     styles.tabSegmentText,
                     { color: addMemberTab === 'manual' ? '#FFFFFF' : colors.textSecondary },
                   ]}
+                  allowFontScaling={false}
                 >
                   Manual Guest
                 </Text>
@@ -1260,13 +1559,14 @@ export default function TripSettingsScreen() {
                   placeholderTextColor={colors.textMuted}
                   value={addMemberSearch}
                   onChangeText={setAddMemberSearch}
+                  allowFontScaling={false}
                 />
 
                 <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
                   {/* Registered Users Section */}
                   {registeredUserResults.length > 0 && (
                     <View style={{ marginBottom: 12 }}>
-                      <Text style={[styles.subHeadingText, { color: colors.primary }]}>
+                      <Text style={[styles.subHeadingText, { color: colors.primary }]} allowFontScaling={false}>
                         ✨ Registered Users Found in Database:
                       </Text>
                       {registeredUserResults.map(ru => (
@@ -1283,15 +1583,15 @@ export default function TripSettingsScreen() {
                               { backgroundColor: colors.primary },
                             ]}
                           >
-                            <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>
+                            <Text style={{ color: '#FFFFFF', fontWeight: '700' }} allowFontScaling={false}>
                               {(ru.full_name || 'U').charAt(0).toUpperCase()}
                             </Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.contactRowName, { color: colors.text }]}>
+                            <Text style={[styles.contactRowName, { color: colors.text }]} allowFontScaling={false}>
                               {ru.full_name}
                             </Text>
-                            <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                            <Text style={{ fontSize: scaleFont(11), color: colors.textSecondary }} allowFontScaling={false}>
                               {ru.phone_number || '✨ SplitYourTrip Account'}
                             </Text>
                           </View>
@@ -1304,7 +1604,7 @@ export default function TripSettingsScreen() {
                             })}
                             disabled={isAddingMember}
                           >
-                            <Text style={styles.smallAddBtnText}>+ Add</Text>
+                            <Text style={styles.smallAddBtnText} allowFontScaling={false}>+ Add</Text>
                           </TouchableOpacity>
                         </View>
                       ))}
@@ -1312,7 +1612,7 @@ export default function TripSettingsScreen() {
                   )}
 
                   {/* Device Contacts */}
-                  <Text style={[styles.subHeadingText, { color: colors.textSecondary }]}>
+                  <Text style={[styles.subHeadingText, { color: colors.textSecondary }]} allowFontScaling={false}>
                     Phone Contacts ({filteredContacts.length})
                   </Text>
                   {filteredContacts.map(c => {
@@ -1330,14 +1630,14 @@ export default function TripSettingsScreen() {
                         ]}
                       >
                         <View style={[styles.miniAvatar, { backgroundColor: colors.primaryLight }]}>
-                          <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                          <Text style={{ color: colors.primary, fontWeight: '700' }} allowFontScaling={false}>
                             {c.name.charAt(0).toUpperCase()}
                           </Text>
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={[styles.contactRowName, { color: colors.text }]}>{c.name}</Text>
+                          <Text style={[styles.contactRowName, { color: colors.text }]} allowFontScaling={false}>{c.name}</Text>
                           {c.phoneNumber && (
-                            <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                            <Text style={{ fontSize: scaleFont(11), color: colors.textSecondary }} allowFontScaling={false}>
                               {c.phoneNumber}
                             </Text>
                           )}
@@ -1361,6 +1661,7 @@ export default function TripSettingsScreen() {
                               styles.smallAddBtnText,
                               alreadyAdded && { color: colors.textSecondary },
                             ]}
+                            allowFontScaling={false}
                           >
                             {alreadyAdded ? 'Added' : '+ Add'}
                           </Text>
@@ -1372,7 +1673,7 @@ export default function TripSettingsScreen() {
               </View>
             ) : (
               <View style={{ paddingTop: 8 }}>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Guest Name *</Text>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>Guest Name *</Text>
                 <TextInput
                   style={[
                     styles.input,
@@ -1386,9 +1687,10 @@ export default function TripSettingsScreen() {
                   placeholderTextColor={colors.textMuted}
                   value={addManualName}
                   onChangeText={setAddManualName}
+                  allowFontScaling={false}
                 />
 
-                <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]} allowFontScaling={false}>
                   Phone Number (Optional - Saves to DB)
                 </Text>
                 <TextInput
@@ -1405,6 +1707,7 @@ export default function TripSettingsScreen() {
                   keyboardType="phone-pad"
                   value={addManualPhone}
                   onChangeText={setAddManualPhone}
+                  allowFontScaling={false}
                 />
 
                 {/* DB Match Indicator */}
@@ -1420,10 +1723,10 @@ export default function TripSettingsScreen() {
                   >
                     <Ionicons name="checkmark-circle" size={18} color={colors.success} />
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.foundDbName, { color: colors.text }]}>
+                      <Text style={[styles.foundDbName, { color: colors.text }]} allowFontScaling={false}>
                         Found in database: "{addDbResult.name}"
                       </Text>
-                      <Text style={{ fontSize: 11, color: colors.success, marginTop: 1 }}>
+                      <Text style={{ fontSize: scaleFont(11), color: colors.success, marginTop: 1 }} allowFontScaling={false}>
                         {addDbResult.isAppUser ? '✨ Registered User Account' : '📱 Linked Contact'}
                       </Text>
                     </View>
@@ -1431,7 +1734,7 @@ export default function TripSettingsScreen() {
                       style={[styles.smallAddBtn, { backgroundColor: colors.success }]}
                       onPress={() => setAddManualName(addDbResult.name)}
                     >
-                      <Text style={styles.smallAddBtnText}>Use Name</Text>
+                      <Text style={styles.smallAddBtnText} allowFontScaling={false}>Use Name</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -1447,7 +1750,7 @@ export default function TripSettingsScreen() {
                   {isAddingMember ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.mainSaveBtnText}>+ Add to Trip</Text>
+                    <Text style={styles.mainSaveBtnText} allowFontScaling={false}>+ Add to Trip</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -1473,10 +1776,10 @@ export default function TripSettingsScreen() {
           >
             <View style={styles.modalHeaderRow}>
               <View>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>
+                <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>
                   Link "{linkingMember?.display_name}"
                 </Text>
-                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                <Text style={{ fontSize: scaleFont(12), color: colors.textSecondary, marginTop: 2 }} allowFontScaling={false}>
                   Link with a phone number or contact in the database
                 </Text>
               </View>
@@ -1487,7 +1790,7 @@ export default function TripSettingsScreen() {
 
             {/* Direct Phone Number Input with live DB lookup */}
             <View style={{ marginBottom: 16 }}>
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>
                 Link by Phone Number:
               </Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -1506,6 +1809,7 @@ export default function TripSettingsScreen() {
                   keyboardType="phone-pad"
                   value={linkManualPhone}
                   onChangeText={setLinkManualPhone}
+                  allowFontScaling={false}
                 />
                 {isCheckingPhone && (
                   <View style={{ justifyContent: 'center', paddingHorizontal: 8 }}>
@@ -1528,14 +1832,14 @@ export default function TripSettingsScreen() {
                 >
                   <Ionicons name="checkmark-circle" size={22} color={colors.success} />
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.foundDbName, { color: colors.text }]}>
+                    <Text style={[styles.foundDbName, { color: colors.text }]} allowFontScaling={false}>
                       Found in database: "{linkDbResult.name}"
                     </Text>
-                    <Text style={{ fontSize: 11, color: colors.success, marginTop: 1 }}>
+                    <Text style={{ fontSize: scaleFont(11), color: colors.success, marginTop: 1 }} allowFontScaling={false}>
                       {linkDbResult.isAppUser ? '✨ Registered User Account' : '📱 Previously Linked'}
                     </Text>
                     {linkDbResult.phoneNumber && (
-                      <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
+                      <Text style={{ fontSize: scaleFont(11), color: colors.textSecondary, marginTop: 2 }} allowFontScaling={false}>
                         {linkDbResult.phoneNumber}
                       </Text>
                     )}
@@ -1557,7 +1861,7 @@ export default function TripSettingsScreen() {
                     {isLinking ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Text style={styles.smallAddBtnText}>Link User</Text>
+                      <Text style={styles.smallAddBtnText} allowFontScaling={false}>Link User</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -1575,7 +1879,7 @@ export default function TripSettingsScreen() {
                   disabled={isLinking}
                 >
                   <Ionicons name="link-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.linkDirectBtnText}>
+                  <Text style={styles.linkDirectBtnText} allowFontScaling={false}>
                     Save & Link Phone: {linkManualPhone.trim()}
                   </Text>
                 </TouchableOpacity>
@@ -1583,7 +1887,7 @@ export default function TripSettingsScreen() {
             </View>
 
             {/* Device Contacts Selection */}
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>
               Or Choose from Contacts:
             </Text>
             <TextInput
@@ -1600,6 +1904,7 @@ export default function TripSettingsScreen() {
               placeholderTextColor={colors.textMuted}
               value={linkSearchQuery}
               onChangeText={setLinkSearchQuery}
+              allowFontScaling={false}
             />
 
             <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
@@ -1623,21 +1928,21 @@ export default function TripSettingsScreen() {
                   disabled={isLinking}
                 >
                   <View style={[styles.miniAvatar, { backgroundColor: colors.primaryLight }]}>
-                    <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                    <Text style={{ color: colors.primary, fontWeight: '700' }} allowFontScaling={false}>
                       {c.name.charAt(0).toUpperCase()}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.contactRowName, { color: colors.text }]}>{c.name}</Text>
+                    <Text style={[styles.contactRowName, { color: colors.text }]} allowFontScaling={false}>{c.name}</Text>
                     {c.phoneNumber && (
-                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                      <Text style={{ fontSize: scaleFont(11), color: colors.textSecondary }} allowFontScaling={false}>
                         {c.phoneNumber}
                       </Text>
                     )}
                   </View>
                   <View style={[styles.memberActionBtn, { backgroundColor: colors.primary }]}>
                     <Ionicons name="link-outline" size={12} color="#FFFFFF" />
-                    <Text style={styles.memberActionBtnText}>Link</Text>
+                    <Text style={styles.memberActionBtnText} allowFontScaling={false}>Link</Text>
                   </View>
                 </TouchableOpacity>
               ))}
@@ -1669,11 +1974,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '700',
   },
   headerSub: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     marginTop: 1,
   },
   headerSaveBtn: {
@@ -1684,7 +1989,7 @@ const styles = StyleSheet.create({
   headerSaveBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: scaleFont(13),
   },
   content: {
     padding: 16,
@@ -1703,12 +2008,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
     marginBottom: 4,
   },
   sectionSub: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     marginBottom: 14,
   },
   bannerContainer: {
@@ -1730,12 +2035,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   coverEmoji: {
-    fontSize: 48,
+    fontSize: scaleFont(46),
   },
   coverFallbackText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '700',
     marginTop: 4,
+  },
+  uploadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadingText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(12),
+    fontWeight: '600',
   },
   editCoverBadge: {
     position: 'absolute',
@@ -1753,7 +2070,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   editCoverBadgeText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   presetScroll: {
@@ -1772,10 +2089,10 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   presetChipEmoji: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
   },
   presetChipLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   removeCoverBtn: {
@@ -1789,25 +2106,50 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   removeCoverText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
   },
   inputLabel: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '600',
     marginBottom: 6,
+  },
+  subLabel: {
+    fontSize: scaleFont(11),
+    fontWeight: '500',
+    marginBottom: 4,
   },
   input: {
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: scaleFont(14),
     marginBottom: 12,
   },
   textArea: {
     minHeight: 70,
     textAlignVertical: 'top',
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  quickDateChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 4,
+  },
+  quickDateChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  quickDateChipText: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
   },
   currencySelectorBtn: {
     flexDirection: 'row',
@@ -1825,10 +2167,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   currencyFlag: {
-    fontSize: 20,
+    fontSize: scaleFont(20),
   },
   currencyText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
   },
   statusSegmentRow: {
@@ -1843,7 +2185,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statusSegmentText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '600',
   },
   shareInvitePill: {
@@ -1855,7 +2197,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   shareInviteText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
   },
   inviteCodeBanner: {
@@ -1867,13 +2209,26 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   inviteCodeLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(11),
     fontWeight: '600',
   },
   inviteCodeValue: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '800',
     letterSpacing: 2,
+    marginTop: 2,
+  },
+  smallCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  smallCopyText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
   },
   memberRow: {
     flexDirection: 'row',
@@ -1892,10 +2247,10 @@ const styles = StyleSheet.create({
   memberAvatarText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: scaleFont(15),
   },
   memberName: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
   },
   memberTypeBadge: {
@@ -1905,11 +2260,11 @@ const styles = StyleSheet.create({
   },
   adminBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 6,
   },
   adminBadgeText: {
-    fontSize: 11,
+    fontSize: scaleFont(11),
     fontWeight: '700',
   },
   memberActionBtn: {
@@ -1922,7 +2277,7 @@ const styles = StyleSheet.create({
   },
   memberActionBtnText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: scaleFont(11),
     fontWeight: '700',
   },
   removeMemberIconBtn: {
@@ -1939,8 +2294,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   adminActionBtnText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '700',
+  },
+  leaveBtn: {
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leaveBtnText: {
+    fontWeight: '700',
+    fontSize: scaleFont(13),
   },
   deleteBtn: {
     paddingVertical: 12,
@@ -1951,7 +2317,7 @@ const styles = StyleSheet.create({
   },
   deleteBtnText: {
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   mainSaveBtn: {
     paddingVertical: 14,
@@ -1964,7 +2330,7 @@ const styles = StyleSheet.create({
   mainSaveBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: scaleFont(15),
   },
   btnRow: {
     flexDirection: 'row',
@@ -2004,7 +2370,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 17,
+    fontSize: scaleFont(17),
     fontWeight: '700',
   },
   tabSegmentContainer: {
@@ -2021,7 +2387,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   tabSegmentText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
   },
   actionRow: {
@@ -2039,11 +2405,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionTitle: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '600',
   },
   actionSub: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     marginTop: 2,
   },
   modalSearchInput: {
@@ -2051,7 +2417,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: scaleFont(14),
     marginBottom: 12,
   },
   currencyRow: {
@@ -2063,22 +2429,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   currencyRowFlag: {
-    fontSize: 24,
+    fontSize: scaleFont(24),
     marginRight: 14,
   },
   currencyRowInfo: {
     flex: 1,
   },
   currencyRowCountry: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '700',
   },
   currencyRowSub: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     marginTop: 2,
   },
   subHeadingText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -2101,7 +2467,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   contactRowName: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
   },
   miniAvatar: {
@@ -2119,7 +2485,7 @@ const styles = StyleSheet.create({
   smallAddBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: scaleFont(12),
   },
   foundDbCard: {
     flexDirection: 'row',
@@ -2130,7 +2496,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   foundDbName: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '700',
   },
   linkDirectBtn: {
@@ -2144,6 +2510,6 @@ const styles = StyleSheet.create({
   linkDirectBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: scaleFont(13),
   },
 });

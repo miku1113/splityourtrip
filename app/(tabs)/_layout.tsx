@@ -13,6 +13,7 @@ import NotificationCenterModal from '../../src/components/NotificationCenterModa
 import SettleUpModal from '../../src/components/SettleUpModal';
 import { useNotificationStore } from '../../src/features/notifications/useNotificationStore';
 import { syncWidgetSummary } from '../../src/services/widgetService';
+import { scaleFont } from '../../src/theme/responsive';
 
 export default function TabLayout() {
   const router = useRouter();
@@ -82,11 +83,16 @@ export default function TabLayout() {
             paddingBottom: Math.max(insets.bottom, 8),
             paddingTop: 8,
           },
+          tabBarLabelStyle: {
+            fontSize: scaleFont(11),
+            fontWeight: '600',
+          },
           headerStyle: {
             backgroundColor: colors.card,
           },
           headerTitleStyle: {
             fontWeight: '700',
+            fontSize: scaleFont(18),
             color: colors.text,
           },
           headerShadowVisible: false,

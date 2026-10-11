@@ -84,6 +84,30 @@ export default function SplashScreen() {
   useEffect(() => {
     let isCancelled = false;
 
+    // Check immediately if native shared data (screenshot / text from Android share sheet) was received
+    import('../src/services/receiptOcr').then(async ({ getNativeSharedData }) => {
+      if (isCancelled) return;
+      try {
+        const shared = await getNativeSharedData();
+        if (shared.imageUri || shared.sharedText) {
+          console.log('[SplashScreen] Native shared launch detected on mount:', shared);
+          navigatingRef.current = true;
+          if (splashTimerRef.current) {
+            clearTimeout(splashTimerRef.current);
+            splashTimerRef.current = null;
+          }
+          router.replace({
+            pathname: '/shared-payment',
+            params: {
+              imageUri: shared.imageUri || undefined,
+              sharedText: shared.sharedText || undefined,
+            },
+          });
+          return;
+        }
+      } catch {}
+    }).catch(() => {});
+
     // Check immediately if app was launched via an external intent / deep link
     Linking.getInitialURL().then(initialUrl => {
       if (isCancelled) return;
@@ -240,6 +264,26 @@ export default function SplashScreen() {
     }
 
     try {
+      // Check for incoming shared screenshot or text from Android Share sheet
+      const { getNativeSharedData } = await import('../src/services/receiptOcr');
+      const shared = await getNativeSharedData();
+      if (shared.imageUri || shared.sharedText) {
+        console.log('[SplashScreen] Native shared data detected in proceedNext, routing to /shared-payment:', shared);
+        navigatingRef.current = true;
+        if (splashTimerRef.current) {
+          clearTimeout(splashTimerRef.current);
+          splashTimerRef.current = null;
+        }
+        router.replace({
+          pathname: '/shared-payment',
+          params: {
+            imageUri: shared.imageUri || undefined,
+            sharedText: shared.sharedText || undefined,
+          },
+        });
+        return;
+      }
+
       const initialUrl = await Linking.getInitialURL();
       if (isExternalSource(initialUrl)) {
         console.log('[SplashScreen] External launch in proceedNext, routing to target:', initialUrl);
