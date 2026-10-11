@@ -941,7 +941,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     let finalImageUrl = imageUrl || null;
     if (imageUrl && (imageUrl.startsWith('file:') || imageUrl.startsWith('content:') || imageUrl.startsWith('ph:'))) {
       try {
-        finalImageUrl = await uploadTripCoverImage(newTripId, imageUrl);
+        const uploaded = await uploadTripCoverImage(newTripId, imageUrl);
+        if (uploaded && !uploaded.startsWith('file:') && !uploaded.startsWith('content:')) {
+          finalImageUrl = uploaded;
+        }
       } catch (err) {
         console.warn('Trip cover image upload notice:', err);
       }
@@ -1141,8 +1144,6 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         const cloudUrl = await uploadTripCoverImage(tripId, finalImageUrl);
         if (cloudUrl && !cloudUrl.startsWith('file:') && !cloudUrl.startsWith('content:')) {
           finalImageUrl = cloudUrl;
-        } else if (target.image_url && !target.image_url.startsWith('file:')) {
-          finalImageUrl = target.image_url;
         }
       } catch (err) {
         console.warn('Trip cover image upload notice on update:', err);
@@ -1401,7 +1402,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (tripData) {
         // Merge Supabase data with local trip to preserve local-only fields
         // (trip_type, friend_id, currency, etc. that Supabase schema may not have)
-        const effectiveImg = (tripData as any).image_url || (localTrip?.image_url && !localTrip.image_url.startsWith('file:') ? localTrip.image_url : null);
+        const effectiveImg = (tripData as any).image_url || localTrip?.image_url || null;
         mergedActiveTrip = {
           ...(tripData as Trip),
           image_url: effectiveImg,

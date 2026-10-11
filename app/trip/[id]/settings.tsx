@@ -208,7 +208,7 @@ export default function TripSettingsScreen() {
     setPhotoPickerVisible(false);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,
@@ -222,10 +222,9 @@ export default function TripSettingsScreen() {
           setIsUploadingPhoto(true);
           uploadTripCoverImage(id, localUri)
             .then(async cloudUrl => {
-              if (cloudUrl && !cloudUrl.startsWith('file:')) {
-                setImageUrl(cloudUrl);
-                await updateTrip(id, { image_url: cloudUrl });
-              }
+              const bestUrl = cloudUrl && !cloudUrl.startsWith('file:') ? cloudUrl : localUri;
+              setImageUrl(bestUrl);
+              await updateTrip(id, { image_url: bestUrl });
             })
             .catch(() => {})
             .finally(() => {
@@ -260,10 +259,9 @@ export default function TripSettingsScreen() {
           setIsUploadingPhoto(true);
           uploadTripCoverImage(id, localUri)
             .then(async cloudUrl => {
-              if (cloudUrl && !cloudUrl.startsWith('file:')) {
-                setImageUrl(cloudUrl);
-                await updateTrip(id, { image_url: cloudUrl });
-              }
+              const bestUrl = cloudUrl && !cloudUrl.startsWith('file:') ? cloudUrl : localUri;
+              setImageUrl(bestUrl);
+              await updateTrip(id, { image_url: bestUrl });
             })
             .catch(() => {})
             .finally(() => {

@@ -1066,7 +1066,7 @@ export default function ChatView({
     setAttachmentModalVisible(false);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         quality: 0.8,
         base64: true,
@@ -1255,7 +1255,7 @@ export default function ChatView({
   const handlePickPaymentScreenshot = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         quality: 0.8,
         base64: true,

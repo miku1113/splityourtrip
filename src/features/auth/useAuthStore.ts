@@ -9,12 +9,25 @@ import { getUserCurrencyPreference, setUserCurrencyPreference } from '../../serv
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 
 // Configure Google Sign-In with Web Client ID for native account selector bottom-sheet
-if (Platform.OS !== 'web') {
+if (Platform.OS === 'android') {
   try {
     GoogleSignin.configure({
       webClientId: GOOGLE_WEB_CLIENT_ID,
       scopes: ['profile', 'email'],
     });
+  } catch (e) {
+    console.warn('GoogleSignin.configure warning:', e);
+  }
+} else if (Platform.OS === 'ios') {
+  try {
+    const iosId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+    if (iosId) {
+      GoogleSignin.configure({
+        webClientId: GOOGLE_WEB_CLIENT_ID,
+        iosClientId: iosId,
+        scopes: ['profile', 'email'],
+      });
+    }
   } catch (e) {
     console.warn('GoogleSignin.configure warning:', e);
   }
@@ -799,8 +812,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      // 1. Mobile (Android/iOS): Native Google Account Chooser bottom sheet
-      if (Platform.OS !== 'web') {
+      // 1. Native Google Account Chooser bottom sheet on Android (or iOS with iosClientId)
+      if (Platform.OS === 'android' || (Platform.OS === 'ios' && process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID)) {
         try {
           await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
