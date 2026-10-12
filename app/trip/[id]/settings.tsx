@@ -725,14 +725,21 @@ export default function TripSettingsScreen() {
 
             <View style={styles.bannerContainer}>
               {imageUrl && !isEmojiImage ? (
-                <Image
-                  source={{ uri: imageUrl }}
-                  style={styles.coverImage}
-                  onError={() => {
-                    console.warn('Cover preview failed, resetting image');
-                    setImageUrl(null);
-                  }}
-                />
+                <>
+                  <View style={[styles.coverFallback, { position: 'absolute', backgroundColor: colors.primaryLight }]}>
+                    <Text style={styles.coverEmoji} allowFontScaling={false}>{emojiValue}</Text>
+                    <Text style={[styles.coverFallbackText, { color: colors.primary }]} allowFontScaling={false}>
+                      {tripName || 'Trip'}
+                    </Text>
+                  </View>
+                  <Image
+                    source={{ uri: imageUrl }}
+                    style={styles.coverImage}
+                    onError={(e) => {
+                      console.warn('Cover preview image load notice:', e?.nativeEvent?.error);
+                    }}
+                  />
+                </>
               ) : (
                 <View style={[styles.coverFallback, { backgroundColor: colors.primaryLight }]}>
                   <Text style={styles.coverEmoji} allowFontScaling={false}>{emojiValue}</Text>

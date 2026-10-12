@@ -13,6 +13,7 @@ export default function TripDetailScreen() {
   const { colors, isDark } = useTheme();
   const {
     trips,
+    activeTrip,
     members: rawMembers,
     expenses: rawExpenses,
     loadTripDetails,
@@ -28,7 +29,7 @@ export default function TripDetailScreen() {
     [rawExpenses, id]
   );
 
-  const trip = trips.find(t => t.id === id) || {
+  const trip = (activeTrip?.id === id ? activeTrip : trips.find(t => t.id === id)) || {
     id: id || '',
     name: 'Trip Chat',
     status: 'active',

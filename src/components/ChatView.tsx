@@ -43,6 +43,7 @@ import {
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
+import TripCoverBadge from './TripCoverBadge';
 import { getFriendSettings } from '../services/friendSettings';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
@@ -1669,18 +1670,12 @@ export default function ChatView({
           >
             <View style={[styles.headerAvatar, { backgroundColor: colors.primaryLight, overflow: 'hidden' }]}>
               {isGroup ? (
-                currentTrip?.image_url ? (
-                  currentTrip.image_url.startsWith('emoji:') ? (
-                    <Text style={{ fontSize: 20 }}>{currentTrip.image_url.replace('emoji:', '')}</Text>
-                  ) : (
-                    <Image
-                      source={{ uri: currentTrip.image_url }}
-                      style={{ width: '100%', height: '100%' }}
-                    />
-                  )
-                ) : (
-                  <Ionicons name="airplane" size={20} color={colors.primary} />
-                )
+                <TripCoverBadge
+                  imageUrl={currentTrip?.image_url}
+                  size={38}
+                  borderRadius={19}
+                  fallbackEmoji="✈️"
+                />
               ) : currentFriendAvatarUrl ? (
                 <Image
                   source={{ uri: currentFriendAvatarUrl }}

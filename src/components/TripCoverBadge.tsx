@@ -25,6 +25,10 @@ export const TripCoverBadge: React.FC<TripCoverBadgeProps> = ({
   const { colors, isDark } = useTheme();
   const [hasError, setHasError] = useState(false);
 
+  React.useEffect(() => {
+    setHasError(false);
+  }, [imageUrl]);
+
   // If emoji string: "emoji:🏖️"
   if (imageUrl && imageUrl.startsWith('emoji:')) {
     const emojiChar = imageUrl.replace('emoji:', '') || fallbackEmoji;
@@ -66,6 +70,9 @@ export const TripCoverBadge: React.FC<TripCoverBadgeProps> = ({
           style,
         ]}
       >
+        <Text style={[styles.emojiText, { fontSize: scaleFont(size * 0.5), position: 'absolute' }, textStyle]}>
+          {fallbackEmoji}
+        </Text>
         <Image
           source={{ uri: imageUrl }}
           style={[
