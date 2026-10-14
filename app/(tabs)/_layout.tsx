@@ -99,7 +99,7 @@ export default function TabLayout() {
           headerLeft: () => (
             <View style={styles.headerLeft}>
               <Image
-                source={require('../../assets/images/icon.png')}
+                source={require('../../assets/images/logo-transparent.png')}
                 style={styles.appIcon}
                 resizeMode="contain"
               />
@@ -295,9 +295,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
   },
   notifBtn: {
     padding: 6,
