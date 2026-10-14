@@ -75,7 +75,7 @@ export default function NotificationCenterModal({
         return { name: 'people' as const, color: '#8B5CF6', bg: isDark ? 'rgba(139, 92, 246, 0.2)' : '#EDE9FE' };
       case 'message':
       default:
-        return { name: 'chatbubble-ellipses' as const, color: '#6366F1', bg: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' };
+        return { name: 'chatbubble-ellipses' as const, color: colors.primary, bg: colors.primaryLight };
     }
   };
 

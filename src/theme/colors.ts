@@ -1,47 +1,47 @@
 export const lightColors = {
-  primary: '#4F46E5', // Indigo
-  primaryLight: '#EEF2FF',
-  primaryDark: '#3730A3',
-  secondary: '#0EA5E9', // Ocean blue
-  success: '#10B981', // Emerald green
-  successBg: '#ECFDF5',
-  danger: '#EF4444', // Coral red
-  dangerBg: '#FEF2F2',
-  warning: '#F59E0B',
-  warningBg: '#FFFBEB',
-  background: '#F8FAFC',
+  primary: '#5B789A', // Muted Cobalt (deepened for light mode contrast)
+  primaryLight: 'rgba(120, 149, 183, 0.15)',
+  primaryDark: '#445D78',
+  secondary: '#789B80', // Supporting accent sage green
+  success: '#689272',
+  successBg: 'rgba(104, 146, 114, 0.15)',
+  danger: '#D9534F',
+  dangerBg: 'rgba(217, 83, 79, 0.12)',
+  warning: '#D99B43',
+  warningBg: 'rgba(217, 155, 67, 0.12)',
+  background: '#F4F6F8',
   card: '#FFFFFF',
-  cardSecondary: '#F1F5F9',
-  text: '#0F172A',
-  textSecondary: '#64748B',
-  textMuted: '#94A3B8',
-  border: '#E2E8F0',
-  borderLight: '#F1F5F9',
-  surfaceDark: '#0F172A',
-  inputBackground: '#F8FAFC',
+  cardSecondary: '#EAEFF5',
+  text: '#151B25',
+  textSecondary: '#556274',
+  textMuted: '#8492A6',
+  border: '#D7DEE8',
+  borderLight: '#EBF0F6',
+  surfaceDark: '#151B25',
+  inputBackground: '#FFFFFF',
 };
 
 export const darkColors = {
-  primary: '#6366F1', // Luminous indigo
-  primaryLight: 'rgba(99, 102, 241, 0.18)',
-  primaryDark: '#4F46E5',
-  secondary: '#38BDF8', // Cyan blue
-  success: '#34D399', // Bright emerald
-  successBg: 'rgba(52, 211, 153, 0.15)',
-  danger: '#F87171', // Bright coral
-  dangerBg: 'rgba(248, 113, 113, 0.15)',
-  warning: '#FBBF24',
-  warningBg: 'rgba(251, 191, 36, 0.15)',
-  background: '#0B0F19', // Midnight dark
-  card: '#161F30', // Deep elevated surface
-  cardSecondary: '#1E293B',
-  text: '#F8FAFC', // Crisp white text
-  textSecondary: '#94A3B8',
-  textMuted: '#64748B',
-  border: '#2A364F',
-  borderLight: '#1E293B',
-  surfaceDark: '#020617',
-  inputBackground: '#131B2B',
+  primary: '#7895B7', // Muted Cobalt Primary
+  primaryLight: 'rgba(120, 149, 183, 0.20)',
+  primaryDark: '#5B789A',
+  secondary: '#9BB4A1', // Supporting Accent Sage Green
+  success: '#9BB4A1', // Harmonious supporting accent
+  successBg: 'rgba(155, 180, 161, 0.18)',
+  danger: '#E07A7A', // Muted soft coral red
+  dangerBg: 'rgba(224, 122, 122, 0.18)',
+  warning: '#E5B887', // Muted warm sand amber
+  warningBg: 'rgba(229, 184, 135, 0.18)',
+  background: '#151B25', // Muted Cobalt Deep Background
+  card: '#242D3B', // Muted Cobalt Card Surface
+  cardSecondary: '#1D2431', // Subtle inset surface
+  text: '#F0F2E9', // Crisp light mist text
+  textSecondary: '#A3AFC2', // Soft cobalt secondary text
+  textMuted: '#6C7A8E', // Dimmed cobalt text
+  border: '#2E3A4B', // Subtle slate-cobalt border
+  borderLight: '#242D3B',
+  surfaceDark: '#0F141C',
+  inputBackground: '#1B2330', // Elegant input surface
 };
 
 export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device } from './responsive';

@@ -647,7 +647,7 @@ export default function SplashScreen() {
               style={[
                 styles.themeOptionBtn,
                 {
-                  backgroundColor: '#0B0F19',
+                  backgroundColor: '#151B25',
                   borderColor: selectedMode === 'dark' ? colors.primary : colors.border,
                 },
                 selectedMode === 'dark' && styles.themeOptionActive,
@@ -656,7 +656,7 @@ export default function SplashScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.themeEmoji}>🌙</Text>
-              <Text style={[styles.themeOptionTitle, { color: '#F8FAFC' }]}>Dark Theme</Text>
+              <Text style={[styles.themeOptionTitle, { color: '#F0F2E9' }]}>Dark Theme</Text>
               <Text style={styles.themeOptionBadge}>Default</Text>
             </TouchableOpacity>
 

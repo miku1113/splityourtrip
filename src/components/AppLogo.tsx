@@ -51,8 +51,8 @@ const styles = StyleSheet.create({
   },
   glowRing: {
     position: 'absolute',
-    backgroundColor: 'rgba(99, 102, 241, 0.22)',
-    shadowColor: '#6366F1',
+    backgroundColor: 'rgba(120, 149, 183, 0.25)',
+    shadowColor: '#7895B7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.6,
     shadowRadius: 20,
