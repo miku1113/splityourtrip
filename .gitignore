@@ -43,3 +43,6 @@ yarn-error.*
 # binary artifacts
 *.apk
 *.aab
+*.keystore
+mapping.txt
+*.command
