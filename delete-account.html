@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account and Data Deletion - Split Your Trip</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #EF4444;
+      --primary-light: #FEE2E2;
+      --text-main: #1F2937;
+      --text-muted: #4B5563;
+      --bg-main: #F9FAFB;
+      --card-bg: #FFFFFF;
+      --border: #E5E7EB;
+      --accent: #10B981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.65;
+      padding: 32px 16px;
+    }
+
+    .container {
+      max-width: 840px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+      border: 1px solid var(--border);
+      padding: 48px;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 24px 20px;
+        border-radius: 12px;
+      }
+    }
+
+    .header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+
+    .app-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--primary-light);
+      color: var(--primary);
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 2.15rem;
+      font-weight: 700;
+      color: #111827;
+      letter-spacing: -0.025em;
+      margin-bottom: 8px;
+    }
+
+    .meta {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #111827;
+      margin-top: 36px;
+      margin-bottom: 14px;
+    }
+
+    p {
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      font-size: 1rem;
+    }
+
+    ul, ol {
+      margin-left: 24px;
+      margin-bottom: 18px;
+      color: var(--text-muted);
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    strong {
+      color: var(--text-main);
+    }
+
+    .step-card {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      padding: 22px 24px;
+      margin: 18px 0;
+    }
+
+    .step-card h3 {
+      font-size: 1.15rem;
+      color: #0F172A;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge-num {
+      background: #4F46E5;
+      color: #FFFFFF;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+
+    .data-table th, .data-table td {
+      border: 1px solid var(--border);
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 0.95rem;
+    }
+
+    .data-table th {
+      background-color: #F3F4F6;
+      color: #111827;
+      font-weight: 600;
+    }
+
+    .tag-deleted {
+      color: #DC2626;
+      background: #FEE2E2;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+
+    .tag-anonymized {
+      color: #D97706;
+      background: #FEF3C7;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+
+    .footer {
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+      padding-top: 24px;
+      text-align: center;
+      color: #9CA3AF;
+      font-size: 0.875rem;
+    }
+
+    a {
+      color: #4F46E5;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="app-badge">Split Your Trip &bull; Account &amp; Data Deletion</div>
+      <h1>Delete Account &amp; Associated Data</h1>
+      <div class="meta">
+        <strong>Application:</strong> Split Your Trip (com.splityourtrip)<br>
+        <strong>Developer:</strong> Split Your Trip<br>
+        <strong>Last Updated:</strong> October 14, 2026
+      </div>
+    </div>
+
+    <p>
+      At <strong>Split Your Trip</strong>, we respect your right to control your personal data. In accordance with Google Play's User Data and Account Deletion policies, this page provides clear, accessible instructions for requesting the permanent deletion of your account and all associated personal records.
+    </p>
+
+    <h2>How to Request Account &amp; Data Deletion</h2>
+    <p>You can delete your account and personal data using either of the two methods below:</p>
+
+    <div class="step-card">
+      <h3><span class="badge-num">1</span> Option 1: In-App Instant Deletion</h3>
+      <p>You can permanently delete your account directly inside the app at any time:</p>
+      <ol>
+        <li>Open the <strong>Split Your Trip</strong> app on your device.</li>
+        <li>Tap on your <strong>Profile</strong> tab in the bottom navigation bar.</li>
+        <li>Scroll down and tap <strong>Delete Account</strong>.</li>
+        <li>Confirm your choice in the confirmation dialog.</li>
+      </ol>
+      <p><em>Your account, profile information, and authentication access are deleted immediately.</em></p>
+    </div>
+
+    <div class="step-card">
+      <h3><span class="badge-num">2</span> Option 2: Request Deletion via Email (No App Required)</h3>
+      <p>If you have uninstalled the app or cannot log in, you can request account deletion by emailing our support team:</p>
+      <ul>
+        <li>Send an email to: <a href="mailto:splityourtrip.app@gmail.com">splityourtrip.app@gmail.com</a></li>
+        <li>Subject line: <strong>Request Account Deletion - Split Your Trip</strong></li>
+        <li>Include: The <strong>email address</strong> or phone number registered with your Split Your Trip account.</li>
+      </ul>
+      <p>
+        Our support team will verify your identity and process your deletion request within <strong>30 days</strong>. You will receive a confirmation email once your account and data are permanently removed.
+      </p>
+    </div>
+
+    <h2>Types of Data Deleted vs. Retained</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Data Category</th>
+          <th>Action Taken</th>
+          <th>Retention Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>User Profile</strong><br>(Name, Email, Profile Picture, Bio)</td>
+          <td><span class="tag-deleted">PERMANENTLY DELETED</span></td>
+          <td>Deleted immediately (or within 30 days for email requests). No copies retained.</td>
+        </tr>
+        <tr>
+          <td><strong>Authentication Records</strong><br>(Password hashes, Google Sign-in tokens)</td>
+          <td><span class="tag-deleted">PERMANENTLY DELETED</span></td>
+          <td>Deleted immediately from our database and Supabase Auth.</td>
+        </tr>
+        <tr>
+          <td><strong>Notification Tokens &amp; Device Links</strong></td>
+          <td><span class="tag-deleted">PERMANENTLY DELETED</span></td>
+          <td>FCM/Expo push tokens unlinked and removed from database.</td>
+        </tr>
+        <tr>
+          <td><strong>Private Trips &amp; Uploaded Receipts</strong></td>
+          <td><span class="tag-deleted">PERMANENTLY DELETED</span></td>
+          <td>Trips where you are the sole member are deleted entirely including receipt images.</td>
+        </tr>
+        <tr>
+          <td><strong>Historical Group Expense Line Items</strong><br>(Shared Trips with other active users)</td>
+          <td><span class="tag-anonymized">ANONYMIZED</span></td>
+          <td>To preserve the financial balance ledger for other participants who spent money, historical expense splits remain calculated but your name is replaced with "Former Member" and your personal info is wiped.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Retention Period</h2>
+    <p>
+      Once an account is deleted, your personal profile and authentication access are eliminated immediately. Any residual database backup snapshots are automatically purged according to our standard 30-day rolling backup cycle, after which no trace of your personal data remains.
+    </p>
+
+    <h2>Need Assistance?</h2>
+    <p>
+      If you have any questions or difficulties requesting account deletion, please reach out directly:
+    </p>
+    <ul>
+      <li>Email: <a href="mailto:splityourtrip.app@gmail.com">splityourtrip.app@gmail.com</a></li>
+      <li>Privacy Policy: <a href="https://miku1113.github.io/splityourtrip/">https://miku1113.github.io/splityourtrip/</a></li>
+    </ul>
+
+    <div class="footer">
+      &copy; 2026 Split Your Trip. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>
