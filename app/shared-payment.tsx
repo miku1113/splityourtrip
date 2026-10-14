@@ -19,7 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../src/features/contacts/useContactsStore';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
-import { extractPaymentFromScreenshot, getNativeSharedImageUri } from '../src/services/receiptOcr';
+import { extractPaymentFromScreenshot, getNativeSharedImageUri, getNativeSharedData, clearNativeSharedData } from '../src/services/receiptOcr';
 import { theme } from '../src/theme/colors';
 import { useTheme } from '../src/theme/useThemeStore';
 
@@ -74,13 +74,11 @@ export default function SharedPaymentScreen() {
       let currentText = params.sharedText || null;
 
       if (!currentUri && !currentText) {
-        const { getNativeSharedData, clearNativeSharedData } = await import('../src/services/receiptOcr');
         const nativeData = await getNativeSharedData();
         if (nativeData.imageUri) currentUri = nativeData.imageUri;
         if (nativeData.sharedText) currentText = nativeData.sharedText;
         await clearNativeSharedData();
       } else {
-        const { clearNativeSharedData } = await import('../src/services/receiptOcr');
         await clearNativeSharedData();
       }
 

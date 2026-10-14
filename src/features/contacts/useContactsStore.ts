@@ -165,30 +165,45 @@ export function getEffectiveContactName(options: {
   displayName?: string | null;
   profileName?: string | null;
   fallback?: string;
+  currentUserName?: string | null;
 }): string {
   const { phoneNumber, contactName, displayName, profileName, fallback = 'Friend' } = options;
+
+  let myName = options.currentUserName;
+  if (!myName) {
+    try {
+      const { useAuthStore } = require('../auth/useAuthStore');
+      const auth = useAuthStore.getState();
+      myName = auth.profile?.full_name || auth.profile?.name || (auth.user as any)?.user_metadata?.full_name || (auth.user as any)?.user_metadata?.name;
+    } catch {}
+  }
+
+  const isMyName = (n?: string | null) => {
+    if (!n || !myName) return false;
+    return normalizeNameForMatch(n) === normalizeNameForMatch(myName);
+  };
 
   // 1. Device Phonebook contact name (Saved by the user in device contacts)
   if (phoneNumber) {
     const savedPhoneName = getContactNameByPhone(phoneNumber);
-    if (savedPhoneName && savedPhoneName.trim() && !isGenericPlaceholder(savedPhoneName)) {
+    if (savedPhoneName && savedPhoneName.trim() && !isGenericPlaceholder(savedPhoneName) && !isMyName(savedPhoneName)) {
       return savedPhoneName.trim();
     }
   }
 
-  // 2. Explicit contact name from local contacts list (if it's a real name)
-  if (contactName && contactName.trim() && !isGenericPlaceholder(contactName)) {
+  // 2. Explicit contact name from local contacts list (if it's a real name and not self)
+  if (contactName && contactName.trim() && !isGenericPlaceholder(contactName) && !isMyName(contactName)) {
     return contactName.trim();
   }
 
-  // 3. Trip member display name (if user explicitly assigned a real nickname/name)
-  if (displayName && displayName.trim() && !isGenericPlaceholder(displayName)) {
+  // 3. Trip member display name (if user explicitly assigned a real nickname/name and not self)
+  if (displayName && displayName.trim() && !isGenericPlaceholder(displayName) && !isMyName(displayName)) {
     return displayName.trim();
   }
 
   // 4. USE PROFILE NAME WHEN NO NAME IS THERE!
   // If the user has not saved this person in contacts, display their remote profile name!
-  if (profileName && profileName.trim() && !isGenericPlaceholder(profileName)) {
+  if (profileName && profileName.trim() && !isGenericPlaceholder(profileName) && !isMyName(profileName)) {
     return profileName.trim();
   }
 
@@ -200,7 +215,11 @@ export function getEffectiveContactName(options: {
     return phoneNumber.trim();
   }
 
-  return fallback;
+  if (fallback && !isMyName(fallback)) {
+    return fallback;
+  }
+
+  return (profileName && !isMyName(profileName)) ? profileName.trim() : 'Friend';
 }
 
 export const useContactsStore = create<ContactsState>((set, get) => ({
@@ -236,6 +255,14 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       const targetId = userId || authState.user?.id || authState.profile?.id;
       if (!targetId) return get().friendsSummary;
 
+      let myUserName: string | null = null;
+      let myUserPhone: string | null = null;
+      try {
+        const auth = authState;
+        myUserName = auth.profile?.full_name || auth.profile?.name || (auth.user as any)?.user_metadata?.full_name || (auth.user as any)?.user_metadata?.name;
+        myUserPhone = auth.profile?.phone_number || (auth.user as any)?.phone || (auth.user as any)?.user_metadata?.phone_number;
+      } catch {}
+
       // 0. If current contacts is empty, load instantly from storage cache to avoid blank flash
       if (get().contacts.length === 0) {
         try {
@@ -244,8 +271,12 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
           if (rawCache) {
             const parsed = JSON.parse(rawCache);
             if (parsed && Array.isArray(parsed.friends) && parsed.friends.length > 0) {
+              const sanitizedCached = parsed.friends.filter((f: any) =>
+                f.profileId !== targetId &&
+                (!myUserName || normalizeNameForMatch(f.name) !== normalizeNameForMatch(myUserName))
+              );
               set({
-                contacts: parsed.friends,
+                contacts: sanitizedCached,
                 friendsSummary: {
                   totalOwedToYouPaise: parsed.totalOwedToYouPaise || 0,
                   totalYouOwePaise: parsed.totalYouOwePaise || 0,
@@ -268,11 +299,17 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       const seenNames = new Set<string>();
       const merged: FriendContact[] = [];
 
+      const cleanUserPhone = myUserPhone ? normalizePhone(myUserPhone) : '';
+
       // 1. Add API friends (which only contains people with shared trips/splits/messages)
       for (const f of apiFriends) {
         if (f.profileId && f.profileId === targetId) continue;
-        const cleanName = f.name.trim().toLowerCase();
+        if (f.id && f.id === targetId) continue;
         const normPhone = f.cleanPhone || normalizePhone(f.phoneNumber);
+        if (cleanUserPhone && normPhone && cleanUserPhone === normPhone) continue;
+        if (myUserName && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName) && (!f.profileId || f.profileId === targetId)) continue;
+
+        const cleanName = f.name.trim().toLowerCase();
 
         // Find existing matching contact to preserve details like avatar or phone
         const existingMatch = existing.find(e =>
@@ -282,9 +319,15 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
           normalizeNameForMatch(e.name) === normalizeNameForMatch(f.name)
         );
 
-        // Resolve Contact Name: device contact name > existing contact name > f.name (never profile name)
+        // Resolve Contact Name: device contact name > f.name (from API) > existing contact name (if not self and not placeholder)
         const savedContactName = normPhone ? deviceContactNamesByPhone.get(normPhone) : null;
-        const resolvedName = savedContactName || (existingMatch?.name && !isGenericPlaceholder(existingMatch.name) ? existingMatch.name : null) || f.name;
+        const isFMyName = myUserName && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName);
+        const safeFName = (!isFMyName && !isGenericPlaceholder(f.name)) ? f.name : null;
+
+        const isExistingMyName = myUserName && existingMatch?.name && normalizeNameForMatch(existingMatch.name) === normalizeNameForMatch(myUserName);
+        const safeExistingName = (!isExistingMyName && existingMatch?.name && !isGenericPlaceholder(existingMatch.name)) ? existingMatch.name : null;
+
+        const resolvedName = savedContactName || safeFName || safeExistingName || (f.profileId ? 'Friend' : f.name);
 
         const canonicalId = f.profileId || f.id || existingMatch?.id || `friend_${cleanName}`;
         if (!seenIds.has(canonicalId) && !seenNames.has(cleanName)) {
@@ -409,25 +452,45 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
     }
 
     try {
-      // 1. Request permission (with timeout guard)
+      // 1. Check existing permission status FIRST without prompting
       let granted = false;
       try {
-        const { status } = await withTimeout(Contacts.requestPermissionsAsync(), 5000);
-        granted = status === 'granted';
-      } catch {}
+        const { status: existingStatus } = await withTimeout(Contacts.getPermissionsAsync(), 3000);
+        granted = existingStatus === 'granted';
+
+        // ONLY prompt the user if they explicitly initiated an action (force = true)
+        if (!granted && force) {
+          const { status: requestedStatus } = await withTimeout(Contacts.requestPermissionsAsync(), 5000);
+          granted = requestedStatus === 'granted';
+        }
+      } catch (permErr: any) {
+        console.log('[useContactsStore] Permission check notice:', permErr?.message);
+        granted = false;
+      }
+
       set({ hasPermission: granted });
 
+      // If user denied or has not granted permission, exit safely without crashing
+      if (!granted) {
+        set({
+          deviceContacts: [],
+          lastSyncedAt: new Date().toISOString(),
+          isLoading: false,
+        });
+        return;
+      }
+
       let rawDeviceContacts: any[] = [];
-      if (granted) {
-        try {
-          const { data } = await withTimeout(
-            Contacts.getContactsAsync({
-              fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
-            }),
-            6000
-          );
-          rawDeviceContacts = data || [];
-        } catch {}
+      try {
+        const { data } = await withTimeout(
+          Contacts.getContactsAsync({
+            fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
+          }),
+          6000
+        );
+        rawDeviceContacts = data || [];
+      } catch (getErr: any) {
+        console.log('[useContactsStore] getContactsAsync notice:', getErr?.message);
       }
 
       // Map device contacts strictly into deviceContacts (for contact picker / modals)
@@ -487,6 +550,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       });
     } catch (err: any) {
       console.log('Error initializing device contacts:', err?.message);
+      set({ deviceContacts: [], isLoading: false });
     }
   },
 
@@ -580,6 +644,23 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
   handleIncomingMessage: (msg: any, currentUserId?: string) => {
     if (!msg || !msg.trip_id) return;
     const isMe = Boolean(currentUserId && msg.sender_id === currentUserId);
+    if (isMe) return;
+
+    // Verify current user belongs to this trip
+    let isUserTrip = false;
+    try {
+      const { useTripStore } = require('../trips/useTripStore');
+      const tripStore = useTripStore.getState();
+      isUserTrip = tripStore.trips.some((t: any) => t.id === msg.trip_id);
+    } catch {}
+
+    const currentContacts = get().contacts;
+    const matchingContact = currentContacts.find(c => c.defaultTripId && c.defaultTripId === msg.trip_id);
+
+    if (!isUserTrip && !matchingContact) {
+      // Current user is not a participant in this trip! Ignore!
+      return;
+    }
 
     let parsed: any = { msgType: 'text', displayText: msg.message || '' };
     try {
@@ -591,11 +672,9 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
 
     set((state) => {
       const contacts = [...state.contacts];
+      // Only match contact whose defaultTripId is this trip
       const idx = contacts.findIndex(
-        (c) =>
-          (c.defaultTripId && c.defaultTripId === msg.trip_id) ||
-          (c.profileId && c.profileId === msg.sender_id) ||
-          (c.id && c.id === msg.sender_id)
+        (c) => c.defaultTripId && c.defaultTripId === msg.trip_id
       );
 
       if (idx !== -1) {

@@ -12,6 +12,7 @@ import { subscribeToSharedData } from '../src/services/receiptOcr';
 import { Platform, StatusBar, View, Text, TextInput } from 'react-native';
 import * as Linking from 'expo-linking';
 
+
 // Standardize responsive font behavior across devices (prevents accessibility zoom layout breakage)
 if ((Text as any).defaultProps == null) {
   (Text as any).defaultProps = {};
@@ -54,24 +55,47 @@ export default function RootLayout() {
       useAuthStore.getState().fetchProfile().catch(() => {});
     });
     initTrips();
-    initContacts();
+    initContacts(false).catch(() => {});
 
-    // Global listener for OAuth deep links (e.g. splityourtrip://...)
+    // Global listener for deep links (e.g. splityourtrip://join/CODE, splityourtrip://trip/ID, OAuth)
     const handleDeepLink = async (event: { url: string }) => {
       const url = event?.url;
+      if (!url) return;
+
+      console.log('[RootLayout] Deep link received:', url);
+
+      // 1. Join trip links (e.g. splityourtrip://join/CODE or .../join/CODE)
+      if (url.includes('/join/')) {
+        const parts = url.split('/join/');
+        const code = parts[1]?.split(/[?#/]/)[0]?.trim();
+        if (code) {
+          router.push(`/join/${code}`);
+          return;
+        }
+      }
+
+      // 2. Direct trip links (e.g. splityourtrip://trip/ID)
+      if (url.includes('/trip/')) {
+        const parts = url.split('/trip/');
+        const tripId = parts[1]?.split(/[?#/]/)[0]?.trim();
+        if (tripId) {
+          router.push(`/trip/${tripId}`);
+          return;
+        }
+      }
+
+      // 3. OAuth callback deep links
       if (
-        url &&
-        (url.startsWith('splityourtrip:') ||
-          url.includes('access_token=') ||
-          url.includes('code='))
+        url.includes('access_token=') ||
+        url.includes('refresh_token=') ||
+        (url.startsWith('splityourtrip:') && (url.includes('code=') || url.includes('#error=')))
       ) {
-        console.log('[RootLayout] Deep link received:', url);
         try {
           const authRes = await useAuthStore.getState().handleAuthUrl(url);
           if (authRes?.success) {
             const loggedInUser = useAuthStore.getState().user;
             if (loggedInUser?.id) {
-              await useTripStore.getState().fetchTrips(loggedInUser.id);
+              await useTripStore.getState().fetchTrips(loggedInUser.id, true);
             }
             router.replace('/(tabs)');
           }
@@ -107,14 +131,16 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (error) throw error;
+    if (error) {
+      console.log('[RootLayout] Font loading notice:', error);
+    }
   }, [error]);
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (loaded || error) {
+      SplashScreen.hideAsync().catch(() => {});
     }
-  }, [loaded]);
+  }, [loaded, error]);
 
   const navTheme = useMemo(() => {
     const base = isDark ? DarkTheme : DefaultTheme;

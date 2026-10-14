@@ -201,14 +201,15 @@ export default function BillDetailScreen() {
 
   // Identify current user's member in this trip
   const myMember = useMemo(() => {
-    return findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
+    return findMyMember(tripMembers, user?.id, currentUserPhone);
   }, [tripMembers, user?.id, currentUserPhone]);
 
   // Determine if current user created this expense (only creator can edit; others view only)
   const canEdit = useMemo(() => {
     if (!expense) return false;
+    if (!myMember) return false; // User is not a member of this trip! Cannot edit!
     const currentUserId = user?.id || 'local_user';
-    if (myMember?.role === 'admin') return true;
+    if (myMember.role === 'admin') return true;
 
     // If created_by is explicitly stored on the expense
     if (expense.created_by) {

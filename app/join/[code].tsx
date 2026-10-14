@@ -31,17 +31,17 @@ export default function JoinTripScreen() {
     setJoining(true);
     setErrorMsg(null);
 
-    const success = await joinTripByCode(
+    const res = await joinTripByCode(
       code,
       user.id,
       profile?.full_name || profile?.name || 'Friend'
     );
 
     setJoining(false);
-    if (success) {
-      router.replace('/(tabs)');
+    if (res.success && res.tripId) {
+      router.replace(`/trip/${res.tripId}`);
     } else {
-      setErrorMsg('Invalid or expired invite code.');
+      setErrorMsg(res.error || 'Invalid or expired invite code.');
     }
   };
 

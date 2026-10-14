@@ -49,7 +49,7 @@ import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 30;
 
 interface ChatViewProps {
   tripId: string;
@@ -189,7 +189,7 @@ export default function ChatView({
     const showSub = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
       }, 50);
     });
 
@@ -227,8 +227,8 @@ export default function ChatView({
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
-  const didInitialScrollRef = useRef(false);
   const prevMsgCountRef = useRef(0);
+  const [isChatReady, setIsChatReady] = useState(true);
 
   const currentTrip = trips.find(t => t.id === tripId);
   const userCurrency = currentTrip?.currency || 'INR';
@@ -245,10 +245,9 @@ export default function ChatView({
     [tripExpenses]
   );
 
-  // Reset initial scroll tracker when switching trips
+  // Reset pagination when switching trips
   useEffect(() => {
-    didInitialScrollRef.current = false;
-    prevMsgCountRef.current = 0;
+    setIsChatReady(true);
     setMessagesVisibleCount(PAGE_SIZE);
   }, [tripId]);
 
@@ -741,8 +740,8 @@ export default function ChatView({
 
   useEffect(() => {
     let isMounted = true;
-    didInitialScrollRef.current = false;
     prevMsgCountRef.current = 0;
+    setIsChatReady(true);
     setMessagesVisibleCount(PAGE_SIZE);
 
     if (tripId) {
@@ -779,9 +778,11 @@ export default function ChatView({
         });
 
       const unsub = subscribeTripRealtime(tripId);
+      // Supabase Realtime delivers messages instantaneously via WebSocket.
+      // 30s heartbeat serves as a gentle fallback only for network reconnect resilience.
       const heartbeat = setInterval(() => {
         useTripStore.getState().syncTripMessages(tripId);
-      }, 3500);
+      }, 30000);
 
       return () => {
         isMounted = false;
@@ -952,32 +953,34 @@ export default function ChatView({
     }
   }, [combinedMessages.length]);
 
-  // Paginate messages by 10 from the end (most recent `messagesVisibleCount` messages)
+  // Paginate messages from the end (most recent `messagesVisibleCount` messages)
   const paginatedMessages = useMemo(() => {
     if (combinedMessages.length <= messagesVisibleCount) return combinedMessages;
     return combinedMessages.slice(combinedMessages.length - messagesVisibleCount);
   }, [combinedMessages, messagesVisibleCount]);
 
-  // Auto-scroll to bottom on initial load or when a new message is added at the end
+  // Inverted data for FlatList: newest message at index 0 (renders directly at bottom with NO scroll needed)
+  const invertedMessages = useMemo(() => {
+    return [...paginatedMessages].reverse();
+  }, [paginatedMessages]);
+
+  const scrollToBottom = useCallback((animated = true) => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated });
+  }, []);
+
+  // Track incoming messages: only animate scroll if a new message arrives while user is in active chat
+  const trackedMsgCountRef = useRef(0);
   useEffect(() => {
-    if (paginatedMessages.length === 0) return;
-
-    if (!didInitialScrollRef.current) {
-      didInitialScrollRef.current = true;
-      prevMsgCountRef.current = combinedMessages.length;
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
-      }, 80);
-      return;
+    if (trackedMsgCountRef.current > 0 && combinedMessages.length > trackedMsgCountRef.current) {
+      scrollToBottom(true);
     }
+    trackedMsgCountRef.current = combinedMessages.length;
+  }, [combinedMessages.length, scrollToBottom]);
 
-    if (combinedMessages.length > prevMsgCountRef.current) {
-      prevMsgCountRef.current = combinedMessages.length;
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 80);
-    }
-  }, [paginatedMessages.length, combinedMessages.length]);
+  // Reset tracked message count on trip switch
+  useEffect(() => {
+    trackedMsgCountRef.current = 0;
+  }, [tripId]);
 
   const handleLoadEarlierMessages = useCallback(() => {
     if (loadingEarlierMessages || messagesVisibleCount >= combinedMessages.length) return;
@@ -1059,7 +1062,7 @@ export default function ChatView({
       isGroup ? 'group' : 'individual'
     );
     setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
+      scrollToBottom(true);
     }, 100);
   };
 
@@ -1114,7 +1117,7 @@ export default function ChatView({
         );
         setInputText('');
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
+          scrollToBottom(true);
         }, 100);
       }
     } catch (e: any) {
@@ -1177,7 +1180,7 @@ export default function ChatView({
         );
         setInputText('');
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
+          scrollToBottom(true);
         }, 100);
       }
     } catch (e: any) {
@@ -1209,7 +1212,7 @@ export default function ChatView({
           isGroup ? 'group' : 'individual'
         );
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
+          scrollToBottom(true);
         }, 100);
       }
     } catch (e: any) {
@@ -1377,7 +1380,7 @@ export default function ChatView({
 
       setPayModalVisible(false);
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
+        scrollToBottom(true);
       }, 100);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not submit payment');
@@ -1433,7 +1436,7 @@ export default function ChatView({
 
       setRequestMoneyModalVisible(false);
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
+        scrollToBottom(true);
       }, 100);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not send payment request');
@@ -1871,81 +1874,72 @@ export default function ChatView({
       </View>
 
       {/* Messages Feed */}
-      {isChatLoading && paginatedMessages.length === 0 ? (
-        <View style={styles.chatLoadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.chatLoadingText, { color: colors.textSecondary }]}>
-            Loading messages...
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          ref={flatListRef}
-          data={paginatedMessages}
-          keyExtractor={item => item.id}
-          contentContainerStyle={[
-            styles.messagesList,
-            paginatedMessages.length === 0 && { flex: 1, justifyContent: 'center' },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          onLayout={() => {
-            if (!didInitialScrollRef.current && paginatedMessages.length > 0) {
-              didInitialScrollRef.current = true;
-              flatListRef.current?.scrollToEnd({ animated: false });
+      <View style={{ flex: 1, position: 'relative' }}>
+        {isChatLoading && paginatedMessages.length === 0 ? (
+          <View style={styles.chatLoadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.chatLoadingText, { color: colors.textSecondary }]}>
+              Loading messages...
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={invertedMessages}
+            keyExtractor={item => item.id}
+            inverted
+            initialNumToRender={PAGE_SIZE}
+            maxToRenderPerBatch={PAGE_SIZE}
+            windowSize={11}
+            removeClippedSubviews={false}
+            contentContainerStyle={[
+              styles.messagesList,
+              invertedMessages.length === 0 && { flex: 1, justifyContent: 'center' },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            onEndReached={handleLoadEarlierMessages}
+            onEndReachedThreshold={0.15}
+            ListFooterComponent={
+              combinedMessages.length > messagesVisibleCount ? (
+                <View style={styles.loadEarlierContainer}>
+                  {loadingEarlierMessages ? (
+                    <View style={styles.loadEarlierRow}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={[styles.loadEarlierText, { color: colors.textSecondary }]}>
+                        Loading older messages...
+                      </Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.loadEarlierBtn,
+                        { backgroundColor: colors.card, borderColor: colors.border },
+                      ]}
+                      onPress={handleLoadEarlierMessages}
+                    >
+                      <Ionicons name="arrow-up-circle-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.loadEarlierBtnText, { color: colors.primary }]}>
+                        Scroll up or tap for older messages ({combinedMessages.length - messagesVisibleCount} older)
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : null
             }
-          }}
-          onScroll={e => {
-            const offsetY = e.nativeEvent.contentOffset.y;
-            if (
-              offsetY <= 35 &&
-              combinedMessages.length > messagesVisibleCount &&
-              !loadingEarlierMessages
-            ) {
-              handleLoadEarlierMessages();
-            }
-          }}
-          scrollEventThrottle={16}
-          ListHeaderComponent={
-            combinedMessages.length > messagesVisibleCount ? (
-              <View style={styles.loadEarlierContainer}>
-                {loadingEarlierMessages ? (
-                  <View style={styles.loadEarlierRow}>
-                    <ActivityIndicator size="small" color={colors.primary} />
-                    <Text style={[styles.loadEarlierText, { color: colors.textSecondary }]}>
-                      Loading older messages...
-                    </Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={[
-                      styles.loadEarlierBtn,
-                      { backgroundColor: colors.card, borderColor: colors.border },
-                    ]}
-                    onPress={handleLoadEarlierMessages}
-                  >
-                    <Ionicons name="arrow-up-circle-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.loadEarlierBtnText, { color: colors.primary }]}>
-                      Scroll up or tap for older messages ({combinedMessages.length - messagesVisibleCount} older)
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <View style={[styles.encryptionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
-                <Ionicons name="lock-closed" size={14} color={colors.textSecondary} />
-                <Text style={[styles.encryptionText, { color: colors.textSecondary }]}>
-                  Messages and shared bills in this chat are end-to-end encrypted and saved locally.
+            ListEmptyComponent={
+              <View style={[styles.emptyContainer, { transform: [{ scaleY: -1 }] }]}>
+                <View style={[styles.encryptionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
+                  <Ionicons name="lock-closed" size={14} color={colors.textSecondary} />
+                  <Text style={[styles.encryptionText, { color: colors.textSecondary }]}>
+                    Messages and shared bills in this chat are end-to-end encrypted and saved locally.
+                  </Text>
+                </View>
+                <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
+                  Say hello or split an expense with {displayTitle}!
                 </Text>
               </View>
-              <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-                Say hello or split an expense with {displayTitle}!
-              </Text>
-            </View>
-          }
+            }
           renderItem={({ item }) => {
           // Reliably identify if message was sent by active user
           const isSenderOther = Boolean(
@@ -2541,6 +2535,7 @@ export default function ChatView({
         }}
       />
       )}
+      </View>
 
       {/* Editing Message Banner */}
       {editingMessage && (
@@ -2635,7 +2630,7 @@ export default function ChatView({
             onChangeText={setInputText}
             onFocus={() => {
               setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
+                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
               }, 120);
             }}
             multiline

@@ -1,0 +1,172 @@
+# Split Your Trip - Store Listing Translations
+
+## Language: en-US (English - Default)
+Title: Split Your Trip
+Short Description: Split trip expenses, scan receipts & settle group balances effortlessly.
+Full Description:
+Planning a vacation, weekend getaway, or road trip with friends? Say goodbye to messy spreadsheets, confusing calculations, and awkward money talks.
+
+Split Your Trip makes managing and splitting group travel expenses effortless, fair, and crystal clear.
+
+✈️ KEY FEATURES:
+
+🔹 Effortless Group Splitting
+Create trips in seconds and invite friends. Add expenses on the go and let the app instantly calculate who owes whom with optimized minimal transactions.
+
+🔹 Flexible Split Methods
+Split bills equally, by exact amounts, or by custom shares. Perfect for group meals, hotel bookings, cab fares, and fuel costs.
+
+🔹 Smart Receipt & Bill Attachment
+Snap a photo of any restaurant bill or receipt. Attach receipts directly to expenses so everyone has full visibility.
+
+🔹 Multi-Currency Support
+Traveling internationally? Log expenses in different currencies and keep accurate track of travel budgets.
+
+🔹 Instant Settle Up & Clear Records
+Settle debts smoothly via UPI or direct payment notes. Keep track of payments and mark balances as cleared with a single tap.
+
+🔹 Integrated Trip Chat
+Discuss trip plans, share updates, and notify friends about new expenses all in one place.
+
+🔹 Real-Time Notifications
+Get instant alerts when someone adds a bill, edits an expense, or settles a balance.
+
+🔹 Sleek, Modern & Ad-Free Experience
+Enjoy a modern, intuitive interface with dark mode support designed to keep your travel accounting seamless.
+
+Whether you're backpacking with friends, taking a family holiday, or managing shared roommate costs, Split Your Trip is your ultimate group expense companion.
+
+Download Split Your Trip today and travel stress-free!
+
+---
+
+## Language: hi-IN (Hindi)
+Title: Split Your Trip
+Short Description: दोस्तों के साथ ट्रिप खर्च और बिल आसानी से बांटें और हिसाब रखें।
+Full Description:
+दोस्तों के साथ वेकेशन, रोड ट्रिप या वीकेंड टूर की योजना बना रहे हैं? हिसाब-किताब के झंझट और स्प्रेडशीट को कहें अलविदा!
+
+Split Your Trip आपके ग्रुप ट्रिप के खर्चों को बांटना और मैनेज करना बेहद आसान और पारदर्शी बनाता है।
+
+✈️ मुख्य विशेषताएं:
+
+🔹 आसान ग्रुप खर्च विभाजन
+कुछ ही सेकंड में ट्रिप बनाएं और दोस्तों को जोड़ें। रीयल-टाइम में खर्च जोड़ें और जानें कि किसे कितने पैसे देने हैं।
+
+🔹 लचीले विभाजन विकल्प
+बिल को बराबर, निश्चित राशि या प्रतिशत के आधार पर बांटें। होटल, खाना, कैब और पेट्रोल खर्च के लिए बेहतरीन।
+
+🔹 रसीद और बिल अटैचमेंट
+होटल या रेस्टोरेंट के बिल की फोटो खींचकर सीधे खर्च के साथ अटैच करें ताकि पूरी पारदर्शिता रहे।
+
+🔹 मल्टी-करेंसी सपोर्ट
+विदेश यात्रा के दौरान अलग-अलग मुद्राओं में खर्च जोड़ें और बजट का पूरा हिसाब रखें।
+
+🔹 आसान सेटलमेंट और यूपीआई
+यूपीआई (UPI) या कैश पेमेंट के जरिए तुरंत हिसाब चुकता करें और एक टैप में बैलेंस क्लियर करें।
+
+🔹 ट्रिप चैट और रीयल-टाइम नोटिफिकेशन
+ट्रिप चैट में दोस्तों के साथ प्लान बनाएं और हर नए खर्च या सेटलमेंट पर तुरंत नोटिफिकेशन पाएं।
+
+चाहे दोस्तों के साथ ट्रिप हो, फैमिली टूर हो या रूममेट्स का खर्च, Split Your Trip आपका सबसे भरोसेमंद साथी है।
+
+आज ही डाउनलोड करें और बिना किसी झंझट के घूमें!
+
+---
+
+## Language: es-ES (Spanish)
+Title: Split Your Trip
+Short Description: Divide gastos de viajes, añade facturas y salda cuentas con amigos.
+Full Description:
+¿Planeas unas vacaciones, escapada de fin de semana o viaje por carretera con amigos? Olvídate de cálculos complicados y hojas de cálculo.
+
+Split Your Trip hace que gestionar y dividir los gastos de viaje en grupo sea sencillo, justo y transparente.
+
+✈️ CARACTERÍSTICAS PRINCIPALES:
+
+🔹 División de gastos sin esfuerzo
+Crea viajes en segundos e invita a tus amigos. Añade gastos sobre la marcha y deja que la aplicación calcule quién le debe a quién optimizando las transacciones.
+
+🔹 Métodos flexibles de división
+Divide las facturas a partes iguales, por importes exactos o porcentajes. Ideal para cenas, alojamientos, transporte y combustible.
+
+🔹 Adjunta recibos y facturas
+Haz una foto a cualquier ticket o factura y añádela directamente al gasto para total transparencia.
+
+🔹 Soporte multimoneda
+¿Viajas al extranjero? Registra gastos en diferentes divisas y mantén el control de tu presupuesto.
+
+🔹 Salda deudas fácilmente
+Registra pagos y salda cuentas con un solo toque manteniendo un historial limpio y claro.
+
+🔹 Chat integrado del viaje
+Organiza planes, comparte novedades y mantente en contacto con todos los miembros del viaje en un mismo lugar.
+
+🔹 Notificaciones en tiempo real
+Recibe alertas instantáneas cuando alguien añade un gasto o salda un pago.
+
+Descarga Split Your Trip hoy y viaja sin preocupaciones.
+
+---
+
+## Language: fr-FR (French)
+Title: Split Your Trip
+Short Description: Partagez facilement les dépenses de voyage et équilibrez vos comptes.
+Full Description:
+Vous prévoyez des vacances ou un week-end entre amis ? Dites adieu aux calculs fastidieux et aux feuilles de calcul compliquées.
+
+Split Your Trip simplifie la gestion et le partage des dépenses de voyage en groupe de manière claire et équitable.
+
+✈️ FONCTIONNALITÉS CLÉS :
+
+🔹 Partage de groupe simplifié
+Créez un voyage en quelques secondes et invitez vos proches. Ajoutez vos dépenses et laissez l'application calculer qui doit quoi en optimisant les remboursements.
+
+🔹 Méthodes de partage flexibles
+Partagez équitablement, par montants fixes ou par pourcentages. Idéal pour les restaurants, hébergements et transports.
+
+🔹 Ajout de reçus et factures
+Photographiez vos tickets de caisse et joignez-les directement aux dépenses pour une transparence totale.
+
+🔹 Prise en charge multidevise
+En voyage à l'étranger ? Enregistrez vos dépenses dans différentes devises sans prise de tête.
+
+🔹 Remboursements et soldes simplifiés
+Suivez les remboursements et marquez les dettes comme réglées en un seul clic.
+
+🔹 Chat de voyage intégré & Notifications en direct
+Discutez des détails du voyage et recevez des alertes dès qu'une dépense est ajoutée.
+
+Téléchargez Split Your Trip dès maintenant et voyagez l'esprit tranquille !
+
+---
+
+## Language: de-DE (German)
+Title: Split Your Trip
+Short Description: Reisekosten teilen, Belege scannen und Gruppenrechnungen einfach begleichen.
+Full Description:
+Planst du einen Urlaub, Wochenendausflug oder Roadtrip mit Freunden? Vergiss unübersichtliche Tabellen und komplizierte Berechnungen.
+
+Split Your Trip macht das Verwalten und Aufteilen von Gruppenreisekosten mühelos, fair und transparent.
+
+✈️ HAUPTFUNKTIONEN:
+
+🔹 Mühelose Kostenaufteilung
+Erstelle Reisen in Sekundenschnelle und lade Freunde ein. Füge Ausgaben unterwegs hinzu und die App berechnet automatisch, wer wem wie viel schuldet.
+
+🔹 Flexible Aufteilungsmethoden
+Teile Rechnungen gleichmäßig, nach genauen Beträgen oder prozentual auf. Perfekt für Restaurantbesuche, Unterkünfte und Fahrtkosten.
+
+🔹 Belege und Rechnungen erfassen
+Fotografiere Quittungen und hänge sie direkt an die Ausgabe an – für volle Transparenz.
+
+🔹 Mehrwährungsunterstützung
+Auslandsreise? Erfasse Ausgaben in verschiedenen Währungen und behalte dein Reisebudget im Blick.
+
+🔹 Schulden einfach begleichen
+Behalte den Überblick über Rückzahlungen und gleiche offene Beträge mit einem Fingertipp aus.
+
+🔹 Integrierter Reise-Chat & Push-Benachrichtigungen
+Tausche dich mit deinen Mitreisenden aus und erhalte sofort Benachrichtigungen bei neuen Ausgaben.
+
+Lade Split Your Trip jetzt herunter und reise stressfrei!

@@ -1,7 +1,7 @@
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
-import { FriendContact, normalizePhone, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
+import { FriendContact, normalizePhone, normalizeNameForMatch, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
 import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload } from '../features/trips/useTripStore';
 
@@ -34,6 +34,7 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
   }
 
   let myUserPhone: string | null = null;
+  let myUserName: string | null = null;
   try {
     const { useAuthStore } = require('../features/auth/useAuthStore');
     const authState = useAuthStore.getState();
@@ -42,17 +43,42 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       (authState.user as any)?.phone ||
       (authState.user as any)?.user_metadata?.phone_number ||
       null;
+    myUserName =
+      authState.profile?.full_name ||
+      authState.profile?.name ||
+      (authState.user as any)?.user_metadata?.full_name ||
+      (authState.user as any)?.user_metadata?.name ||
+      null;
   } catch {}
 
   try {
     const sb = supabaseAdmin || supabase;
+
+    // Ensure we have current user's own profile data for strict self-filtering
+    if ((!myUserPhone || !myUserName) && userId) {
+      try {
+        const { data: myProf } = await sb
+          .from('profiles')
+          .select('phone_number, full_name')
+          .eq('id', userId)
+          .maybeSingle();
+        if (myProf?.phone_number && !myUserPhone) myUserPhone = myProf.phone_number;
+        if (myProf?.full_name && !myUserName) myUserName = myProf.full_name;
+      } catch {}
+    }
+
+    const cleanUserPhone = myUserPhone ? normalizePhone(myUserPhone) : '';
+    const last10Digits = cleanUserPhone && cleanUserPhone.length >= 6 ? cleanUserPhone.slice(-10) : '';
+    const memberQuery = last10Digits
+      ? `profile_id.eq.${userId},user_id.eq.${userId},phone_number.ilike.%${last10Digits}%`
+      : `profile_id.eq.${userId},user_id.eq.${userId}`;
 
     // 2. Fetch all trips where user is creator, friend, or a member, or sent chat messages
     const [memberTripsRes, createdTripsRes, friendTripsRes, messageTripsRes] = await Promise.all([
       sb
         .from('trip_members')
         .select('trip_id, id, profile_id, display_name, phone_number')
-        .or(`profile_id.eq.${userId},user_id.eq.${userId}`),
+        .or(memberQuery),
       sb.from('trips').select('id, name, trip_type, friend_id, created_by').eq('created_by', userId),
       sb.from('trips').select('id, name, trip_type, friend_id, created_by').eq('friend_id', userId),
       sb.from('trip_messages').select('trip_id').eq('sender_id', userId).limit(100),
@@ -196,13 +222,28 @@ interface FriendMapEntry {
         const otherPersonId = tripMeta.created_by === userId ? tripMeta.friend_id : (tripMeta.friend_id === userId ? tripMeta.created_by : null);
         if (otherPersonId) {
           const prof = profilesMap.get(otherPersonId);
-          const friendPhone = prof?.phone_number || undefined;
-          const rawTripFriendName = tripMeta.name?.replace(/^split with /i, '').trim();
+          const otherMember = remoteMembers.find((m: any) =>
+            m.trip_id === tId &&
+            (m.profile_id === otherPersonId || m.user_id === otherPersonId || (!m.profile_id && m.role === 'admin' && tripMeta.created_by === otherPersonId))
+          );
+          const friendPhone = prof?.phone_number || otherMember?.phone_number || undefined;
+          const isTripCreatedByMe = tripMeta.created_by === userId;
+          // CRITICAL: If the trip was created by the other person, the name in 'Split with [Name]' is ME, NOT the friend!
+          const rawTripFriendName = isTripCreatedByMe
+            ? tripMeta.name?.replace(/^split with /i, '').trim()
+            : null;
+
+          const otherMemberDisplayName = (!isTripCreatedByMe && otherMember?.display_name && otherMember.display_name !== 'You' && (!myUserName || normalizeNameForMatch(otherMember.display_name) !== normalizeNameForMatch(myUserName)))
+            ? otherMember.display_name
+            : null;
+
           const friendName = getEffectiveContactName({
             phoneNumber: friendPhone,
-            displayName: rawTripFriendName,
-            profileName: prof?.full_name,
-            fallback: rawTripFriendName || 'Friend',
+            contactName: isTripCreatedByMe ? rawTripFriendName : null,
+            displayName: isTripCreatedByMe ? rawTripFriendName : otherMemberDisplayName,
+            profileName: prof?.full_name || (prof as any)?.name,
+            fallback: prof?.full_name || (prof as any)?.name || (isTripCreatedByMe ? (rawTripFriendName || 'Friend') : (otherMemberDisplayName || 'Friend')),
+            currentUserName: myUserName,
           });
           const normPhone = normalizePhone(friendPhone);
           const friendKey = normPhone || otherPersonId;
@@ -213,15 +254,19 @@ interface FriendMapEntry {
             cleanPhone: normPhone || undefined,
             profileId: otherPersonId,
             isGuest: false,
-            avatarUrl: prof?.avatar_url || undefined,
+            avatarUrl: prof?.avatar_url || otherMember?.avatar_url || undefined,
             owedToYouPaise: 0,
             youOwePaise: 0,
             trips: new Set<string>(),
             unseenMessagesCount: 0,
             lastMessageAt: undefined,
           };
-          if (!entry.name || entry.name === 'Friend') {
+          if (!entry.name || entry.name === 'Friend' || (myUserName && normalizeNameForMatch(entry.name) === normalizeNameForMatch(myUserName))) {
             entry.name = friendName;
+          }
+          if (friendPhone && !entry.phoneNumber) {
+            entry.phoneNumber = friendPhone;
+            entry.cleanPhone = normPhone || undefined;
           }
           entry.trips.add(tId);
 
@@ -252,8 +297,13 @@ interface FriendMapEntry {
       if (tMembers.length === 0) continue;
 
       let myMember = findMyMember(tMembers, userId, myUserPhone);
-      if (!myMember && tripMeta && tripMeta.created_by === userId) {
-        myMember = tMembers.find(m => m.role === 'admin') || tMembers[0];
+      if (!myMember) {
+        if (tripMeta && tripMeta.created_by === userId) {
+          myMember = tMembers.find(m => m.role === 'admin') || tMembers[0];
+        } else if (tMembers.length === 2 && tripMeta && tripMeta.created_by) {
+          // In a 2-person split trip created by the other person, the admin is the creator, so the other member is ME!
+          myMember = tMembers.find(m => m.profile_id !== tripMeta.created_by && m.role !== 'admin') || tMembers.find(m => m.profile_id === userId);
+        }
       }
       if (!myMember) continue;
 
@@ -281,6 +331,7 @@ interface FriendMapEntry {
         if (otherMember.profile_id && otherMember.profile_id === userId) continue;
         if ((otherMember as any).user_id && (otherMember as any).user_id === userId) continue;
         if (myUserPhone && otherMember.phone_number && normalizePhone(otherMember.phone_number) === normalizePhone(myUserPhone)) continue;
+        if (myUserName && otherMember.display_name && normalizeNameForMatch(otherMember.display_name) === normalizeNameForMatch(myUserName)) continue;
 
         const prof = otherMember.profile_id ? profilesMap.get(otherMember.profile_id) : null;
         const friendPhone = prof?.phone_number || otherMember.phone_number || undefined;
@@ -289,12 +340,16 @@ interface FriendMapEntry {
         // Primary lookup key: normalized phone if available, then profile_id, then member.id
         const friendKey = resolvedPhone || otherMember.profile_id || otherMember.id;
 
+        const isOtherMemberMe = myUserName && otherMember.display_name && normalizeNameForMatch(otherMember.display_name) === normalizeNameForMatch(myUserName);
+        const safeDisplayName = (!isOtherMemberMe && otherMember.display_name && otherMember.display_name !== 'You') ? otherMember.display_name : null;
+
         const resolvedFriendName = getEffectiveContactName({
           phoneNumber: friendPhone,
-          contactName: otherMember.display_name,
-          displayName: otherMember.display_name,
-          profileName: prof?.full_name,
-          fallback: otherMember.display_name || 'Friend',
+          contactName: safeDisplayName,
+          displayName: safeDisplayName,
+          profileName: prof?.full_name || (prof as any)?.name,
+          fallback: prof?.full_name || (prof as any)?.name || safeDisplayName || 'Friend',
+          currentUserName: myUserName,
         });
 
         const entry: FriendMapEntry = friendMap.get(friendKey) || {
@@ -316,12 +371,16 @@ interface FriendMapEntry {
           entry.avatarUrl = prof.avatar_url;
         }
 
-        // Prioritize device contact name. If none exists, use profile name
+        // Prioritize device contact name. If none exists, use profile name or resolved friend name
         const matchedContactName = getContactNameByPhone(friendPhone || entry.phoneNumber || entry.cleanPhone);
         if (matchedContactName) {
           entry.name = matchedContactName;
-        } else if (!entry.name || isGenericPlaceholder(entry.name)) {
+        } else if (!entry.name || isGenericPlaceholder(entry.name) || (myUserName && normalizeNameForMatch(entry.name) === normalizeNameForMatch(myUserName))) {
           entry.name = resolvedFriendName;
+        }
+        if (friendPhone && !entry.phoneNumber) {
+          entry.phoneNumber = friendPhone;
+          entry.cleanPhone = resolvedPhone || undefined;
         }
 
         entry.trips.add(tId);
@@ -369,14 +428,20 @@ interface FriendMapEntry {
       if (f.profileId && f.profileId === userId) continue;
       if (myUserPhone && f.phoneNumber && normalizePhone(f.phoneNumber) === normalizePhone(myUserPhone)) continue;
       if (myUserPhone && f.cleanPhone && normalizePhone(f.cleanPhone) === normalizePhone(myUserPhone)) continue;
+      if (myUserName && f.name && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName) && (!f.profileId || f.profileId === userId)) continue;
 
       const prof = f.profileId ? profilesMap.get(f.profileId) : null;
+      // If f.name was accidentally set to the current user's name, strip it so profileName wins!
+      const isMyName = myUserName && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName);
+      const safeContactName = isMyName ? null : f.name;
+
       const finalResolvedName = getEffectiveContactName({
         phoneNumber: f.phoneNumber || f.cleanPhone,
-        contactName: f.name,
-        displayName: f.name,
-        profileName: prof?.full_name,
-        fallback: prof?.full_name || f.name || 'Friend',
+        contactName: safeContactName,
+        displayName: safeContactName,
+        profileName: prof?.full_name || (prof as any)?.name,
+        fallback: prof?.full_name || (prof as any)?.name || safeContactName || 'Friend',
+        currentUserName: myUserName,
       });
       const net = f.owedToYouPaise - f.youOwePaise;
       totalOwedToYouPaise += f.owedToYouPaise;

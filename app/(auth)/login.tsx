@@ -34,7 +34,6 @@ export default function LoginScreen() {
     verifyOtp,
     sendPasswordResetEmail,
     resetPasswordWithOtp,
-    isConfigured,
   } = useAuthStore();
   const fetchTrips = useTripStore(state => state.fetchTrips);
 
@@ -724,18 +723,6 @@ export default function LoginScreen() {
             </View>
           )}
 
-          {/* Database status indicator */}
-          <View style={[styles.configBadge, { borderTopColor: colors.borderLight }]}>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: isConfigured ? colors.success : colors.warning },
-              ]}
-            />
-            <Text style={[styles.configText, { color: colors.textMuted }]}>
-              {isConfigured ? 'Connected to Supabase Database' : 'Supabase Not Configured'}
-            </Text>
-          </View>
         </View>
       </ScrollView>
       {/* Currency & Country Selector Modal */}
@@ -1205,24 +1192,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     flex: 1,
     lineHeight: 18,
-  },
-  configBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 24,
-    paddingTop: 16,
-    borderTopWidth: 1,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  configText: {
-    fontSize: 12,
-    fontWeight: '500',
   },
   otpAuxActions: {
     marginTop: 18,

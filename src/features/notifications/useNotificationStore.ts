@@ -46,6 +46,16 @@ interface NotificationState {
 
 const STORAGE_KEY_PREFIX = '@splityourtrip_user_notifications_';
 
+function getNotificationStorageKey(userId?: string): string {
+  if (userId) return `${STORAGE_KEY_PREFIX}${userId}`;
+  try {
+    const { useAuthStore } = require('../auth/useAuthStore');
+    const uId = useAuthStore.getState().user?.id;
+    if (uId) return `${STORAGE_KEY_PREFIX}${uId}`;
+  } catch {}
+  return `${STORAGE_KEY_PREFIX}guest`;
+}
+
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
@@ -78,9 +88,16 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const updated = [newNotif, ...state.notifications].slice(0, 80);
       const unreadCount = updated.filter(n => !n.read).length;
 
-      // Save to persistent storage
+      // Save to user-partitioned persistent storage
       try {
-        AppStorage.setItem(`${STORAGE_KEY_PREFIX}current`, JSON.stringify(updated)).catch(() => {});
+        const key = getNotificationStorageKey();
+        AppStorage.setItem(key, JSON.stringify(updated)).catch(() => {});
+      } catch {}
+
+      // Post native system OS notification to Android/iOS notification drawer
+      try {
+        const { scheduleLocalNotification } = require('../../services/pushNotificationService');
+        scheduleLocalNotification(newNotif.title, newNotif.message, { tripId: newNotif.tripId });
       } catch {}
 
       return {
@@ -96,7 +113,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const updated = state.notifications.map(n => n.id === id ? { ...n, read: true } : n);
       const unreadCount = updated.filter(n => !n.read).length;
       try {
-        AppStorage.setItem(`${STORAGE_KEY_PREFIX}current`, JSON.stringify(updated)).catch(() => {});
+        const key = getNotificationStorageKey();
+        AppStorage.setItem(key, JSON.stringify(updated)).catch(() => {});
       } catch {}
       return { notifications: updated, unreadCount };
     });
@@ -106,7 +124,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     set((state) => {
       const updated = state.notifications.map(n => ({ ...n, read: true }));
       try {
-        AppStorage.setItem(`${STORAGE_KEY_PREFIX}current`, JSON.stringify(updated)).catch(() => {});
+        const key = getNotificationStorageKey();
+        AppStorage.setItem(key, JSON.stringify(updated)).catch(() => {});
       } catch {}
       return { notifications: updated, unreadCount: 0 };
     });
@@ -114,6 +133,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   clearAllNotifications: () => {
     try {
+      const key = getNotificationStorageKey();
+      AppStorage.removeItem(key).catch(() => {});
       AppStorage.removeItem(`${STORAGE_KEY_PREFIX}current`).catch(() => {});
     } catch {}
     set({ notifications: [], unreadCount: 0, activeToast: null });
@@ -121,15 +142,17 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   loadNotifications: async (userId?: string) => {
     try {
-      const key = userId ? `${STORAGE_KEY_PREFIX}${userId}` : `${STORAGE_KEY_PREFIX}current`;
+      const key = getNotificationStorageKey(userId);
       const raw = await AppStorage.getItem(key);
       if (raw) {
         const parsed: AppNotification[] = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           const unreadCount = parsed.filter(n => !n.read).length;
           set({ notifications: parsed, unreadCount });
+          return;
         }
       }
+      set({ notifications: [], unreadCount: 0 });
     } catch {}
   },
 }));

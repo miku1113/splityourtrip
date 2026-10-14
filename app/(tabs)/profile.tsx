@@ -24,7 +24,7 @@ import { SUPPORTED_CURRENCIES, CurrencyItem, getCurrencyInfo } from '../../src/s
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, profile, isConfigured, updateProfile, fetchProfile, signOut } = useAuthStore();
+  const { user, profile, updateProfile, fetchProfile, signOut } = useAuthStore();
   const { colors } = useTheme();
 
   const [name, setName] = useState(profile?.full_name || profile?.name || 'Traveler');
@@ -200,7 +200,7 @@ export default function ProfileScreen() {
         Alert.alert('Save Failed', res.error.message);
       } else {
         setSavedMsg(true);
-        Alert.alert('Profile Saved', 'Your profile details, mobile number, UPI ID, and profile picture have been updated in Supabase.');
+        Alert.alert('Profile Saved', 'Your profile details, mobile number, UPI ID, and profile picture have been updated.');
         setTimeout(() => setSavedMsg(false), 3000);
       }
     } catch (err: any) {
@@ -285,22 +285,6 @@ export default function ProfileScreen() {
         <Text style={[styles.userEmail, { color: colors.textSecondary }]}>
           {user?.email || 'Logged Out'}
         </Text>
-
-        <View style={[styles.statusBadge, { backgroundColor: colors.borderLight }]}>
-          <View
-            style={[
-              styles.statusDot,
-              { backgroundColor: isConfigured ? colors.success : colors.warning },
-            ]}
-          />
-          <Text style={[styles.statusText, { color: colors.textSecondary }]}>
-            {isConfigured ? 'Supabase Backend Connected' : 'Local Preview Mode'}
-          </Text>
-        </View>
-
-        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 6, fontWeight: '500' }}>
-          App Version 1.0.14 (Build 15)
-        </Text>
       </View>
 
 
@@ -319,7 +303,7 @@ export default function ProfileScreen() {
         {savedMsg && (
           <View style={[styles.savedBanner, { backgroundColor: colors.successBg }]}>
             <Text style={[styles.savedText, { color: colors.success }]}>
-              ✓ Profile updated and saved to Supabase
+              ✓ Profile updated successfully
             </Text>
           </View>
         )}
@@ -459,25 +443,6 @@ export default function ProfileScreen() {
         )}
       </View>
 
-      {/* Supabase Integration Info */}
-      <View
-        style={[
-          styles.sectionCard,
-          {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-          },
-        ]}
-      >
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Backend Architecture</Text>
-        <Text style={[styles.backendDesc, { color: colors.textSecondary }]}>
-          • Database: Supabase Postgres with Row Level Security (RLS)
-          {'\n'}• Storage: Private bucket `payment-screenshots`
-          {'\n'}• Realtime: Live sync for expenses, balances & trip chat
-          {'\n'}• Currency: Integer Paise (1 INR = 100 paise)
-        </Text>
-      </View>
-
       {/* Auth Action */}
       {user ? (
         <TouchableOpacity
@@ -508,6 +473,10 @@ export default function ProfileScreen() {
           <Text style={styles.saveBtnText}>Sign In / Create Account</Text>
         </TouchableOpacity>
       )}
+
+      <Text style={[styles.footerVersionText, { color: colors.textMuted }]}>
+        Split Your Trip • v1.0.31
+      </Text>
       </ScrollView>
 
       {/* Currency & Country Selector Modal */}
@@ -778,24 +747,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 9999,
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
   sectionCard: {
     borderRadius: 16,
     padding: 20,
@@ -939,17 +890,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  backendDesc: {
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 8,
-  },
   logoutBtn: {
     borderWidth: 1,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 8,
+    marginBottom: 20,
+  },
+  footerVersionText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
     marginBottom: 32,
   },
   logoutBtnText: {

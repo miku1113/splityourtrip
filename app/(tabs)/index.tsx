@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -34,7 +35,7 @@ export default function MyTripsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, profile } = useAuthStore();
-  const { trips, fetchTrips, createTrip, addMember, joinTripByCode, isLoading } = useTripStore();
+  const { trips, fetchTrips, initTrips, createTrip, addMember, joinTripByCode, isLoading, isHydrated } = useTripStore();
   const { contacts, isLoading: contactsLoading, initContacts } = useContactsStore();
   const { colors, isDark } = useTheme();
 
@@ -47,6 +48,7 @@ export default function MyTripsScreen() {
   const [newTripImage, setNewTripImage] = useState<string | null>(null);
   const [newTripDescription, setNewTripDescription] = useState('');
   const [inviteCode, setInviteCode] = useState('');
+  const [joinErrorMsg, setJoinErrorMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
 
@@ -68,19 +70,31 @@ export default function MyTripsScreen() {
     }
   }, [openCreate]);
 
+  // Initial local hydration on mount (instant cache load, matching contacts)
+  useEffect(() => {
+    initTrips();
+  }, [user?.id]);
+
   // Pagination state (10 per page)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [openingTripId, setOpeningTripId] = useState<string | null>(null);
+  const lastFetchRef = useRef<number>(0);
 
   useFocusEffect(
     useCallback(() => {
       setOpeningTripId(null);
-      if (user?.id) {
-        fetchTrips(user.id);
+
+      // Only refetch if more than 4 seconds elapsed to eliminate rapid flickering
+      if (Date.now() - lastFetchRef.current > 4000) {
+        lastFetchRef.current = Date.now();
+        const task = InteractionManager.runAfterInteractions(() => {
+          fetchTrips(user?.id);
+        });
+        return () => task.cancel();
       }
-    }, [user?.id])
+    }, [user?.id, fetchTrips])
   );
 
   const handleOpenTrip = (tripId: string) => {
@@ -240,22 +254,65 @@ export default function MyTripsScreen() {
   }, [contacts, contactSearch]);
 
   const handleJoinTrip = async () => {
-    if (!inviteCode.trim()) return;
+    const rawCode = inviteCode.trim();
+    if (!rawCode) {
+      setJoinErrorMsg('Please enter a 6-character invite code.');
+      return;
+    }
     if (!user) {
-      router.replace('/(auth)/login');
+      Alert.alert(
+        'Sign In Required',
+        'Please sign in to your account to join a trip using an invite code.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign In', onPress: () => router.push('/(auth)/login') },
+        ]
+      );
       return;
     }
     setJoining(true);
-    const success = await joinTripByCode(
-      inviteCode.trim(),
-      user.id,
-      profile?.full_name || profile?.name || 'Traveler'
-    );
-    setJoining(false);
-    setInviteCode('');
-    setJoinModalVisible(false);
-    if (success) {
-      fetchTrips(user.id);
+    setJoinErrorMsg(null);
+    try {
+      const res = await joinTripByCode(
+        rawCode,
+        user.id,
+        profile?.full_name || profile?.name || 'Traveler'
+      );
+      setJoining(false);
+
+      if (res.success && res.tripId) {
+        setInviteCode('');
+        setJoinErrorMsg(null);
+        setJoinModalVisible(false);
+        if (res.alreadyMember) {
+          Alert.alert(
+            'Already Joined',
+            `You are already a member of "${res.tripName || 'this trip'}". Opening trip!`,
+            [
+              {
+                text: 'Open',
+                onPress: () => router.push(`/trip/${res.tripId}`),
+              },
+            ]
+          );
+        } else {
+          Alert.alert(
+            'Trip Joined! 🎉',
+            `You have successfully joined "${res.tripName || 'the trip'}"!`,
+            [
+              {
+                text: 'Open Trip',
+                onPress: () => router.push(`/trip/${res.tripId}`),
+              },
+            ]
+          );
+        }
+      } else {
+        setJoinErrorMsg(res.error || 'Trip not found. Please check the code and try again.');
+      }
+    } catch (err: any) {
+      setJoining(false);
+      setJoinErrorMsg(err?.message || 'Failed to join trip. Please try again.');
     }
   };
 
@@ -345,7 +402,11 @@ export default function MyTripsScreen() {
             styles.joinBtn,
             { backgroundColor: colors.card, borderColor: colors.primary },
           ]}
-          onPress={() => setJoinModalVisible(true)}
+          onPress={() => {
+            setInviteCode('');
+            setJoinErrorMsg(null);
+            setJoinModalVisible(true);
+          }}
         >
           <Ionicons name="link" size={18} color={colors.primary} />
           <Text style={[styles.joinBtnText, { color: colors.primary }]}>Join via Code</Text>
@@ -389,7 +450,7 @@ export default function MyTripsScreen() {
         }
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          isLoading ? (
+          (!isHydrated || (isLoading && groupTrips.length === 0)) ? (
             <View style={styles.emptyContainer}>
               <ActivityIndicator size="large" color={colors.primary} />
               <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 12 }]}>
@@ -1151,28 +1212,62 @@ export default function MyTripsScreen() {
                 Paste the 6-character invite code shared by your trip admin.
               </Text>
 
+              {joinErrorMsg && (
+                <View style={[styles.errorModalBanner, { backgroundColor: colors.dangerBg }]}>
+                  <Text style={[styles.errorModalText, { color: colors.danger }]}>
+                    {joinErrorMsg}
+                  </Text>
+                </View>
+              )}
+
               <Text style={[styles.modalLabel, { color: colors.textSecondary }]}>Invite Code</Text>
-              <TextInput
-                style={[
-                  styles.modalInput,
-                  styles.codeText,
-                  {
-                    backgroundColor: colors.inputBackground,
-                    borderColor: colors.border,
-                    color: colors.text,
-                  },
-                ]}
-                placeholder="e.g. GOA420"
-                placeholderTextColor={colors.textMuted}
-                autoCapitalize="characters"
-                value={inviteCode}
-                onChangeText={setInviteCode}
-              />
+              <View style={{ position: 'relative', width: '100%' }}>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    styles.codeText,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: joinErrorMsg ? colors.danger : colors.border,
+                      color: colors.text,
+                      paddingRight: inviteCode ? 40 : 12,
+                    },
+                  ]}
+                  placeholder="e.g. 6VF0WT"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  value={inviteCode}
+                  onChangeText={(val) => {
+                    setInviteCode(val.toUpperCase());
+                    if (joinErrorMsg) setJoinErrorMsg(null);
+                  }}
+                />
+                {inviteCode.length > 0 && (
+                  <TouchableOpacity
+                    style={{
+                      position: 'absolute',
+                      right: 12,
+                      top: 14,
+                      padding: 4,
+                    }}
+                    onPress={() => {
+                      setInviteCode('');
+                      if (joinErrorMsg) setJoinErrorMsg(null);
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
 
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={[styles.cancelBtn, { borderColor: colors.border }]}
-                  onPress={() => setJoinModalVisible(false)}
+                  onPress={() => {
+                    setJoinModalVisible(false);
+                    setJoinErrorMsg(null);
+                  }}
                 >
                   <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
                 </TouchableOpacity>

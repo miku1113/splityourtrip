@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
-import { useContactsStore, FriendContact, getEffectiveContactName } from '../../src/features/contacts/useContactsStore';
+import { useContactsStore, FriendContact, getEffectiveContactName, normalizeNameForMatch, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 
@@ -35,6 +35,7 @@ interface FriendRowItemProps {
   colors: any;
   isDark: boolean;
   currentUserId?: string;
+  currentUserName?: string | null;
   userAvatarUrl?: string | null;
   onOpen: (item: FriendContact) => void;
   onInvite: (name: string, phone?: string) => void;
@@ -50,6 +51,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
   colors,
   isDark,
   currentUserId,
+  currentUserName,
   userAvatarUrl,
   onOpen,
   onInvite,
@@ -80,6 +82,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
     contactName: item.name,
     displayName: item.name,
     fallback: item.name,
+    currentUserName,
   });
 
   return (
@@ -397,6 +400,9 @@ export default function FriendsScreen() {
     setRefreshing(false);
   };
 
+  const currentUserName = profile?.full_name || profile?.name || (user as any)?.user_metadata?.full_name || (user as any)?.user_metadata?.name;
+  const currentUserPhone = profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
+
   // Friends list with unseen messages first, then highest pending amounts, then settled
   const activeFriends = useMemo(() => {
     const seenIds = new Set<string>();
@@ -405,7 +411,16 @@ export default function FriendsScreen() {
     const pendingList: FriendContact[] = [];
     const otherList: FriendContact[] = [];
 
+    const currentUserId = user?.id;
+    const normUserPhone = currentUserPhone ? normalizePhone(currentUserPhone) : '';
+
     for (const c of contacts) {
+      // Strictly prevent user from ever seeing themself as a friend
+      if (currentUserId && (c.profileId === currentUserId || c.id === currentUserId)) continue;
+      if (normUserPhone && c.cleanPhone && normalizePhone(c.cleanPhone) === normUserPhone) continue;
+      if (normUserPhone && c.phoneNumber && normalizePhone(c.phoneNumber) === normUserPhone) continue;
+      if (currentUserName && normalizeNameForMatch(c.name) === normalizeNameForMatch(currentUserName) && (!c.profileId || c.profileId === currentUserId)) continue;
+
       const cleanName = c.name.trim().toLowerCase();
       if (seenIds.has(c.id) || seenNames.has(cleanName)) continue;
       seenIds.add(c.id);
@@ -441,7 +456,7 @@ export default function FriendsScreen() {
     });
 
     return [...unseenList, ...pendingList, ...otherList];
-  }, [contacts]);
+  }, [contacts, user?.id, currentUserPhone, currentUserName]);
 
   // Aggregate totals calculated accurately from entire database via dedicated API
   const totalOwedToYou = friendsSummary.totalOwedToYouPaise;
@@ -525,6 +540,7 @@ export default function FriendsScreen() {
         colors={colors}
         isDark={isDark}
         currentUserId={user?.id}
+        currentUserName={currentUserName}
         userAvatarUrl={profile?.avatar_url}
         onOpen={handleOpenFriendChat}
         onInvite={inviteFriend}
@@ -537,6 +553,7 @@ export default function FriendsScreen() {
       colors,
       isDark,
       user?.id,
+      currentUserName,
       profile?.avatar_url,
       handleOpenFriendChat,
       inviteFriend,

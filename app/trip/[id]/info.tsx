@@ -501,7 +501,7 @@ export default function TripInfoScreen() {
           const list = data
             .filter(c => c.name && c.name.trim().length > 0)
             .map(c => ({
-              id: c.id,
+              id: c.id || `contact_${Math.random().toString(36).slice(2, 9)}`,
               name: c.name,
               phoneNumber: c.phoneNumbers?.[0]?.number || undefined,
             }));

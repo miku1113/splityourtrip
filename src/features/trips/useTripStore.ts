@@ -78,6 +78,14 @@ export function normalizePhone(rawPhone?: string | null): string {
   return digits;
 }
 
+export interface JoinTripResult {
+  success: boolean;
+  alreadyMember?: boolean;
+  tripId?: string;
+  tripName?: string;
+  error?: string;
+}
+
 // User-partitioned local storage key helper to prevent cross-account data leakage
 export function getUserTripsStorageKey(userId?: string | null): string {
   let targetId = userId;
@@ -98,6 +106,11 @@ export function getUserTripsStorageKey(userId?: string | null): string {
 // SWR throttling & deduplication map
 export const tripDetailsFetchTimestamps: Record<string, number> = {};
 export const tripDetailsInFlightPromises: Record<string, Promise<void> | undefined> = {};
+export const syncTripMessagesTimestamps: Record<string, number> = {};
+export const syncTripMessagesInFlight: Record<string, Promise<void> | undefined> = {};
+export const fetchTripsTimestamps: Record<string, number> = {};
+export const fetchTripsInFlight: Record<string, Promise<void> | undefined> = {};
+export const markSeenTimestamps: Record<string, number> = {};
 
 // Deleted expense IDs tombstone set to prevent zombie resurrection across syncs
 export const deletedExpenseIdsSet = new Set<string>();
@@ -138,7 +151,7 @@ interface TripStoreState {
   // Actions
   clearTripStore: () => void;
   initTrips: () => Promise<void>;
-  fetchTrips: (userId?: string) => Promise<void>;
+  fetchTrips: (userId?: string, forceRefresh?: boolean) => Promise<void>;
   createTrip: (
     name: string,
     userId?: string,
@@ -177,7 +190,7 @@ interface TripStoreState {
     query: string
   ) => Promise<Array<{ id: string; full_name: string; phone_number: string | null; avatar_url: string | null }>>;
   generateInviteCode: (tripId: string, userId: string) => Promise<string | null>;
-  joinTripByCode: (code: string, userId: string, userName: string) => Promise<boolean>;
+  joinTripByCode: (code: string, userId: string, userName?: string) => Promise<JoinTripResult>;
   addExpense: (data: {
     tripId: string;
     paidByMemberId: string;
@@ -258,7 +271,7 @@ interface TripStoreState {
     defaultTripId?: string;
   }) => Promise<Trip | null>;
   subscribeTripRealtime: (tripId: string) => () => void;
-  syncTripMessages: (tripId: string) => Promise<void>;
+  syncTripMessages: (tripId: string, forceRefresh?: boolean) => Promise<void>;
 }
 
 // Helper to prevent any network or native call from hanging indefinitely
@@ -550,6 +563,8 @@ export function computeBalances(
   });
 }
 
+let activeStoreUserId: string | null = null;
+
 export const useTripStore = create<TripStoreState>((set, get) => ({
   trips: [],
   activeTrip: null,
@@ -562,6 +577,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   error: null,
 
   clearTripStore: () => {
+    activeStoreUserId = null;
     set({
       trips: [],
       activeTrip: null,
@@ -570,6 +586,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       balances: [],
       messages: [],
       isLoading: false,
+      isHydrated: false,
       error: null,
     });
   },
@@ -590,15 +607,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (localTripsRaw) {
         const localTrips: Trip[] = JSON.parse(localTripsRaw);
         if (Array.isArray(localTrips) && localTrips.length > 0) {
-          const filtered = targetUserId
-            ? localTrips.filter(t => !t.created_by || t.created_by === targetUserId || t.created_by === 'local_user')
-            : localTrips;
-          set({ trips: deduplicateTrips(filtered), isHydrated: true });
+          set({ trips: deduplicateTrips(localTrips), isHydrated: true });
         } else {
-          set({ trips: [], isHydrated: true });
+          set({ isHydrated: true });
         }
       } else {
-        set({ trips: [], isHydrated: true });
+        set({ isHydrated: true });
       }
     } catch (e) {
       console.log('initTrips local read notice:', e);
@@ -608,7 +622,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     get().fetchTrips();
   },
 
-  fetchTrips: async (userId?: string) => {
+  fetchTrips: async (userId?: string, forceRefresh = false) => {
     // 1. Resolve active authenticated user ID first
     let targetUserId = userId;
     if (!targetUserId || !isValidUUID(targetUserId)) {
@@ -630,25 +644,22 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       }
     }
 
-    const storageKey = getUserTripsStorageKey(targetUserId);
-
-    // If current store contains trips from a DIFFERENT user, clear them immediately
-    const currentTrips = get().trips;
-    if (targetUserId && currentTrips.some(t => t.created_by && t.created_by !== targetUserId && t.created_by !== 'local_user')) {
+    // If active user ID switched, reset the store for the new account
+    if (activeStoreUserId && targetUserId && activeStoreUserId !== targetUserId) {
       set({ trips: [], isLoading: true });
     }
+    activeStoreUserId = targetUserId || null;
 
-    // 2. Load user-partitioned local trips
+    const storageKey = getUserTripsStorageKey(targetUserId);
+
+    // 2. Load user-partitioned local trips immediately if current store is empty (like contacts)
     let localTrips: Trip[] = [];
     try {
       const localTripsRaw = await AppStorage.getItem(storageKey);
       if (localTripsRaw) {
         const parsed = JSON.parse(localTripsRaw);
-        if (Array.isArray(parsed)) {
-          localTrips = deduplicateTrips(parsed).filter(t => {
-            if (!targetUserId) return true;
-            return !t.created_by || t.created_by === targetUserId || t.created_by === 'local_user';
-          });
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          localTrips = deduplicateTrips(parsed);
         }
       }
     } catch (e) {
@@ -672,235 +683,263 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       }
     } catch {}
 
-    // Immediately display user-isolated local trips and clear loading if we already have local data for this user
-    if (localTrips.length > 0) {
-      set({ trips: localTrips, isLoading: false, isHydrated: true, error: null });
+    // Immediately display user-isolated local trips if store is empty to avoid any blank flash
+    if (get().trips.length === 0) {
+      if (localTrips.length > 0) {
+        set({ trips: localTrips, isLoading: false, isHydrated: true, error: null });
+      } else {
+        set({ isLoading: true, error: null });
+      }
     } else {
-      set({ trips: [], isLoading: true, error: null });
+      set({ isHydrated: true, error: null });
     }
 
     // If unauthenticated or no valid user UUID, finish with local trips
     if (!isSupabaseConfigured || !targetUserId || !isValidUUID(targetUserId)) {
-      set({ trips: localTrips, isLoading: false, isHydrated: true });
+      if (localTrips.length > 0 && get().trips.length === 0) {
+        set({ trips: localTrips, isLoading: false, isHydrated: true });
+      } else {
+        set({ isLoading: false, isHydrated: true });
+      }
       return;
     }
 
-    // ── Ensure active session is refreshed if available (non-blocking) ──
-    try {
-      await withTimeout(supabase.auth.getSession(), 2000);
-    } catch {}
+    // Throttle & deduplicate cloud trips fetching (6-second throttle window)
+    const now = Date.now();
+    const lastFetch = fetchTripsTimestamps[targetUserId] || 0;
+    if (!forceRefresh && (now - lastFetch < 6000)) {
+      set({ isLoading: false, isHydrated: true });
+      return;
+    }
 
-    // ── Auto-claim any splits or trips created before this user joined ──
-    const authState = useAuthStore.getState();
-    const userPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number;
-    const cleanDigits = userPhone ? (userPhone as string).replace(/[^0-9]/g, '') : '';
-    const last10Phone = cleanDigits.length >= 6 ? cleanDigits.slice(-10) : '';
+    if (fetchTripsInFlight[targetUserId]) {
+      return fetchTripsInFlight[targetUserId];
+    }
 
-    try {
-      if (userPhone && targetUserId) {
-        await get().claimUnlinkedSplits(targetUserId, userPhone);
-      }
-    } catch {}
+    const inFlightPromise = (async () => {
+      fetchTripsTimestamps[targetUserId] = Date.now();
+      // ── Ensure active session is refreshed if available (non-blocking) ──
+      try {
+        await withTimeout(supabase.auth.getSession(), 2000);
+      } catch {}
 
-    try {
-      const memberQueryFilter = last10Phone
-        ? `profile_id.eq.${targetUserId},user_id.eq.${targetUserId},phone_number.ilike.%${last10Phone}%`
-        : `profile_id.eq.${targetUserId},user_id.eq.${targetUserId}`;
+        // ── Auto-claim any splits or trips created before this user joined ──
+        const authState = useAuthStore.getState();
+        const userPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number;
+        const cleanDigits = userPhone ? (userPhone as string).replace(/[^0-9]/g, '') : '';
+        const last10Phone = cleanDigits.length >= 6 ? cleanDigits.slice(-10) : '';
 
-      // Execute created trips, member rows, and friend trips concurrently in parallel!
-      const [createdRes, memberRes, friendRes] = await Promise.all([
-        withTimeout(
-          supabaseAdmin
-            .from('trips')
-            .select('*')
-            .eq('created_by', targetUserId)
-            .order('created_at', { ascending: false }),
-          3500
-        ).catch(() => ({ data: [] as any[], error: null })),
-        withTimeout(
-          supabaseAdmin
-            .from('trip_members')
-            .select('trip_id')
-            .or(memberQueryFilter),
-          3500
-        ).catch(() => ({ data: [] as any[], error: null })),
-        withTimeout(
-          supabaseAdmin
-            .from('trips')
-            .select('*')
-            .eq('friend_id', targetUserId)
-            .order('created_at', { ascending: false }),
-          3500
-        ).catch(() => ({ data: [] as any[], error: null })),
-      ]);
+        try {
+          if (userPhone && targetUserId) {
+            await get().claimUnlinkedSplits(targetUserId, userPhone);
+          }
+        } catch {}
 
-      const createdTrips: Trip[] = (createdRes.data || []) as Trip[];
-      const memberRows: any[] = memberRes.data || [];
-      const friendTrips: Trip[] = (friendRes.data || []) as Trip[];
+        try {
+          const memberQueryFilter = last10Phone
+            ? `profile_id.eq.${targetUserId},user_id.eq.${targetUserId},phone_number.ilike.%${last10Phone}%`
+            : `profile_id.eq.${targetUserId},user_id.eq.${targetUserId}`;
 
-      const memberTripIds = memberRows
-        .map((r: any) => r.trip_id)
-        .filter((id: string) => !createdTrips.some((ct: any) => ct.id === id));
+        // Execute created trips, member rows, and friend trips concurrently in parallel!
+        const [createdRes, memberRes, friendRes] = await Promise.all([
+          withTimeout(
+            supabaseAdmin
+              .from('trips')
+              .select('*')
+              .eq('created_by', targetUserId)
+              .order('created_at', { ascending: false }),
+            8000
+          ).catch(() => ({ data: [] as any[], error: null })),
+          withTimeout(
+            supabaseAdmin
+              .from('trip_members')
+              .select('trip_id')
+              .or(memberQueryFilter),
+            8000
+          ).catch(() => ({ data: [] as any[], error: null })),
+          withTimeout(
+            supabaseAdmin
+              .from('trips')
+              .select('*')
+              .eq('friend_id', targetUserId)
+              .order('created_at', { ascending: false }),
+            8000
+          ).catch(() => ({ data: [] as any[], error: null })),
+        ]);
 
-      let memberTrips: Trip[] = [];
-      if (memberTripIds.length > 0) {
-        const { data: mtData } = await withTimeout(
-          supabaseAdmin
-            .from('trips')
-            .select('*')
-            .in('id', memberTripIds)
-            .order('created_at', { ascending: false }),
-          3500
-        ).catch(() => ({ data: [] }));
-        memberTrips = (mtData || []) as Trip[];
-      }
+        const createdTrips: Trip[] = (createdRes.data || []) as Trip[];
+        const memberRows: any[] = memberRes.data || [];
+        const friendTrips: Trip[] = (friendRes.data || []) as Trip[];
 
-      // Merge remote and local trips:
-      // Remote (Supabase) wins for server-side fields, but local wins for
-      // fields that Supabase doesn't store (trip_type, friend_id, currency, etc.)
-      const remoteTrips = deduplicateTrips([
-        ...(createdTrips || []),
-        ...(memberTrips || []),
-        ...((friendTrips as Trip[]) || []),
-      ]);
-      const mergedTripsMap = new Map<string, Trip>();
+        const memberTripIds = memberRows
+          .map((r: any) => r.trip_id)
+          .filter((id: string) => !createdTrips.some((ct: any) => ct.id === id));
 
-      // Build a quick lookup for local trips by id
-      const localTripById = new Map<string, Trip>();
-      localTrips.forEach(t => localTripById.set(t.id, t));
-
-      // For every remote trip, merge with local data to preserve local-only fields
-      remoteTrips.forEach(remoteTrip => {
-        const localVersion = localTripById.get(remoteTrip.id);
-        if (localVersion) {
-          // Merge: remote base + local-only fields that remote doesn't have
-          mergedTripsMap.set(remoteTrip.id, {
-            ...remoteTrip,
-            trip_type: remoteTrip.trip_type || localVersion.trip_type,
-            friend_id: remoteTrip.friend_id || localVersion.friend_id,
-            currency: remoteTrip.currency || localVersion.currency,
-          });
-        } else {
-          mergedTripsMap.set(remoteTrip.id, remoteTrip);
-        }
-      });
-
-      // Add local-only trips (strictly verifying ownership) and auto-sync them to Supabase
-      const localOnlyTripsToSync: Trip[] = [];
-      localTrips.forEach(t => {
-        const belongsToUser =
-          t.created_by === targetUserId ||
-          (!t.created_by && !remoteTrips.some(rt => rt.id === t.id));
-
-        // Strictly reject any trip belonging to a different user
-        if (t.created_by && t.created_by !== targetUserId && t.created_by !== 'local_user') {
-          return;
+        let memberTrips: Trip[] = [];
+        if (memberTripIds.length > 0) {
+          const { data: mtData } = await withTimeout(
+            supabaseAdmin
+              .from('trips')
+              .select('*')
+              .in('id', memberTripIds)
+              .order('created_at', { ascending: false }),
+            8000
+          ).catch(() => ({ data: [] }));
+          memberTrips = (mtData || []) as Trip[];
         }
 
-        if (belongsToUser && !mergedTripsMap.has(t.id)) {
-          const syncedTrip: Trip = {
-            ...t,
-            created_by: targetUserId,
-          };
-          mergedTripsMap.set(t.id, syncedTrip);
-          if (!remoteTrips.some(rt => rt.id === t.id)) {
+        // Merge remote and local trips:
+        // Remote (Supabase) wins for server-side fields, but local wins for
+        // fields that Supabase doesn't store (trip_type, friend_id, currency, etc.)
+        const remoteTrips = deduplicateTrips([
+          ...(createdTrips || []),
+          ...(memberTrips || []),
+          ...((friendTrips as Trip[]) || []),
+        ]);
+        const mergedTripsMap = new Map<string, Trip>();
+
+        // Build a quick lookup for local trips by id
+        const localTripById = new Map<string, Trip>();
+        localTrips.forEach(t => localTripById.set(t.id, t));
+
+        // For every remote trip, merge with local data to preserve local-only fields
+        remoteTrips.forEach(remoteTrip => {
+          const localVersion = localTripById.get(remoteTrip.id);
+          if (localVersion) {
+            // Merge: remote base + local-only fields that remote doesn't have
+            mergedTripsMap.set(remoteTrip.id, {
+              ...remoteTrip,
+              trip_type: remoteTrip.trip_type || localVersion.trip_type,
+              friend_id: remoteTrip.friend_id || localVersion.friend_id,
+              currency: remoteTrip.currency || localVersion.currency,
+            });
+          } else {
+            mergedTripsMap.set(remoteTrip.id, remoteTrip);
+          }
+        });
+
+        // Retain local trips that were cached for this user, and prepare locally created trips for sync
+        const localOnlyTripsToSync: Trip[] = [];
+        localTrips.forEach(t => {
+          if (!mergedTripsMap.has(t.id)) {
+            mergedTripsMap.set(t.id, t);
+          }
+
+          const isLocallyCreatedByMe =
+            (!t.created_by || t.created_by === targetUserId || t.created_by === 'local_user') &&
+            !remoteTrips.some(rt => rt.id === t.id);
+
+          if (isLocallyCreatedByMe) {
+            const syncedTrip: Trip = {
+              ...t,
+              created_by: targetUserId || t.created_by || '',
+            };
             localOnlyTripsToSync.push(syncedTrip);
           }
-        }
-      });
+        });
 
-      // Background auto-sync of local-only trips to Supabase so reinstall or new device login has all data
-      if (localOnlyTripsToSync.length > 0 && isSupabaseConfigured && targetUserId && isValidUUID(targetUserId)) {
-        (async () => {
-          for (const tripToSync of localOnlyTripsToSync) {
-            try {
-              const inviteCode = tripToSync.invite_code || Math.random().toString(36).substring(2, 8).toUpperCase();
-              await supabase.from('trips').upsert({
-                id: tripToSync.id,
-                name: tripToSync.name,
-                description: tripToSync.description || '',
-                trip_type: tripToSync.trip_type || 'group',
-                friend_id: tripToSync.friend_id || null,
-                image_url: (tripToSync.image_url && !tripToSync.image_url.startsWith('file:') && !tripToSync.image_url.startsWith('content:')) ? tripToSync.image_url : null,
-                currency: tripToSync.currency || 'INR',
-                status: tripToSync.status || 'active',
-                invite_code: inviteCode,
-                created_by: targetUserId,
-              }, { onConflict: 'id' });
+        // Background auto-sync of local-only trips to Supabase so reinstall or new device login has all data
+        if (localOnlyTripsToSync.length > 0 && isSupabaseConfigured && targetUserId && isValidUUID(targetUserId)) {
+          (async () => {
+            for (const tripToSync of localOnlyTripsToSync) {
+              try {
+                const inviteCode = tripToSync.invite_code || Math.random().toString(36).substring(2, 8).toUpperCase();
+                await supabase.from('trips').upsert({
+                  id: tripToSync.id,
+                  name: tripToSync.name,
+                  description: tripToSync.description || '',
+                  trip_type: tripToSync.trip_type || 'group',
+                  friend_id: tripToSync.friend_id || null,
+                  image_url: (tripToSync.image_url && !tripToSync.image_url.startsWith('file:') && !tripToSync.image_url.startsWith('content:')) ? tripToSync.image_url : null,
+                  currency: tripToSync.currency || 'INR',
+                  status: tripToSync.status || 'active',
+                  invite_code: inviteCode,
+                  created_by: targetUserId,
+                }, { onConflict: 'id' });
 
-              const authState = useAuthStore.getState();
-              const userName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.email?.split('@')[0] || 'You';
-              const userPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number || null;
-              await supabaseAdmin.from('trip_members').upsert({
-                trip_id: tripToSync.id,
-                profile_id: targetUserId,
-                user_id: targetUserId,
-                display_name: userName,
-                phone_number: userPhone,
-                role: 'admin',
-                status: 'accepted',
-                is_guest: false,
-              }, { onConflict: 'trip_id,profile_id' });
+                const authState = useAuthStore.getState();
+                const userName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.email?.split('@')[0] || 'You';
+                const userPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number || null;
+                await supabaseAdmin.from('trip_members').upsert({
+                  trip_id: tripToSync.id,
+                  profile_id: targetUserId,
+                  user_id: targetUserId,
+                  display_name: userName,
+                  phone_number: userPhone,
+                  role: 'admin',
+                  status: 'accepted',
+                  is_guest: false,
+                }, { onConflict: 'trip_id,profile_id' });
 
-              // Also sync local expenses if available
-              const localDetailsRaw = await AppStorage.getItem(`@splityourtrip_local_details_${tripToSync.id}`);
-              if (localDetailsRaw) {
-                const details = JSON.parse(localDetailsRaw);
-                if (Array.isArray(details.expenses) && details.expenses.length > 0) {
-                  for (const exp of details.expenses) {
-                    if (isValidUUID(exp.id)) {
-                      const merchantPayload = JSON.stringify({
-                        payer_name: exp.payerName || 'Member',
-                        payer_id: exp.paid_by || null,
-                      });
-                      await supabase.from('expenses').upsert({
-                        id: exp.id,
-                        trip_id: tripToSync.id,
-                        amount: exp.amount,
-                        paid_by: targetUserId,
-                        merchant_name: merchantPayload,
-                        expense_type: 'manual',
-                        description: exp.description || 'Expense',
-                        category: exp.category || 'General',
-                        payment_mode: exp.payment_mode || 'upi',
-                        split_type: exp.split_type || 'equal',
-                        currency: exp.currency || 'INR',
-                        created_by: targetUserId,
-                      }, { onConflict: 'id' });
+                // Also sync local expenses if available
+                const localDetailsRaw = await AppStorage.getItem(`@splityourtrip_local_details_${tripToSync.id}`);
+                if (localDetailsRaw) {
+                  const details = JSON.parse(localDetailsRaw);
+                  if (Array.isArray(details.expenses) && details.expenses.length > 0) {
+                    for (const exp of details.expenses) {
+                      if (isValidUUID(exp.id)) {
+                        const merchantPayload = JSON.stringify({
+                          payer_name: exp.payerName || 'Member',
+                          payer_id: exp.paid_by || null,
+                        });
+                        await supabase.from('expenses').upsert({
+                          id: exp.id,
+                          trip_id: tripToSync.id,
+                          amount: exp.amount,
+                          paid_by: targetUserId,
+                          merchant_name: merchantPayload,
+                          expense_type: 'manual',
+                          description: exp.description || 'Expense',
+                          category: exp.category || 'General',
+                          payment_mode: exp.payment_mode || 'upi',
+                          split_type: exp.split_type || 'equal',
+                          currency: exp.currency || 'INR',
+                          created_by: targetUserId,
+                        }, { onConflict: 'id' });
+                      }
                     }
                   }
                 }
+              } catch (syncErr: any) {
+                console.log('Background trip auto-sync notice:', syncErr?.message);
               }
-            } catch (syncErr: any) {
-              console.log('Background trip auto-sync notice:', syncErr?.message);
             }
-          }
-        })();
-      }
+          })();
+        }
 
-      const finalTrips = Array.from(mergedTripsMap.values())
-        .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+        const finalTrips = Array.from(mergedTripsMap.values())
+          .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-      // Save user-isolated merged list back to AppStorage
-      try {
-        await AppStorage.setItem(storageKey, JSON.stringify(finalTrips));
-      } catch {}
-
-      set({ trips: finalTrips, isLoading: false, isHydrated: true });
-
-      // Automatically prefetch & cache expenses, members and splits across all trips in background
-      // and compute friend balances so Friends list is instantly populated without needing to open each trip!
-      (async () => {
+        // Save user-isolated merged list back to AppStorage (never wipe local cache if remote returned empty)
         try {
-          await get().prefetchAllTripDetails(finalTrips.map(t => t.id));
-          const { useContactsStore } = require('../contacts/useContactsStore');
-          useContactsStore.getState().computeFriendBalances(finalTrips, targetUserId).catch(() => {});
+          if (finalTrips.length > 0 || localTrips.length === 0) {
+            await AppStorage.setItem(storageKey, JSON.stringify(finalTrips));
+          }
         } catch {}
-      })();
-    } catch (err: any) {
-      console.log('fetchTrips network notice, preserving local trips:', err?.message);
-      set({ trips: localTrips, isLoading: false, isHydrated: true });
-    }
+
+        const resolvedTrips = finalTrips.length > 0 ? finalTrips : (localTrips.length > 0 ? localTrips : get().trips);
+        set({ trips: resolvedTrips, isLoading: false, isHydrated: true });
+
+        // Automatically prefetch & cache expenses, members and splits across all trips in background
+        // and compute friend balances so Friends list is instantly populated without needing to open each trip!
+        (async () => {
+          try {
+            await get().prefetchAllTripDetails(resolvedTrips.map(t => t.id));
+            const { useContactsStore } = require('../contacts/useContactsStore');
+            useContactsStore.getState().computeFriendBalances(resolvedTrips, targetUserId).catch(() => {});
+          } catch {}
+        })();
+      } catch (err: any) {
+        console.log('fetchTrips network notice, preserving local trips:', err?.message);
+        const fallbackTrips = localTrips.length > 0 ? localTrips : get().trips;
+        set({ trips: fallbackTrips, isLoading: false, isHydrated: true });
+      } finally {
+        delete fetchTripsInFlight[targetUserId];
+      }
+    })();
+
+    fetchTripsInFlight[targetUserId] = inFlightPromise;
+    return inFlightPromise;
   },
 
   createTrip: async (
@@ -2335,51 +2374,176 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     return tripId.replace(/-/g, '').substring(0, 6).toUpperCase();
   },
 
-  joinTripByCode: async (code: string, userId: string, _userName: string) => {
-    if (!isSupabaseConfigured || !isValidUUID(userId)) return true;
+  joinTripByCode: async (code: string, userId: string, _userName?: string): Promise<JoinTripResult> => {
+    let clean = (code || '').trim();
+    if (!clean) {
+      return { success: false, error: 'Please enter an invite code.' };
+    }
+
+    // Extract code if a full URL or join path was pasted
+    if (clean.includes('/join/')) {
+      const parts = clean.split('/join/');
+      clean = parts[1].split(/[?#/]/)[0] || '';
+    }
+    // Clean unwanted characters
+    clean = clean.replace(/[^a-zA-Z0-9-]/g, '').trim();
+
+    if (!clean) {
+      return { success: false, error: 'Invalid invite code format.' };
+    }
+
+    const authState = useAuthStore.getState();
+    const effectiveUserId = (userId && isValidUUID(userId)) ? userId : authState.user?.id || authState.profile?.id;
+    const resolvedName = _userName || authState.profile?.full_name || authState.profile?.name || 'Traveler';
+    const userPhone =
+      authState.profile?.phone_number ||
+      (authState.user as any)?.phone ||
+      (authState.user as any)?.user_metadata?.phone_number ||
+      null;
+
+    if (!isSupabaseConfigured || !effectiveUserId || !isValidUUID(effectiveUserId)) {
+      // Offline fallback: check in-memory local trips
+      const localTrip = get().trips.find(
+        t => (t.invite_code && t.invite_code.toUpperCase() === clean.toUpperCase()) ||
+             t.id.replace(/-/g, '').substring(0, clean.length).toUpperCase() === clean.toUpperCase() ||
+             t.id === clean
+      );
+      if (localTrip) {
+        return {
+          success: true,
+          alreadyMember: true,
+          tripId: localTrip.id,
+          tripName: localTrip.name,
+        };
+      }
+      return { success: false, error: 'Trip not found. Please sign in to sync with cloud.' };
+    }
 
     try {
-      const cleanUpper = code.toUpperCase().trim();
-      const cleanLower = code.toLowerCase().trim();
       const client = supabaseAdmin || supabase;
-      const { data: matchingTrips } = await client
+      let targetTrip: { id: string; name: string; invite_code?: string } | null = null;
+
+      // 1. Check by invite_code (case-insensitive)
+      const { data: byInvite } = await client
         .from('trips')
         .select('id, name, invite_code')
-        .or(`invite_code.eq.${cleanUpper},id.ilike.${cleanLower}%,id.eq.${code.trim()}`)
-        .limit(1);
+        .ilike('invite_code', clean)
+        .maybeSingle();
 
-      if (!matchingTrips || matchingTrips.length === 0) {
-        return false;
+      if (byInvite) {
+        targetTrip = byInvite;
+      } else if (isValidUUID(clean)) {
+        // 2. Check by exact trip UUID
+        const { data: byId } = await client
+          .from('trips')
+          .select('id, name, invite_code')
+          .eq('id', clean)
+          .maybeSingle();
+        if (byId) targetTrip = byId;
+      } else if (clean.length >= 6) {
+        // 3. Fallback: check matching id prefix against local trips
+        const localMatch = get().trips.find(
+          t => t.id.replace(/-/g, '').substring(0, clean.length).toUpperCase() === clean.toUpperCase()
+        );
+        if (localMatch) {
+          targetTrip = localMatch;
+        }
       }
 
-      const targetTripId = matchingTrips[0].id;
+      if (!targetTrip) {
+        return { success: false, error: `No trip found with invite code "${code.trim()}".` };
+      }
 
-      const authState = useAuthStore.getState();
-      const userPhone =
-        authState.profile?.phone_number ||
-        (authState.user as any)?.phone ||
-        (authState.user as any)?.user_metadata?.phone_number ||
-        null;
-      const resolvedName = _userName || authState.profile?.full_name || authState.profile?.name || 'Traveler';
+      const targetTripId = targetTrip.id;
 
-      await supabaseAdmin.from('trip_members').upsert(
-        {
-          trip_id: targetTripId,
-          profile_id: userId,
-          user_id: userId,
-          display_name: resolvedName,
-          phone_number: userPhone,
-          role: 'member',
-          status: 'accepted',
-          is_guest: false,
-        },
-        { onConflict: 'trip_id,profile_id' }
-      );
+      // Check if user is already an accepted member
+      const { data: existingMember } = await client
+        .from('trip_members')
+        .select('id, role, status')
+        .eq('trip_id', targetTripId)
+        .eq('profile_id', effectiveUserId)
+        .maybeSingle();
 
-      await get().fetchTrips(userId);
-      return true;
-    } catch {
-      return false;
+      if (existingMember) {
+        // User is already a member, refresh trips immediately
+        await get().fetchTrips(effectiveUserId, true);
+        return {
+          success: true,
+          alreadyMember: true,
+          tripId: targetTripId,
+          tripName: targetTrip.name,
+        };
+      }
+
+      // Check if user has an unlinked guest member entry by phone number
+      let guestLinked = false;
+      if (userPhone) {
+        const cleanDigits = (userPhone as string).replace(/[^0-9]/g, '');
+        const last10 = cleanDigits.slice(-10);
+        if (last10.length >= 6) {
+          const { data: guestMembers } = await client
+            .from('trip_members')
+            .select('id, phone_number, profile_id')
+            .eq('trip_id', targetTripId)
+            .is('profile_id', null);
+
+          const matchingGuest = guestMembers?.find(gm => {
+            const gDigits = (gm.phone_number || '').replace(/[^0-9]/g, '');
+            return gDigits.endsWith(last10);
+          });
+
+          if (matchingGuest) {
+            await client
+              .from('trip_members')
+              .update({
+                profile_id: effectiveUserId,
+                user_id: effectiveUserId,
+                display_name: resolvedName,
+                is_guest: false,
+                status: 'accepted',
+              })
+              .eq('id', matchingGuest.id);
+            guestLinked = true;
+          }
+        }
+      }
+
+      if (!guestLinked) {
+        await client.from('trip_members').upsert(
+          {
+            trip_id: targetTripId,
+            profile_id: effectiveUserId,
+            user_id: effectiveUserId,
+            display_name: resolvedName,
+            phone_number: userPhone,
+            role: 'member',
+            status: 'accepted',
+            is_guest: false,
+          },
+          { onConflict: 'trip_id,profile_id' }
+        );
+      }
+
+      // Auto-claim any unlinked splits for this user
+      try {
+        await get().claimUnlinkedSplits(effectiveUserId, userPhone);
+      } catch {}
+
+      // Force refresh so newly joined trip immediately shows up in trips list
+      await get().fetchTrips(effectiveUserId, true);
+
+      return {
+        success: true,
+        alreadyMember: false,
+        tripId: targetTripId,
+        tripName: targetTrip.name,
+      };
+    } catch (err: any) {
+      console.warn('joinTripByCode error:', err);
+      return {
+        success: false,
+        error: err?.message || 'Failed to join trip. Please try again.',
+      };
     }
   },
 
@@ -3279,6 +3443,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             });
           } catch {}
         }
+
+        // Dispatch push notification to all OTHER members of this trip
+        try {
+          const { sendPushNotificationToMembers } = require('../../services/pushNotificationService');
+          sendPushNotificationToMembers(tripId, validSenderId || senderId, effectiveSenderName, displayText, {
+            type: msgType,
+            messageId: localMsgId,
+          }).catch(() => {});
+        } catch {}
       } catch (err: any) {
         console.log('sendMessage cloud insert fallback locally:', err?.message);
       }
@@ -3307,18 +3480,23 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const nowIso = new Date().toISOString();
 
     // 1. Immediately update Zustand in-memory state
+    let didChange = false;
     set(state => {
-      let changed = false;
       const updated = state.messages.map(m => {
         const isFromOther = m.sender_id !== currentUserId && m.sender_id !== 'local_user';
         if ((!m.trip_id || m.trip_id === tripId) && isFromOther && !m.is_seen) {
-          changed = true;
+          didChange = true;
           return { ...m, is_seen: true, is_sent: true, seen_at: nowIso };
         }
         return m;
       });
-      return changed ? { messages: updated } : state;
+      return didChange ? { messages: updated } : state;
     });
+
+    // If no local messages needed to be marked seen, avoid remote server calls entirely!
+    if (!didChange) {
+      return;
+    }
 
     // 2. Persist locally
     try {
@@ -3349,6 +3527,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       }));
     } catch {}
 
+    // Throttle remote mark seen: only 1 remote sync per 5 seconds per trip
+    const lastMark = markSeenTimestamps[tripId] || 0;
+    if (Date.now() - lastMark < 5000) {
+      return;
+    }
+    markSeenTimestamps[tripId] = Date.now();
+
     // 4. Update on Supabase so seen status is persisted across fresh installs and devices
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
@@ -3359,6 +3544,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           .eq('trip_id', tripId);
 
         if (!error && rows && rows.length > 0) {
+          const updatePromises: Promise<any>[] = [];
           for (const row of rows) {
             if (row.sender_id && currentUserId && row.sender_id === currentUserId) continue;
 
@@ -3379,12 +3565,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 });
               }
 
-              // Update message column payload
-              await client
-                .from('trip_messages')
-                .update({ message: updatedPayload })
-                .eq('id', row.id);
+              // Update message column payload in parallel
+              updatePromises.push(
+                Promise.resolve(
+                  client
+                    .from('trip_messages')
+                    .update({ message: updatedPayload })
+                    .eq('id', row.id)
+                )
+              );
             }
+          }
+          if (updatePromises.length > 0) {
+            await Promise.all(updatePromises);
           }
         }
       } catch (err: any) {
@@ -4027,93 +4220,114 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     }
   },
 
-  syncTripMessages: async (tripId: string) => {
+  syncTripMessages: async (tripId: string, forceRefresh = false) => {
     if (!isSupabaseConfigured || !isValidUUID(tripId)) return;
-    try {
-      const client = supabaseAdmin || supabase;
-      const { data, error } = await client
-        .from('trip_messages')
-        .select('*')
-        .eq('trip_id', tripId)
-        .order('created_at', { ascending: true });
 
-      if (error || !data) return;
+    const now = Date.now();
+    const lastSync = syncTripMessagesTimestamps[tripId] || 0;
+    // 6-second throttle window unless forceRefresh is requested
+    if (!forceRefresh && (now - lastSync < 6000)) {
+      return;
+    }
 
-      const serverMsgIds = new Set(data.map(tm => tm.id));
-      const currentValidExpenseIds = new Set(get().expenses.map(e => e.id));
+    if (syncTripMessagesInFlight[tripId]) {
+      return syncTripMessagesInFlight[tripId];
+    }
 
-      const tripObj = get().trips.find(t => t.id === tripId) || get().activeTrip;
-      const isFriendSplit =
-        tripObj?.trip_type === 'friend_split' ||
-        (tripObj as any)?.is_friend_split ||
-        tripObj?.name?.toLowerCase().startsWith('split with ') ||
-        Boolean(tripObj?.friend_id);
-      const defaultChatType: 'group' | 'individual' = isFriendSplit ? 'individual' : 'group';
+    const syncPromise = (async () => {
+      syncTripMessagesTimestamps[tripId] = Date.now();
+      try {
+        const client = supabaseAdmin || supabase;
+        const { data, error } = await client
+          .from('trip_messages')
+          .select('*')
+          .eq('trip_id', tripId)
+          .order('created_at', { ascending: true });
 
-      set(state => {
-        // Prune messages deleted on server or referencing deleted expenses,
-        // and strictly discard any messages that belong to a different trip!
-        const filteredCurrent = state.messages.filter(m => {
-          if (m.trip_id && m.trip_id !== tripId) {
-            return false;
-          }
-          if (isValidUUID(m.id) && !serverMsgIds.has(m.id)) {
-            return false;
-          }
-          const expId = m.expense_id || m.expense_data?.id;
-          if (expId && (deletedExpenseIdsSet.has(expId) || !currentValidExpenseIds.has(expId))) {
-            return false;
-          }
-          return true;
-        });
+        if (error || !data) return;
 
-        const existingIds = new Set(filteredCurrent.map(m => m.id));
-        let hasChanges = filteredCurrent.length !== state.messages.length;
-        const newItems: TripMessage[] = [];
+        const serverMsgIds = new Set(data.map(tm => tm.id));
+        const currentValidExpenseIds = new Set(get().expenses.map(e => e.id));
 
-        for (const tm of data) {
-          if (!existingIds.has(tm.id)) {
-            const parsed = parseMessagePayload(tm.message || '');
-            if (parsed.expId && (deletedExpenseIdsSet.has(parsed.expId) || !currentValidExpenseIds.has(parsed.expId))) {
-              continue;
+        const tripObj = get().trips.find(t => t.id === tripId) || get().activeTrip;
+        const isFriendSplit =
+          tripObj?.trip_type === 'friend_split' ||
+          (tripObj as any)?.is_friend_split ||
+          tripObj?.name?.toLowerCase().startsWith('split with ') ||
+          Boolean(tripObj?.friend_id);
+        const defaultChatType: 'group' | 'individual' = isFriendSplit ? 'individual' : 'group';
+
+        set(state => {
+          // Prune messages deleted on server or referencing deleted expenses,
+          // and strictly discard any messages that belong to a different trip!
+          const filteredCurrent = state.messages.filter(m => {
+            if (m.trip_id && m.trip_id !== tripId) {
+              return false;
             }
-            hasChanges = true;
-            existingIds.add(tm.id);
-            newItems.push({
-              id: tm.id,
-              trip_id: tm.trip_id,
-              sender_id: tm.sender_id,
-              sender_name: tm.sender_name || 'Member',
-              message: parsed.displayText,
-              content: tm.message || '',
-              type: parsed.msgType,
-              chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') || tm.message?.includes('"chat_type":"individual"') ? 'individual' : defaultChatType),
-              media_url: parsed.mediaUrl,
-              media_name: parsed.mediaName,
-              media_size: parsed.mediaSize,
-              expense_id: parsed.expId,
-              expense_data: parsed.expData,
-              payload: parsed.rawPayload,
-              created_at: tm.created_at,
-            });
+            if (isValidUUID(m.id) && !serverMsgIds.has(m.id)) {
+              return false;
+            }
+            const expId = m.expense_id || m.expense_data?.id;
+            if (expId && (deletedExpenseIdsSet.has(expId) || !currentValidExpenseIds.has(expId))) {
+              return false;
+            }
+            return true;
+          });
+
+          const existingIds = new Set(filteredCurrent.map(m => m.id));
+          let hasChanges = filteredCurrent.length !== state.messages.length;
+          const newItems: TripMessage[] = [];
+
+          for (const tm of data) {
+            if (!existingIds.has(tm.id)) {
+              const parsed = parseMessagePayload(tm.message || '');
+              if (parsed.expId && (deletedExpenseIdsSet.has(parsed.expId) || !currentValidExpenseIds.has(parsed.expId))) {
+                continue;
+              }
+              hasChanges = true;
+              existingIds.add(tm.id);
+              newItems.push({
+                id: tm.id,
+                trip_id: tm.trip_id,
+                sender_id: tm.sender_id,
+                sender_name: tm.sender_name || 'Member',
+                message: parsed.displayText,
+                content: tm.message || '',
+                type: parsed.msgType,
+                chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') || tm.message?.includes('"chat_type":"individual"') ? 'individual' : defaultChatType),
+                media_url: parsed.mediaUrl,
+                media_name: parsed.mediaName,
+                media_size: parsed.mediaSize,
+                expense_id: parsed.expId,
+                expense_data: parsed.expData,
+                payload: parsed.rawPayload,
+                created_at: tm.created_at,
+              });
+            }
           }
-        }
 
-        if (!hasChanges) return state;
+          if (!hasChanges) return state;
 
-        const merged = [...filteredCurrent, ...newItems].sort(
-          (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
-        );
+          const merged = [...filteredCurrent, ...newItems].sort(
+            (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+          );
 
-        AppStorage.getItem(`@splityourtrip_local_details_${tripId}`).then(raw => {
-          const details = raw ? JSON.parse(raw) : {};
-          details.messages = merged;
-          AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
-        }).catch(() => {});
+          AppStorage.getItem(`@splityourtrip_local_details_${tripId}`).then(raw => {
+            const details = raw ? JSON.parse(raw) : {};
+            details.messages = merged;
+            AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+          }).catch(() => {});
 
-        return { messages: merged };
-      });
-    } catch {}
+          return { messages: merged };
+        });
+      } catch {}
+      finally {
+        delete syncTripMessagesInFlight[tripId];
+      }
+    })();
+
+    syncTripMessagesInFlight[tripId] = syncPromise;
+    return syncPromise;
   },
 
   subscribeTripRealtime: (tripId: string) => {

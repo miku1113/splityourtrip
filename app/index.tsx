@@ -17,6 +17,7 @@ import { useRouter, usePathname } from 'expo-router';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, ThemeMode } from '../src/theme/useThemeStore';
+import { getNativeSharedData } from '../src/services/receiptOcr';
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -85,10 +86,9 @@ export default function SplashScreen() {
     let isCancelled = false;
 
     // Check immediately if native shared data (screenshot / text from Android share sheet) was received
-    import('../src/services/receiptOcr').then(async ({ getNativeSharedData }) => {
+    getNativeSharedData().then(async (shared) => {
       if (isCancelled) return;
       try {
-        const shared = await getNativeSharedData();
         if (shared.imageUri || shared.sharedText) {
           console.log('[SplashScreen] Native shared launch detected on mount:', shared);
           navigatingRef.current = true;
@@ -107,6 +107,15 @@ export default function SplashScreen() {
         }
       } catch {}
     }).catch(() => {});
+
+    // Register device push token with Supabase profiles for closed-app notifications
+    try {
+      const { registerForPushNotificationsAsync } = require('../src/services/pushNotificationService');
+      const authUser = useAuthStore.getState().user;
+      if (authUser?.id) {
+        registerForPushNotificationsAsync(authUser.id).catch(() => {});
+      }
+    } catch {}
 
     // Check immediately if app was launched via an external intent / deep link
     Linking.getInitialURL().then(initialUrl => {
@@ -265,7 +274,6 @@ export default function SplashScreen() {
 
     try {
       // Check for incoming shared screenshot or text from Android Share sheet
-      const { getNativeSharedData } = await import('../src/services/receiptOcr');
       const shared = await getNativeSharedData();
       if (shared.imageUri || shared.sharedText) {
         console.log('[SplashScreen] Native shared data detected in proceedNext, routing to /shared-payment:', shared);
