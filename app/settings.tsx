@@ -264,7 +264,11 @@ export default function SettingsScreen() {
           },
         ]}
       >
-        <View style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}>
+        <TouchableOpacity
+          style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
+          onPress={() => router.push('/about')}
+          activeOpacity={0.7}
+        >
           <View style={styles.settingLabelRow}>
             <View
               style={[
@@ -275,13 +279,57 @@ export default function SettingsScreen() {
               <Ionicons name="information-circle-outline" size={18} color="#3B82F6" />
             </View>
             <View>
-              <Text style={[styles.settingTitle, { color: colors.text }]}>App Name</Text>
+              <Text style={[styles.settingTitle, { color: colors.text }]}>About Us</Text>
               <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
-                Split Your Trip
+                Made by MJ Studios • Story & Mission
               </Text>
             </View>
           </View>
-          <Text style={[styles.versionTag, { color: colors.textMuted }]}>v2.0.0</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
+          onPress={() => router.push('/privacy')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingLabelRow}>
+            <View
+              style={[
+                styles.iconBox,
+                { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5' },
+              ]}
+            >
+              <Ionicons name="lock-closed-outline" size={18} color="#10B981" />
+            </View>
+            <View>
+              <Text style={[styles.settingTitle, { color: colors.text }]}>Privacy Policy</Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+                Data safety, zero third-party selling & security
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        <View style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}>
+          <View style={styles.settingLabelRow}>
+            <View
+              style={[
+                styles.iconBox,
+                { backgroundColor: isDark ? 'rgba(168, 85, 247, 0.2)' : '#FAF5FF' },
+              ]}
+            >
+              <Ionicons name="cube-outline" size={18} color="#A855F7" />
+            </View>
+            <View>
+              <Text style={[styles.settingTitle, { color: colors.text }]}>App Version</Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+                Split Your Trip by MJ Studios
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.versionTag, { color: colors.textMuted }]}>v1.0.36 (37)</Text>
         </View>
 
         <View style={styles.settingRow}>

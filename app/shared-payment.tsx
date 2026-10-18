@@ -22,6 +22,7 @@ import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { extractPaymentFromScreenshot, getNativeSharedImageUri, getNativeSharedData, clearNativeSharedData } from '../src/services/receiptOcr';
 import { theme } from '../src/theme/colors';
 import { useTheme } from '../src/theme/useThemeStore';
+import BillScannerModal, { ScannedBillResult } from '../src/components/BillScannerModal';
 
 type FilterTab = 'all' | 'chats' | 'trips';
 
@@ -33,7 +34,16 @@ export default function SharedPaymentScreen() {
   const { contacts, initContacts, isLoading: contactsLoading } = useContactsStore();
   const { user, profile } = useAuthStore();
 
-  const params = useLocalSearchParams<{ imageUri?: string; sharedText?: string }>();
+  const params = useLocalSearchParams<{
+    imageUri?: string;
+    sharedText?: string;
+    amount?: string;
+    description?: string;
+    category?: string;
+    receiverName?: string;
+    detectedApp?: string;
+    upiTxnId?: string;
+  }>();
   const [imageUri, setImageUri] = useState<string | null>(params.imageUri || null);
   const [sharedText, setSharedText] = useState<string | null>(params.sharedText || null);
 
@@ -45,11 +55,11 @@ export default function SharedPaymentScreen() {
   const [detectedApp, setDetectedApp] = useState<
     'super.money' | 'gpay' | 'phonepe' | 'paytm' | 'cred' | 'bhim' | 'navi' | 'amazon_pay' | 'whatsapp' | 'unknown'
   >('unknown');
-  const [amountRupees, setAmountRupees] = useState('');
-  const [receiverName, setReceiverName] = useState('');
-  const [description, setDescription] = useState('');
-  const [upiTxnId, setUpiTxnId] = useState('');
-  const [suggestedCategory, setSuggestedCategory] = useState<string>('General');
+  const [amountRupees, setAmountRupees] = useState(params.amount || '');
+  const [receiverName, setReceiverName] = useState(params.receiverName || '');
+  const [description, setDescription] = useState(params.description || '');
+  const [upiTxnId, setUpiTxnId] = useState(params.upiTxnId || '');
+  const [suggestedCategory, setSuggestedCategory] = useState<string>(params.category || 'General');
 
   // UI state
   const [showEditFields, setShowEditFields] = useState(false);
@@ -57,6 +67,7 @@ export default function SharedPaymentScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [isNavigating, setIsNavigating] = useState(false);
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
+  const [showScannerModal, setShowScannerModal] = useState(false);
 
   // Initialize contacts and friends list
   useEffect(() => {
@@ -89,6 +100,17 @@ export default function SharedPaymentScreen() {
         setSharedText(currentText);
       }
 
+      // If amount was already scanned & extracted (e.g. from BillScannerModal), don't re-run OCR!
+      if (params.amount) {
+        setAmountRupees(params.amount);
+        if (params.description) setDescription(params.description);
+        if (params.category) setSuggestedCategory(params.category);
+        if (params.receiverName) setReceiverName(params.receiverName);
+        if (params.upiTxnId) setUpiTxnId(params.upiTxnId);
+        if (params.detectedApp) setDetectedApp(params.detectedApp as any);
+        return;
+      }
+
       if (currentUri) {
         runOcrOnUri(currentUri, currentText);
       } else if (currentText) {
@@ -96,7 +118,7 @@ export default function SharedPaymentScreen() {
       }
     }
     checkIncoming();
-  }, [params.imageUri, params.sharedText]);
+  }, [params.imageUri, params.sharedText, params.amount]);
 
   const applyParsedPayment = (parsed: any) => {
     setDetectedApp(parsed.app);
@@ -150,28 +172,9 @@ export default function SharedPaymentScreen() {
     }
   };
 
-  // Pick another screenshot
-  const handlePickScreenshot = async () => {
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Please grant photo library access to pick a payment screenshot.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 1.0,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const pickedUri = result.assets[0].uri;
-        setImageUri(pickedUri);
-        runOcrOnUri(pickedUri);
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Could not pick image');
-    }
+  // Pick or scan another bill/screenshot
+  const handlePickScreenshot = () => {
+    setShowScannerModal(true);
   };
 
   // Deduplicated group trips (excluding 1-on-1 friend splits)
@@ -291,7 +294,7 @@ export default function SharedPaymentScreen() {
       case 'whatsapp':
         return { bg: '#F0FDF4', text: '#15803D', border: '#22C55E', label: 'WhatsApp Pay' };
       default:
-        return { bg: colors.primaryLight, text: colors.primaryDark, border: colors.primary, label: 'UPI Receipt' };
+        return { bg: colors.primaryLight, text: colors.primaryDark, border: colors.primary, label: 'Bill / Receipt' };
     }
   };
 
@@ -739,6 +742,31 @@ export default function SharedPaymentScreen() {
           </View>
         )}
       </ScrollView>
+
+      <BillScannerModal
+        visible={showScannerModal}
+        onClose={() => setShowScannerModal(false)}
+        onScanComplete={(result: ScannedBillResult) => {
+          if (result.imageUri) {
+            setImageUri(result.imageUri);
+          }
+          if (result.amount) {
+            setAmountRupees(result.amount);
+          }
+          if (result.description) {
+            setDescription(result.description);
+          }
+          if (result.category) {
+            setSuggestedCategory(result.category);
+          }
+          if (result.upiTxnId) {
+            setUpiTxnId(result.upiTxnId);
+          }
+          if (result.detectedApp) {
+            setDetectedApp(result.detectedApp as any);
+          }
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }

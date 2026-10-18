@@ -12,6 +12,7 @@ import {
   StatusBar,
   Modal,
   FlatList,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -37,12 +38,15 @@ export default function LoginScreen() {
   } = useAuthStore();
   const fetchTrips = useTripStore(state => state.fetchTrips);
 
+  const [forgotModalVisible, setForgotModalVisible] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(false);
+
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && !forgotModalVisible && !pendingNavigation) {
       fetchTrips(user.id).catch(() => {});
       router.replace('/(tabs)');
     }
-  }, [user]);
+  }, [user, forgotModalVisible, pendingNavigation]);
 
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [fullName, setFullName] = useState('');
@@ -60,7 +64,6 @@ export default function LoginScreen() {
   const [otpToken, setOtpToken] = useState('');
 
   // Forgot Password modal state
-  const [forgotModalVisible, setForgotModalVisible] = useState(false);
   const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotOtp, setForgotOtp] = useState('');
@@ -70,6 +73,13 @@ export default function LoginScreen() {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((prev) => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -127,12 +137,15 @@ export default function LoginScreen() {
     }
 
     setForgotStep('verify');
+    setForgotOtp('');
+    setResendCooldown(60);
     setForgotSuccess(`Recovery code sent to ${clean}. Please check your inbox or spam.`);
   };
 
   const handleResetPassword = async () => {
-    if (!forgotOtp.trim() || forgotOtp.trim().length < 6) {
-      setForgotError('Please enter the 6-digit recovery code');
+    const cleanOtp = forgotOtp.trim().replace(/[^0-9a-zA-Z]/g, '');
+    if (!cleanOtp || cleanOtp.length < 6) {
+      setForgotError('Please enter the recovery code received in your email');
       return;
     }
     if (!forgotNewPassword || forgotNewPassword.length < 6) {
@@ -149,7 +162,7 @@ export default function LoginScreen() {
     setForgotLoading(true);
 
     const clean = forgotEmail.trim().toLowerCase();
-    const { error } = await resetPasswordWithOtp(clean, forgotOtp.trim(), forgotNewPassword);
+    const { error } = await resetPasswordWithOtp(clean, cleanOtp, forgotNewPassword);
     setForgotLoading(false);
 
     if (error) {
@@ -157,8 +170,15 @@ export default function LoginScreen() {
       return;
     }
 
+    Keyboard.dismiss();
+    setPendingNavigation(true);
     setForgotModalVisible(false);
-    router.replace('/(tabs)');
+
+    if (Platform.OS !== 'ios') {
+      setTimeout(() => {
+        router.replace('/(tabs)');
+      }, 300);
+    }
   };
 
   const handleSignUp = async () => {
@@ -214,15 +234,16 @@ export default function LoginScreen() {
   };
 
   const handleVerifyOtp = async () => {
-    if (!otpToken.trim() || otpToken.trim().length < 6) {
-      setErrorMsg('Please enter the complete 6-digit code');
+    const cleanOtp = otpToken.trim().replace(/[^0-9a-zA-Z]/g, '');
+    if (!cleanOtp || cleanOtp.length < 6) {
+      setErrorMsg('Please enter the complete confirmation code from your email');
       return;
     }
 
     setErrorMsg(null);
     setLoading(true);
 
-    const { error } = await verifyOtp(email.trim(), otpToken.trim());
+    const { error } = await verifyOtp(email.trim(), cleanOtp);
     setLoading(false);
 
     if (error) {
@@ -244,17 +265,7 @@ export default function LoginScreen() {
     try {
       const { error } = await signInWithGoogle();
 
-      if (error) {
-        if (
-          error.message.toLowerCase().includes('cancelled') ||
-          error.message.toLowerCase().includes('canceled')
-        ) {
-          return;
-        }
-        setErrorMsg(error.message);
-        return;
-      }
-
+      // Verify if user session is established
       const currentUser = useAuthStore.getState().user;
       if (currentUser) {
         // If the user entered their phone number on the signup/login form, sync it to their profile
@@ -265,6 +276,18 @@ export default function LoginScreen() {
 
         await fetchTrips(currentUser.id);
         router.replace('/(tabs)');
+        return;
+      }
+
+      if (error) {
+        if (
+          error.message.toLowerCase().includes('cancelled') ||
+          error.message.toLowerCase().includes('canceled')
+        ) {
+          return;
+        }
+        setErrorMsg(error.message);
+        return;
       }
     } finally {
       setGoogleLoading(false);
@@ -342,7 +365,10 @@ export default function LoginScreen() {
                 </View>
               )}
 
-              <Text style={[styles.label, { color: colors.text }]}>6-Digit Confirmation Code</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>Confirmation Code (OTP)</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>6 to 10 digits</Text>
+              </View>
               <TextInput
                 style={[
                   styles.input,
@@ -351,12 +377,13 @@ export default function LoginScreen() {
                     backgroundColor: colors.inputBackground,
                     borderColor: colors.border,
                     color: colors.text,
+                    letterSpacing: 2,
                   },
                 ]}
-                placeholder="123456"
+                placeholder="Enter code from email"
                 placeholderTextColor={colors.textMuted}
                 keyboardType="number-pad"
-                maxLength={8}
+                maxLength={10}
                 value={otpToken}
                 onChangeText={setOtpToken}
                 autoFocus
@@ -812,8 +839,22 @@ export default function LoginScreen() {
       </Modal>
 
       {/* Forgot Password Modal */}
-      {forgotModalVisible && (
-        <Modal visible={forgotModalVisible} transparent animationType="slide">
+      <Modal
+        visible={forgotModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          Keyboard.dismiss();
+          setForgotModalVisible(false);
+          setPendingNavigation(false);
+        }}
+        onDismiss={() => {
+          if (pendingNavigation) {
+            setPendingNavigation(false);
+            router.replace('/(tabs)');
+          }
+        }}
+      >
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={styles.forgotModalOverlay}
@@ -841,9 +882,11 @@ export default function LoginScreen() {
                 <TouchableOpacity
                   style={[styles.closeIconBtn, { backgroundColor: colors.inputBackground }]}
                   onPress={() => {
+                    Keyboard.dismiss();
                     setForgotModalVisible(false);
                     setForgotError(null);
                     setForgotSuccess(null);
+                    setPendingNavigation(false);
                   }}
                 >
                   <Ionicons name="close" size={20} color={colors.text} />
@@ -907,7 +950,10 @@ export default function LoginScreen() {
                 </View>
               ) : (
                 <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
-                  <Text style={[styles.label, { color: colors.text }]}>6-Digit Recovery Code</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>Recovery Code (OTP)</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>6 to 10 digits</Text>
+                  </View>
                   <View
                     style={[
                       styles.inputContainer,
@@ -920,13 +966,14 @@ export default function LoginScreen() {
                   >
                     <Ionicons name="key-outline" size={18} color={colors.textMuted} style={styles.inputIcon} />
                     <TextInput
-                      style={[styles.textInput, { color: colors.text, letterSpacing: 3, fontWeight: '700' }]}
-                      placeholder="123456"
+                      style={[styles.textInput, { color: colors.text, letterSpacing: 2, fontWeight: '700' }]}
+                      placeholder="Enter code from email"
                       placeholderTextColor={colors.textMuted}
                       keyboardType="number-pad"
-                      maxLength={6}
+                      maxLength={10}
                       value={forgotOtp}
-                      onChangeText={setForgotOtp}
+                      onChangeText={(val) => setForgotOtp(val.replace(/[^0-9a-zA-Z]/g, ''))}
+                      autoCapitalize="none"
                     />
                   </View>
 
@@ -1000,20 +1047,35 @@ export default function LoginScreen() {
                     )}
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={{ alignItems: 'center', marginTop: 12 }}
-                    onPress={() => setForgotStep('request')}
-                  >
-                    <Text style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '600' }}>
-                      Didn't get code? Resend to another email
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+                    <TouchableOpacity
+                      onPress={handleSendRecoveryCode}
+                      disabled={forgotLoading || resendCooldown > 0}
+                      style={{ paddingVertical: 6, opacity: resendCooldown > 0 ? 0.6 : 1 }}
+                    >
+                      <Text style={{ fontSize: 13, color: resendCooldown > 0 ? colors.textMuted : colors.primary, fontWeight: '600' }}>
+                        {resendCooldown > 0 ? `⏳ Resend Code (${resendCooldown}s)` : '🔄 Resend Code'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        setForgotStep('request');
+                        setForgotError(null);
+                        setForgotSuccess(null);
+                      }}
+                      style={{ paddingVertical: 6 }}
+                    >
+                      <Text style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '600' }}>
+                        ✏️ Change Email
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </ScrollView>
               )}
             </View>
           </KeyboardAvoidingView>
         </Modal>
-      )}
     </KeyboardAvoidingView>
   );
 }

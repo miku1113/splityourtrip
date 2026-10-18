@@ -30,6 +30,7 @@ import { getCurrencyInfo } from '../../../src/services/currency';
 import { extractPaymentFromScreenshot } from '../../../src/services/receiptOcr';
 import { AppStorage } from '../../../src/lib/storage';
 import { sendAutomatedWhatsAppExpenseAlert } from '../../../src/services/whatsappService';
+import BillScannerModal, { ScannedBillResult } from '../../../src/components/BillScannerModal';
 
 const CATEGORIES = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
 
@@ -94,6 +95,23 @@ export default function AddExpenseScreen() {
   const currentTrip = trips.find(t => t.id === id);
   const currencyInfo = getCurrencyInfo(currentTrip?.currency);
 
+  const myMember = React.useMemo(() => {
+    return findMyMember(members, user?.id, currentUserPhone);
+  }, [members, user?.id, currentUserPhone]);
+
+  const getMemberDisplayName = React.useCallback(
+    (m: TripMember) => {
+      if (myMember?.id === m.id) {
+        if (m.display_name.toLowerCase() === 'you' || m.display_name.endsWith('(You)')) {
+          return m.display_name;
+        }
+        return `${m.display_name} (You)`;
+      }
+      return m.display_name;
+    },
+    [myMember?.id]
+  );
+
   const existingExpense = expenseId ? expenses.find(e => e.id === expenseId) : null;
 
   const [amountRupees, setAmountRupees] = useState(
@@ -115,6 +133,7 @@ export default function AddExpenseScreen() {
   );
   const [detectedApp, setDetectedApp] = useState<string | null>(paramPaymentApp || null);
   const [isScanningReceipt, setIsScanningReceipt] = useState(false);
+  const [showBillScanner, setShowBillScanner] = useState(false);
 
   const [splitType, setSplitType] = useState<SplitType>(
     (existingExpense?.split_type as SplitType) || 'equal'
@@ -176,71 +195,82 @@ export default function AddExpenseScreen() {
     (existingExpense?.attachment_type as any) || (paramAttachmentUri ? 'image' : null)
   );
 
-  const handleScanReceipt = async () => {
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Please allow camera roll access to scan a payment screenshot.');
-        return;
+  const handleScanComplete = (scanned: ScannedBillResult) => {
+    if (scanned.amount) {
+      setAmountRupees(scanned.amount);
+      if (splitType === 'custom' && selectedParticipants.length > 0) {
+        const num = parseFloat(scanned.amount) || 0;
+        const per = (num / selectedParticipants.length).toFixed(2);
+        const autoMap: Record<string, string> = {};
+        selectedParticipants.forEach(pId => {
+          autoMap[pId] = per;
+        });
+        setCustomAmounts(autoMap);
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 1.0,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const pickedUri = result.assets[0].uri;
-        setIsScanningReceipt(true);
-        setAttachmentUri(pickedUri);
-        setAttachmentType('image');
-
-        const { parsed } = await extractPaymentFromScreenshot(pickedUri);
-        if (parsed.amountPaise) {
-          const rupees = parsed.amountPaise / 100;
-          setAmountRupees(rupees % 1 === 0 ? rupees.toString() : rupees.toFixed(2));
-        }
-        if (parsed.receiverName) {
-          setDescription(`Payment to ${parsed.receiverName}`);
-        }
-        if (parsed.suggestedCategory) {
-          setCategory(parsed.suggestedCategory);
-        }
-        if (parsed.upiTxnId) {
-          setUpiTxnId(parsed.upiTxnId);
-        }
-        setPaymentMode('upi');
-        setDetectedApp(parsed.app);
-        setAttachmentName(`Payment_Screenshot_${(parsed.app || 'upi').replace(/[^a-zA-Z0-9]/g, '')}.jpg`);
-      }
-    } catch (err: any) {
-      Alert.alert('Scan Error', err?.message || 'Could not scan receipt.');
-    } finally {
-      setIsScanningReceipt(false);
+    }
+    if (scanned.description) {
+      setDescription(scanned.description);
+    }
+    if (scanned.category) {
+      setCategory(scanned.category);
+    }
+    if (scanned.paymentMode) {
+      setPaymentMode(scanned.paymentMode);
+    }
+    if (scanned.upiTxnId) {
+      setUpiTxnId(scanned.upiTxnId);
+    }
+    if (scanned.detectedApp) {
+      setDetectedApp(scanned.detectedApp);
+    }
+    if (scanned.imageUri) {
+      setAttachmentUri(scanned.imageUri);
+      setAttachmentType('image');
+      setAttachmentName(`Scanned_Bill_${Date.now()}.jpg`);
     }
   };
 
-  const handlePickImage = async () => {
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Please allow camera roll access to attach photos or receipts.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        setAttachmentUri(asset.uri);
-        setAttachmentName(asset.fileName || 'Receipt Photo.jpg');
-        setAttachmentType('image');
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Could not pick photo');
-    }
+  const handleScanReceipt = () => {
+    setShowBillScanner(true);
+  };
+
+  const handlePickImage = () => {
+    Alert.alert(
+      'Attach Receipt / Bill',
+      'Choose how you would like to add the bill or receipt:',
+      [
+        {
+          text: 'Scan with Camera',
+          onPress: () => setShowBillScanner(true),
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: async () => {
+            try {
+              const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (!permission.granted) {
+                Alert.alert('Permission Denied', 'Please allow camera roll access to attach photos or receipts.');
+                return;
+              }
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.8,
+              });
+              if (!result.canceled && result.assets && result.assets.length > 0) {
+                const asset = result.assets[0];
+                setAttachmentUri(asset.uri);
+                setAttachmentName(asset.fileName || 'Receipt Photo.jpg');
+                setAttachmentType('image');
+              }
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Could not pick photo');
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handlePickDocument = async () => {
@@ -604,7 +634,7 @@ export default function AddExpenseScreen() {
         </View>
       )}
 
-      {/* Quick Button to Scan a Payment Screenshot directly */}
+      {/* Quick Button to Scan a Bill or Payment Screenshot directly */}
       {!expenseId && (
         <TouchableOpacity
           style={[
@@ -614,16 +644,12 @@ export default function AddExpenseScreen() {
               borderColor: isDark ? 'rgba(234, 179, 8, 0.4)' : '#FEF08A',
             },
           ]}
-          onPress={handleScanReceipt}
-          disabled={isScanningReceipt}
+          onPress={() => setShowBillScanner(true)}
+          activeOpacity={0.8}
         >
-          {isScanningReceipt ? (
-            <ActivityIndicator size="small" color="#D97706" />
-          ) : (
-            <Ionicons name="sparkles" size={18} color="#D97706" />
-          )}
+          <Ionicons name="scan" size={18} color="#D97706" />
           <Text style={styles.quickOcrBtnText}>
-            {isScanningReceipt ? 'Scanning with AI OCR...' : 'Auto-fill from Payment Screenshot'}
+            Auto-scan Bill or Payment with Camera
           </Text>
         </TouchableOpacity>
       )}
@@ -767,7 +793,7 @@ export default function AddExpenseScreen() {
                   paidBy === m.id && styles.payerTextActive,
                 ]}
               >
-                {m.display_name}
+                {getMemberDisplayName(m)}
               </Text>
             </TouchableOpacity>
           ))}
@@ -1147,7 +1173,7 @@ export default function AddExpenseScreen() {
                     color={isSelected ? colors.primary : colors.textMuted}
                   />
                   <Text style={[styles.participantName, { color: colors.text }]}>
-                    {m.display_name}
+                    {getMemberDisplayName(m)}
                   </Text>
                   {m.is_guest && (
                     <Text
@@ -1221,6 +1247,11 @@ export default function AddExpenseScreen() {
         )}
       </TouchableOpacity>
     </ScrollView>
+    <BillScannerModal
+      visible={showBillScanner}
+      onClose={() => setShowBillScanner(false)}
+      onScanComplete={handleScanComplete}
+    />
     </KeyboardAvoidingView>
   );
 }

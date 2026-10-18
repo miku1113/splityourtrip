@@ -142,7 +142,15 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       tripIds.map(async tId => {
         try {
           const lr = await AppStorage.getItem(`@splityourtrip_last_read_${tId}`);
-          if (lr) lastReadMap.set(tId, new Date(lr).getTime());
+          if (lr) {
+            const num = Number(lr);
+            if (!isNaN(num) && num > 0) {
+              lastReadMap.set(tId, num);
+            } else {
+              const parsed = new Date(lr).getTime();
+              if (!isNaN(parsed) && parsed > 0) lastReadMap.set(tId, parsed);
+            }
+          }
         } catch {}
       })
     );
@@ -277,13 +285,12 @@ interface FriendMapEntry {
 
             const parsed = parseMessagePayload(msg.message || msg.content || '');
             const isSeen = msg.is_seen !== undefined ? !!msg.is_seen : (parsed.is_seen !== undefined ? !!parsed.is_seen : false);
+            const msgTime = new Date(msg.created_at).getTime();
 
-            if (!isSeen) {
-              const msgTime = new Date(msg.created_at).getTime();
-              // Unseen if explicitly is_seen === false, or if created after lastReadMs (when lastReadMs exists)
-              if (parsed.is_seen === false || (lastReadMs > 0 && msgTime > lastReadMs)) {
-                entry.unseenMessagesCount += 1;
-              }
+            // A message is unseen ONLY if it is not marked seen AND was sent after user's lastRead timestamp (or user never opened the chat)
+            const isUnseen = !isSeen && (lastReadMs > 0 ? msgTime > lastReadMs : true);
+            if (isUnseen) {
+              entry.unseenMessagesCount += 1;
             }
             if (!entry.lastMessageAt || msg.created_at > entry.lastMessageAt) {
               entry.lastMessageAt = msg.created_at;
@@ -385,7 +392,12 @@ interface FriendMapEntry {
 
         entry.trips.add(tId);
 
-        // Check unseen messages from this other member in this trip
+        // Check unseen messages from this other member in direct 1-on-1 friend split trips
+        const isDirectFriendTrip =
+          tMembers.length === 2 ||
+          tripMeta?.trip_type === 'friend_split' ||
+          tripMeta?.name?.toLowerCase().startsWith('split with ');
+
         for (const msg of (tMessages as any[])) {
           const isSenderOther =
             msg.sender_id === otherMember.id ||
@@ -395,13 +407,19 @@ interface FriendMapEntry {
           if (!isSenderOther) continue;
 
           const parsed = parseMessagePayload(msg.message || msg.content || '');
-          const isSeen = msg.is_seen !== undefined ? !!msg.is_seen : (parsed.is_seen !== undefined ? !!parsed.is_seen : false);
 
-          if (!isSeen) {
-            const msgTime = new Date(msg.created_at).getTime();
-            if (parsed.is_seen === false || (lastReadMs > 0 && msgTime > lastReadMs)) {
-              entry.unseenMessagesCount += 1;
-            }
+          // Group trip messages belong to the group trip on the Trips tab, NOT this individual friend's 1-on-1 badge
+          if (!isDirectFriendTrip && parsed.chatType !== 'individual') {
+            continue;
+          }
+
+          const isSeen = msg.is_seen !== undefined ? !!msg.is_seen : (parsed.is_seen !== undefined ? !!parsed.is_seen : false);
+          const msgTime = new Date(msg.created_at).getTime();
+
+          // A message is unseen ONLY if it is not marked seen AND was sent after user's lastRead timestamp (or user never opened the chat)
+          const isUnseen = !isSeen && (lastReadMs > 0 ? msgTime > lastReadMs : true);
+          if (isUnseen) {
+            entry.unseenMessagesCount += 1;
           }
           if (!entry.lastMessageAt || msg.created_at > entry.lastMessageAt) {
             entry.lastMessageAt = msg.created_at;

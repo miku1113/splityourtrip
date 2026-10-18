@@ -23,6 +23,9 @@ BUILD_GRADLE="$PROJECT_DIR/android/app/build.gradle"
 APK_PATH="$PROJECT_DIR/splitYourTrip.apk"
 DESKTOP_APK="/Users/mihir/Desktop/splitYourTrip.apk"
 RELEASE_APK="$PROJECT_DIR/android/app/build/outputs/apk/release/app-release.apk"
+AAB_PATH="$PROJECT_DIR/splitYourTrip.aab"
+DESKTOP_AAB="/Users/mihir/Desktop/splitYourTrip.aab"
+RELEASE_AAB="$PROJECT_DIR/android/app/build/outputs/bundle/release/app-release.aab"
 
 # Dynamically resolve current version and build number
 APP_VERSION=$(grep '"version":' "$APP_JSON" 2>/dev/null | head -n 1 | awk -F '"' '{print $4}')
@@ -41,7 +44,7 @@ for b_dir in $(ls -dt /Users/mihir/.gemini/antigravity-ide/brain/*/ 2>/dev/null)
   TASK_DIR="${b_dir}.system_generated/tasks"
   if [ -d "$TASK_DIR" ]; then
     for file in $(ls -t "$TASK_DIR"/task-*.log 2>/dev/null); do
-      if grep -q -E "(assembleRelease|BUILD SUCCESSFUL|BUILD FAILED|compileRelease|react-native|expo-modules-core|app:packageRelease)" "$file" 2>/dev/null; then
+      if grep -q -E "(bundleRelease|assembleRelease|BUILD SUCCESSFUL|BUILD FAILED|compileRelease|react-native|expo-modules-core|app:packageRelease)" "$file" 2>/dev/null; then
         LATEST_LOG="$file"
         break 2
       fi
@@ -88,7 +91,20 @@ show_success() {
     cp "$RELEASE_APK" "$APK_PATH" 2>/dev/null
     cp "$RELEASE_APK" "$DESKTOP_APK" 2>/dev/null
   fi
+  # Ensure latest built AAB is copied to designated spots
+  if [ -f "$RELEASE_AAB" ]; then
+    cp "$RELEASE_AAB" "$AAB_PATH" 2>/dev/null
+    cp "$RELEASE_AAB" "$DESKTOP_AAB" 2>/dev/null
+  fi
 
+  if [ -f "$AAB_PATH" ]; then
+    echo -e "${GREEN}✓ Project AAB located at:${NC}"
+    ls -lh "$AAB_PATH"
+  fi
+  if [ -f "$DESKTOP_AAB" ]; then
+    echo -e "${GREEN}✓ Desktop AAB located at:${NC}"
+    ls -lh "$DESKTOP_AAB"
+  fi
   if [ -f "$APK_PATH" ]; then
     echo -e "${GREEN}✓ Project APK located at:${NC}"
     ls -lh "$APK_PATH"
@@ -98,7 +114,7 @@ show_success() {
     ls -lh "$DESKTOP_APK"
   fi
   echo ""
-  echo -e "${CYAN}You can now transfer and install 'splitYourTrip.apk' (v${APP_VERSION}, Build ${VERSION_CODE}) on your Android device.${NC}"
+  echo -e "${CYAN}Release package (v${APP_VERSION}, Build ${VERSION_CODE}) ready!${NC}"
 }
 
 # Function to show build failure summary

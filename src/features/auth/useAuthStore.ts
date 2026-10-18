@@ -1,35 +1,48 @@
 import { create } from 'zustand';
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { AppStorage } from '../../lib/storage';
 import { supabase, supabaseAdmin, isSupabaseConfigured, GOOGLE_WEB_CLIENT_ID } from '../../lib/supabase';
 import { Profile } from '../../types/database';
 import { getUserCurrencyPreference, setUserCurrencyPreference } from '../../services/currency';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+// Dynamically resolve GoogleSignin only when the native module is present in the binary (e.g. custom development build)
+// In standard Expo Go, NativeModules.RNGoogleSignin is undefined. Static imports trigger TurboModuleRegistry.getEnforcing crashes!
+let GoogleSignin: any = null;
+let statusCodes: any = {
+  SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED',
+  IN_PROGRESS: 'IN_PROGRESS',
+  PLAY_SERVICES_NOT_AVAILABLE: 'PLAY_SERVICES_NOT_AVAILABLE',
+  SIGN_IN_REQUIRED: 'SIGN_IN_REQUIRED',
+};
 
-// Configure Google Sign-In with Web Client ID for native account selector bottom-sheet
-if (Platform.OS === 'android') {
+const isGoogleSigninAvailable = Boolean(NativeModules && NativeModules.RNGoogleSignin);
+
+if (isGoogleSigninAvailable) {
   try {
-    GoogleSignin.configure({
-      webClientId: GOOGLE_WEB_CLIENT_ID,
-      scopes: ['profile', 'email'],
-    });
-  } catch (e) {
-    console.warn('GoogleSignin.configure warning:', e);
-  }
-} else if (Platform.OS === 'ios') {
-  try {
-    const iosId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
-    if (iosId) {
+    const GoogleSigninPkg = require('@react-native-google-signin/google-signin');
+    GoogleSignin = GoogleSigninPkg.GoogleSignin;
+    if (GoogleSigninPkg.statusCodes) {
+      statusCodes = GoogleSigninPkg.statusCodes;
+    }
+
+    if (Platform.OS === 'android') {
       GoogleSignin.configure({
         webClientId: GOOGLE_WEB_CLIENT_ID,
-        iosClientId: iosId,
         scopes: ['profile', 'email'],
       });
+    } else if (Platform.OS === 'ios') {
+      const iosId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+      if (iosId) {
+        GoogleSignin.configure({
+          webClientId: GOOGLE_WEB_CLIENT_ID,
+          iosClientId: iosId,
+          scopes: ['profile', 'email'],
+        });
+      }
     }
   } catch (e) {
-    console.warn('GoogleSignin.configure warning:', e);
+    console.warn('[AuthStore] GoogleSignin native init warning:', e);
   }
 }
 
@@ -135,6 +148,11 @@ function parseAuthUrlParams(url: string): Record<string, string> {
 
   return params;
 }
+
+// Global in-flight lock and cache for PKCE auth codes to prevent duplicate single-use exchange race conditions
+let inFlightAuthPromise: Promise<{ success: boolean; error: Error | null }> | null = null;
+let lastHandledAuthCode: string | null = null;
+let lastHandledAuthCodeTime = 0;
 
 interface AuthState {
   user: { id: string; email?: string } | null;
@@ -589,11 +607,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     const cleanEmail = email.trim().toLowerCase();
     try {
+      // 1. Verify user exists first to prevent waiting on typos (read-only query)
+      if (supabaseAdmin) {
+        try {
+          const { data: userData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+          if (userData?.users && userData.users.length > 0) {
+            const userExists = userData.users.some(
+              (u) => u.email?.trim().toLowerCase() === cleanEmail
+            );
+            if (!userExists) {
+              return {
+                error: new Error(
+                  `No account found with "${cleanEmail}". Please check your email for typos or create an account.`
+                ),
+              };
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Dispatch recovery email via Supabase Auth
       const { error } = await withTimeout(
         supabase.auth.resetPasswordForEmail(cleanEmail),
-        7000
+        10000
       );
       if (error) {
+        const msg = error.message?.toLowerCase() || '';
+        if (
+          msg.includes('rate limit') ||
+          msg.includes('seconds') ||
+          (error as any).code === 'over_email_send_rate_limit'
+        ) {
+          return { error: new Error('Please wait 60 seconds before requesting another recovery code.') };
+        }
         return { error: new Error(error.message) };
       }
       return { error: null };
@@ -607,15 +653,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return { error: new Error('Supabase is not configured yet.') };
     }
     const cleanEmail = email.trim().toLowerCase();
+    const cleanOtp = otp.trim().replace(/[^0-9a-zA-Z]/g, '');
     try {
-      // 1. Verify OTP with recovery type
+      // 1. Verify OTP with recovery type (supports 6 to 10 digits)
       const { data, error: verifyError } = await withTimeout(
         supabase.auth.verifyOtp({
           email: cleanEmail,
-          token: otp.trim(),
+          token: cleanOtp,
           type: 'recovery',
         }),
-        7000
+        10000
       );
 
       if (verifyError) {
@@ -627,11 +674,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         supabase.auth.updateUser({
           password: newPassword,
         }),
-        7000
+        10000
       );
 
       if (updateError) {
-        return { error: new Error(updateError.message) };
+        if (data?.user?.id && supabaseAdmin) {
+          try {
+            await supabaseAdmin.auth.admin.updateUserById(data.user.id, { password: newPassword });
+          } catch {
+            return { error: new Error(updateError.message) };
+          }
+        } else {
+          return { error: new Error(updateError.message) };
+        }
       }
 
       if (data?.user) {
@@ -727,42 +782,86 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return { success: false, error: new Error(decodeURIComponent(msg.replace(/\+/g, ' '))) };
     }
 
-    // 1. PKCE Authorization Code Exchange
+    // 1. PKCE Authorization Code Exchange with concurrency lock and deduplication
     if (params.code) {
-      const { data: exData, error: exError } = await supabase.auth.exchangeCodeForSession(params.code);
-      if (exError) {
-        console.warn('PKCE exchange warning:', exError.message);
-        // If code exchange failed (e.g. already consumed), check if live session is active
+      const authCode = params.code;
+
+      // Deduplication: if this exact code was successfully handled within the last 20 seconds, succeed immediately
+      if (lastHandledAuthCode === authCode && Date.now() - lastHandledAuthCodeTime < 20000) {
+        const currentUser = get().user;
+        if (currentUser) {
+          return { success: true, error: null };
+        }
         const { data: sData } = await supabase.auth.getSession();
         if (sData?.session?.user) {
-          const prevUser = get().user;
-          if (!prevUser || prevUser.id !== sData.session.user.id) {
-            resetUserStores();
-          }
           const profile = await get().ensureProfile(
             sData.session.user.id,
             sData.session.user.user_metadata?.full_name || sData.session.user.user_metadata?.name
           );
           set({ user: sData.session.user, profile, isLoading: false });
-          syncUserData(sData.session.user.id).catch(() => {});
           return { success: true, error: null };
         }
-        if (!params.access_token) {
-          return { success: false, error: new Error(exError.message) };
-        }
-      } else if (exData?.user) {
-        const prevUser = get().user;
-        if (!prevUser || prevUser.id !== exData.user.id) {
-          resetUserStores();
-        }
-        const profile = await get().ensureProfile(
-          exData.user.id,
-          exData.user.user_metadata?.full_name || exData.user.user_metadata?.name
-        );
-        set({ user: exData.user, profile, isLoading: false });
-        syncUserData(exData.user.id).catch(() => {});
-        return { success: true, error: null };
       }
+
+      // If an exchange for this code is already in flight across any listener, reuse the same promise
+      if (inFlightAuthPromise) {
+        return inFlightAuthPromise;
+      }
+
+      inFlightAuthPromise = (async () => {
+        try {
+          const { data: exData, error: exError } = await supabase.auth.exchangeCodeForSession(authCode);
+
+          if (exError) {
+            console.warn('PKCE exchange notice:', exError.message);
+            // Polling fallback: if code exchange returned an error (e.g. invalid flow state or already used),
+            // poll for active session up to 8 times (2 seconds total) in case another handler or Supabase completed it
+            for (let i = 0; i < 8; i++) {
+              const { data: sData } = await supabase.auth.getSession();
+              if (sData?.session?.user) {
+                lastHandledAuthCode = authCode;
+                lastHandledAuthCodeTime = Date.now();
+                const prevUser = get().user;
+                if (!prevUser || prevUser.id !== sData.session.user.id) {
+                  resetUserStores();
+                }
+                const profile = await get().ensureProfile(
+                  sData.session.user.id,
+                  sData.session.user.user_metadata?.full_name || sData.session.user.user_metadata?.name
+                );
+                set({ user: sData.session.user, profile, isLoading: false });
+                syncUserData(sData.session.user.id).catch(() => {});
+                return { success: true, error: null };
+              }
+              await new Promise(r => setTimeout(r, 250));
+            }
+
+            if (!params.access_token) {
+              return { success: false, error: new Error(exError.message) };
+            }
+          } else if (exData?.user) {
+            lastHandledAuthCode = authCode;
+            lastHandledAuthCodeTime = Date.now();
+            const prevUser = get().user;
+            if (!prevUser || prevUser.id !== exData.user.id) {
+              resetUserStores();
+            }
+            const profile = await get().ensureProfile(
+              exData.user.id,
+              exData.user.user_metadata?.full_name || exData.user.user_metadata?.name
+            );
+            set({ user: exData.user, profile, isLoading: false });
+            syncUserData(exData.user.id).catch(() => {});
+            return { success: true, error: null };
+          }
+        } finally {
+          inFlightAuthPromise = null;
+        }
+
+        return { success: false, error: new Error('Could not establish session from code') };
+      })();
+
+      return inFlightAuthPromise;
     }
 
     // 2. Direct Token Set (Implicit Flow)
@@ -812,8 +911,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      // 1. Native Google Account Chooser bottom sheet on Android (or iOS with iosClientId)
-      if (Platform.OS === 'android' || (Platform.OS === 'ios' && process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID)) {
+      // 1. Native Google Account Chooser on Android (or iOS with iosClientId)
+      if (isGoogleSigninAvailable && GoogleSignin && (Platform.OS === 'android' || (Platform.OS === 'ios' && process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID))) {
         try {
           await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
@@ -830,81 +929,77 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
           const idToken = signInRes.data?.idToken || (signInRes as any).idToken;
           if (!idToken) {
-            return { error: new Error('Google did not return an identity token. Please try again.') };
-          }
+            console.log('[Native Google Sign-In] Google did not return ID token, smoothly continuing to browser OAuth...');
+          } else {
+            // Directly authenticate with Supabase using the Google ID Token (no browser redirects!)
+            const { data: sData, error: sErr } = await supabase.auth.signInWithIdToken({
+              provider: 'google',
+              token: idToken,
+            });
 
-          // Directly authenticate with Supabase using the Google ID Token (no browser redirects!)
-          const { data: sData, error: sErr } = await supabase.auth.signInWithIdToken({
-            provider: 'google',
-            token: idToken,
-          });
-
-          if (sErr) {
-            return { error: new Error(sErr.message) };
-          }
-
-          if (sData?.user) {
-            const u = sData.user;
-            const prevUser = get().user;
-            if (!prevUser || prevUser.id !== u.id) {
-              resetUserStores();
-            }
-
-            const googlePhoto =
-              signInRes.data?.user?.photo ||
-              u.user_metadata?.avatar_url ||
-              u.user_metadata?.picture ||
-              null;
-            const googlePhone =
-              (u as any).phone ||
-              u.user_metadata?.phone_number ||
-              u.user_metadata?.phone ||
-              null;
-
-            const profile = await get().ensureProfile(
-              u.id,
-              u.user_metadata?.full_name ||
-                u.user_metadata?.name ||
-                signInRes.data?.user?.name ||
-                'Traveler'
-            );
-
-            // Sync avatar or phone number to user profile if available
-            if (profile && (googlePhoto || googlePhone)) {
-              const updates: any = {};
-              if (!profile.avatar_url && googlePhoto) updates.avatar_url = googlePhoto;
-              if (!profile.phone_number && googlePhone) updates.phone_number = googlePhone;
-              if (Object.keys(updates).length > 0) {
-                await get().updateProfile(updates);
+            if (sErr) {
+              console.log('[Native Google Sign-In] Supabase signInWithIdToken notice:', sErr.message, '- falling back to browser OAuth...');
+            } else if (sData?.user) {
+              const u = sData.user;
+              const prevUser = get().user;
+              if (!prevUser || prevUser.id !== u.id) {
+                resetUserStores();
               }
+
+              const googlePhoto =
+                signInRes.data?.user?.photo ||
+                u.user_metadata?.avatar_url ||
+                u.user_metadata?.picture ||
+                null;
+              const googlePhone =
+                (u as any).phone ||
+                u.user_metadata?.phone_number ||
+                u.user_metadata?.phone ||
+                null;
+
+              const profile = await get().ensureProfile(
+                u.id,
+                u.user_metadata?.full_name ||
+                  u.user_metadata?.name ||
+                  signInRes.data?.user?.name ||
+                  'Traveler'
+              );
+
+              // Sync avatar or phone number to user profile if available
+              if (profile && (googlePhoto || googlePhone)) {
+                const updates: any = {};
+                if (!profile.avatar_url && googlePhoto) updates.avatar_url = googlePhoto;
+                if (!profile.phone_number && googlePhone) updates.phone_number = googlePhone;
+                if (Object.keys(updates).length > 0) {
+                  await get().updateProfile(updates);
+                }
+              }
+
+              set({ user: u, profile: get().profile || profile, isLoading: false });
+              syncUserData(u.id).catch(() => {});
+              return { error: null };
             }
-
-            set({ user: u, profile: get().profile || profile, isLoading: false });
-            syncUserData(u.id).catch(() => {});
-            return { error: null };
           }
-
-          return { error: new Error('Could not establish user session with Google.') };
         } catch (nativeErr: any) {
-          console.warn('Native Google Sign-In notice:', nativeErr);
-          if (
+          console.warn('Native Google Sign-In notice:', nativeErr?.message || nativeErr);
+          const isCancel =
             nativeErr?.code === statusCodes.SIGN_IN_CANCELLED ||
+            nativeErr?.code === '12501' ||
             nativeErr?.message?.toLowerCase().includes('cancel') ||
-            nativeErr?.type === 'cancelled'
-          ) {
+            nativeErr?.type === 'cancelled';
+          if (isCancel) {
             return { error: new Error('Google Sign-In was cancelled') };
           }
           if (nativeErr?.code === statusCodes.IN_PROGRESS) {
             return { error: new Error('Google Sign-In is already in progress') };
           }
-          if (nativeErr?.code !== statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-            return { error: new Error(nativeErr?.message || 'Google Sign-In failed') };
-          }
-          // If Google Play Services is missing or unavailable, fallback to browser session below
+          // On any other native error (e.g. statusCodes.DEVELOPER_ERROR 10 / keystore mismatch),
+          // smoothly fall back to the universal browser OAuth flow below!
+          console.log('[Native Google Sign-In] Native attempt unsuccessful, proceeding to universal OAuth fallback...');
         }
       }
 
-      // 2. Web or fallback: Browser OAuth with PKCE
+      // 2. Web or fallback: Universal Browser OAuth with PKCE
       const redirectUrl = 'splityourtrip://';
 
       if (Platform.OS === 'web') {
@@ -970,6 +1065,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             }
           } catch {}
 
+          if (get().user) {
+            return { error: null };
+          }
+
           try {
             const { data: sData } = await supabase.auth.getSession();
             if (sData?.session?.user) {
@@ -993,21 +1092,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         if (finalUrl) {
           const authRes = await get().handleAuthUrl(finalUrl);
-          if (authRes.error) return { error: authRes.error };
+          if (authRes?.success) {
+            return { error: null };
+          }
+        }
+
+        // Before considering it failed, check if live session is already established
+        if (get().user) {
           return { error: null };
         }
 
-        // Final fallback: check if user session was established
-        const { data: lastCheck } = await supabase.auth.getSession();
-        if (lastCheck?.session?.user) {
-          const u = lastCheck.session.user;
-          const profile = await get().ensureProfile(
-            u.id,
-            u.user_metadata?.full_name || u.user_metadata?.name
-          );
-          set({ user: u, profile, isLoading: false });
-          syncUserData(u.id).catch(() => {});
-          return { error: null };
+        for (let i = 0; i < 5; i++) {
+          const { data: lastCheck } = await supabase.auth.getSession();
+          if (lastCheck?.session?.user) {
+            const u = lastCheck.session.user;
+            const profile = await get().ensureProfile(
+              u.id,
+              u.user_metadata?.full_name || u.user_metadata?.name
+            );
+            set({ user: u, profile, isLoading: false });
+            syncUserData(u.id).catch(() => {});
+            return { error: null };
+          }
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
 
         if (res.type === 'cancel' || res.type === 'dismiss') {

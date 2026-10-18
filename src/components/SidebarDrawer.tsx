@@ -321,7 +321,44 @@ export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) 
 
             <TouchableOpacity
               style={[styles.menuItemRow, { borderBottomColor: colors.borderLight }]}
-              onPress={() => Alert.alert('Split Your Trip Support', 'Reach out to support@splityourtrip.app. We are here 24/7!')}
+              onPress={() => handleNavigate('/about')}
+            >
+              <View style={[styles.menuIconBox, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' }]}>
+                <Ionicons name="sparkles" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.menuItemTitle, { color: colors.text }]}>About Us</Text>
+                  <View style={{ backgroundColor: colors.primaryLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                    <Text style={{ fontSize: 9, fontWeight: '800', color: colors.primary }}>MJ STUDIOS</Text>
+                  </View>
+                </View>
+                <Text style={[styles.menuItemSubtitle, { color: colors.textSecondary }]}>
+                  Story, mission & features
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.menuItemRow, { borderBottomColor: colors.borderLight }]}
+              onPress={() => handleNavigate('/privacy')}
+            >
+              <View style={[styles.menuIconBox, { backgroundColor: '#ECFDF5' }]}>
+                <Ionicons name="shield-checkmark" size={18} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuItemTitle, { color: colors.text }]}>Privacy Policy</Text>
+                <Text style={[styles.menuItemSubtitle, { color: colors.textSecondary }]}>
+                  Zero data selling, terms & security
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.menuItemRow, { borderBottomColor: colors.borderLight }]}
+              onPress={() => Alert.alert('Split Your Trip Support', 'Reach out to splityourtrip1@gmail.com. MJ Studios is here 24/7!')}
             >
               <View style={[styles.menuIconBox, { backgroundColor: '#F3E8FF' }]}>
                 <Ionicons name="help-circle" size={18} color="#9333EA" />
@@ -329,7 +366,7 @@ export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) 
               <View style={{ flex: 1 }}>
                 <Text style={[styles.menuItemTitle, { color: colors.text }]}>Help & Support</Text>
                 <Text style={[styles.menuItemSubtitle, { color: colors.textSecondary }]}>
-                  FAQs, offline tips & guides
+                  splityourtrip1@gmail.com
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -363,7 +400,7 @@ export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) 
           >
             <Text style={[styles.footerAppName, { color: colors.text }]}>Split Your Trip</Text>
             <Text style={[styles.footerVersion, { color: colors.textMuted }]}>
-              v1.2.0 • Offline First & Realtime
+              v1.0.36 • Made with ❤️ by MJ Studios
             </Text>
           </View>
         </Animated.View>

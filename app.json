@@ -2,7 +2,7 @@
   "expo": {
     "name": "Split Your Trip",
     "slug": "splitYourTrip",
-    "version": "1.0.34",
+    "version": "1.0.39",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "splityourtrip",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.splityourtrip",
-      "versionCode": 35,
+      "versionCode": 40,
       "adaptiveIcon": {
         "backgroundColor": "#0b1122",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

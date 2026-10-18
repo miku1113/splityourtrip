@@ -1025,14 +1025,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       .filter(m => m && m.name && m.name.trim().length > 0)
       .map(m => {
         const contactName = getContactNameByPhone(m.phoneNumber);
+        const isTargetFriend = tripType === 'friend_split' && friendId && isValidUUID(friendId);
         return {
           id: generateUUID(),
           trip_id: tripData.id,
+          profile_id: isTargetFriend ? friendId : undefined,
+          user_id: isTargetFriend ? friendId : undefined,
           display_name: contactName || m.name.trim(),
           phone_number: m.phoneNumber ? m.phoneNumber.trim() : null,
           role: 'member',
           status: 'accepted',
-          is_guest: true,
+          is_guest: !isTargetFriend,
           created_at: new Date().toISOString(),
         };
       });
@@ -1501,6 +1504,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         });
       });
 
+      const authState = useAuthStore.getState();
+      const currentUserId = authState.user?.id || authState.profile?.id;
+      const currentUserName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.user_metadata?.full_name || (authState.user as any)?.user_metadata?.name || 'You';
+      const currentUserPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number;
+
       const existingMembers = localDetails?.members || [];
       const enrichedMembers: TripMember[] = (membersRaw || []).map((m: any) => {
         const pInfo = profileMap.get(m.profile_id);
@@ -1508,13 +1516,26 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           em => em.id === m.id || (m.profile_id && em.profile_id === m.profile_id)
         );
         const resolvedPhone = pInfo?.phone_number || localMatch?.phone_number || m.phone_number || null;
-        const resolvedDisplayName = getEffectiveContactName({
-          phoneNumber: resolvedPhone,
-          contactName: localMatch?.display_name,
-          displayName: m.display_name,
-          profileName: pInfo?.full_name,
-          fallback: localMatch?.display_name || m.display_name || 'Member',
-        });
+        
+        const isCurrentUser = Boolean(
+          (currentUserId && (m.profile_id === currentUserId || m.user_id === currentUserId)) ||
+          (currentUserPhone && resolvedPhone && normalizePhone(currentUserPhone) === normalizePhone(resolvedPhone))
+        );
+
+        let resolvedDisplayName: string;
+        if (isCurrentUser) {
+          resolvedDisplayName = currentUserName || localMatch?.display_name || m.display_name || 'You';
+        } else {
+          resolvedDisplayName = getEffectiveContactName({
+            phoneNumber: resolvedPhone,
+            contactName: localMatch?.display_name,
+            displayName: m.display_name,
+            profileName: pInfo?.full_name,
+            fallback: localMatch?.display_name || m.display_name || 'Member',
+            currentUserName,
+          });
+        }
+
         return {
           id: m.id,
           trip_id: m.trip_id,
@@ -3478,8 +3499,26 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   markTripMessagesAsSeen: async (tripId: string, currentUserId: string) => {
     if (!tripId) return;
     const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
 
-    // 1. Immediately update Zustand in-memory state
+    // 1. Immediately record last read timestamp so this trip is marked seen
+    try {
+      await AppStorage.setItem(`@splityourtrip_last_read_${tripId}`, String(nowMs));
+    } catch {}
+
+    // 2. Clear unseen badge in contacts store immediately
+    try {
+      const { useContactsStore } = require('../contacts/useContactsStore');
+      useContactsStore.setState((s: any) => ({
+        contacts: s.contacts.map((c: any) =>
+          c.defaultTripId === tripId || c.trips?.some((t: any) => t.id === tripId) || c.id === tripId
+            ? { ...c, unseenMessagesCount: 0 }
+            : c
+        ),
+      }));
+    } catch {}
+
+    // 3. Immediately update Zustand in-memory state
     let didChange = false;
     set(state => {
       const updated = state.messages.map(m => {
@@ -3493,38 +3532,24 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       return didChange ? { messages: updated } : state;
     });
 
-    // If no local messages needed to be marked seen, avoid remote server calls entirely!
-    if (!didChange) {
-      return;
-    }
-
-    // 2. Persist locally
+    // 4. Persist locally to trip details cache
     try {
       const raw = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
       if (raw) {
         const details = JSON.parse(raw);
+        let detailsChanged = false;
         details.messages = (details.messages || []).map((m: any) => {
           const isFromOther = m.sender_id !== currentUserId && m.sender_id !== 'local_user';
           if (isFromOther && !m.is_seen) {
+            detailsChanged = true;
             return { ...m, is_seen: true, is_sent: true, seen_at: nowIso };
           }
           return m;
         });
-        await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+        if (detailsChanged) {
+          await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+        }
       }
-      await AppStorage.setItem(`@splityourtrip_last_read_${tripId}`, String(Date.now()));
-    } catch {}
-
-    // 3. Clear unseen badge in contacts store immediately
-    try {
-      const { useContactsStore } = require('../contacts/useContactsStore');
-      useContactsStore.setState((s: any) => ({
-        contacts: s.contacts.map((c: any) =>
-          c.defaultTripId === tripId || c.trips?.some((t: any) => t.id === tripId)
-            ? { ...c, unseenMessagesCount: 0 }
-            : c
-        ),
-      }));
     } catch {}
 
     // Throttle remote mark seen: only 1 remote sync per 5 seconds per trip
@@ -3981,8 +4006,16 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   }): Promise<Trip | null> => {
     try {
       const authState = useAuthStore.getState();
-      const currentUserId = authState.user?.id || authState.profile?.id;
-      const currentUserName = authState.profile?.full_name || authState.profile?.name || 'You';
+      let currentUserId = authState.user?.id || authState.profile?.id;
+      if (!currentUserId && isSupabaseConfigured) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) {
+            currentUserId = session.user.id;
+          }
+        } catch {}
+      }
+      const currentUserName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.user_metadata?.full_name || (authState.user as any)?.user_metadata?.name || 'You';
       const currentUserPhone = normalizePhone(
         authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number
       );
@@ -4000,33 +4033,41 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         );
       };
 
-      // 0. If direct defaultTripId is supplied, check local store immediately (0ms instant return if 1-on-1)
+      const belongsToMe = (t: any): boolean => {
+        if (!currentUserId) return true;
+        return t.created_by === currentUserId || t.friend_id === currentUserId;
+      };
+
+      // 0. If direct defaultTripId is supplied, check local store immediately (0ms instant return if 1-on-1 and belongs to user)
       if (friend.defaultTripId) {
         const directTrip = get().trips.find(t => t.id === friend.defaultTripId);
-        if (directTrip && isTrip1on1(directTrip)) {
+        if (directTrip && isTrip1on1(directTrip) && belongsToMe(directTrip)) {
           return directTrip;
         }
       }
 
-      // 1. Resolve friend's profile_id if not directly provided
+      // 1. Resolve friend's profile_id if not directly provided (exclude self)
       let resolvedProfileId = (friend.profileId && isValidUUID(friend.profileId)) ? friend.profileId : null;
+      if (resolvedProfileId && currentUserId && resolvedProfileId === currentUserId) {
+        resolvedProfileId = null;
+      }
       if (!resolvedProfileId && cleanFriendPhone && isSupabaseConfigured) {
         try {
           const dbContact = await get().findContactByPhone(cleanFriendPhone);
-          if (dbContact?.profileId && isValidUUID(dbContact.profileId)) {
+          if (dbContact?.profileId && isValidUUID(dbContact.profileId) && dbContact.profileId !== currentUserId) {
             resolvedProfileId = dbContact.profileId;
           }
         } catch {}
       }
 
-      // 2. Search local store trips first (STRICTLY 1-on-1 split trips only!)
+      // 2. Search local store trips first (STRICTLY 1-on-1 split trips belonging to current user!)
       const allTrips = get().trips;
       let matchedTrip: Trip | undefined;
 
       // Check defaultTripId against local trips
       if (friend.defaultTripId) {
         const cand = allTrips.find(t => t.id === friend.defaultTripId);
-        if (cand && isTrip1on1(cand)) {
+        if (cand && isTrip1on1(cand) && belongsToMe(cand)) {
           matchedTrip = cand;
         }
       }
@@ -4034,7 +4075,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (!matchedTrip) {
         for (const t of allTrips) {
           // CRITICAL: NEVER match a group trip as a 1-on-1 friend split!
-          if (!isTrip1on1(t)) continue;
+          if (!isTrip1on1(t) || !belongsToMe(t)) continue;
 
           // A. Direct friend_id match
           if (
@@ -4101,12 +4142,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         }
       }
 
-      // 3. If defaultTripId exists but wasn't in memory, check Supabase directly (must be 1-on-1!)
-      if (!matchedTrip && friend.defaultTripId && isValidUUID(friend.defaultTripId) && isSupabaseConfigured) {
+      // 3. If defaultTripId exists but wasn't in memory, check Supabase directly (must be 1-on-1 and belong to current user!)
+      if (!matchedTrip && friend.defaultTripId && isValidUUID(friend.defaultTripId) && isSupabaseConfigured && currentUserId) {
         try {
           const client = supabaseAdmin || supabase;
           const { data: tripRow } = await withTimeout(
-            client.from('trips').select('*').eq('id', friend.defaultTripId).maybeSingle(),
+            client
+              .from('trips')
+              .select('*')
+              .eq('id', friend.defaultTripId)
+              .or(`created_by.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+              .maybeSingle(),
             2500
           ).catch(() => ({ data: null }));
           if (tripRow && isTrip1on1(tripRow)) {
@@ -4115,7 +4161,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         } catch {}
       }
 
-      // 4. If still not found, search Supabase strictly for 1-on-1 friend split trips
+      // 4. If still not found, search Supabase strictly for 1-on-1 friend split trips belonging to current user
       if (!matchedTrip && isSupabaseConfigured && currentUserId) {
         try {
           const client = supabaseAdmin || supabase;
@@ -4137,10 +4183,16 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             else if (q2?.data && q2.data.length > 0) matchedTrip = q2.data[0] as Trip;
           }
 
-          // B. Match 1-on-1 trips by title in Supabase
+          // B. Match 1-on-1 trips by title in Supabase (MUST belong to current user!)
           if (!matchedTrip) {
             const { data: titleTrips } = await withTimeout(
-              client.from('trips').select('*').eq('trip_type', 'friend_split').ilike('name', `split with ${cleanFriendName}%`).limit(1),
+              client
+                .from('trips')
+                .select('*')
+                .eq('trip_type', 'friend_split')
+                .or(`created_by.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+                .ilike('name', `split with ${cleanFriendName}%`)
+                .limit(1),
               2500
             ).catch(() => ({ data: null }));
             if (titleTrips && titleTrips.length > 0) {

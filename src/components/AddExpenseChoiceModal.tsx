@@ -22,6 +22,7 @@ import { useTripStore } from '../features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../features/contacts/useContactsStore';
 import { useAuthStore } from '../features/auth/useAuthStore';
 import { scaleFont, moderateScale } from '../theme/responsive';
+import BillScannerModal from './BillScannerModal';
 
 const PAGE_SIZE = 10;
 
@@ -45,6 +46,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
   const [searchQuery, setSearchQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [showBillScanner, setShowBillScanner] = useState(false);
 
   // Inline Add Contact State
   const [showInlineAddContact, setShowInlineAddContact] = useState(false);
@@ -223,38 +225,18 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
     }
   };
 
-  const handleScanScreenshot = async () => {
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Denied', 'Please grant photo library access to pick a payment screenshot.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 1.0,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const pickedUri = result.assets[0].uri;
-        handleClose();
-        setTimeout(() => {
-          router.push({
-            pathname: '/shared-payment',
-            params: { imageUri: pickedUri },
-          });
-        }, 120);
-      }
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Could not pick image');
-    }
+  const handleScanBill = () => {
+    handleClose();
+    setTimeout(() => {
+      setShowBillScanner(true);
+    }, 120);
   };
 
-  if (!visible) return null;
+  if (!visible && !showBillScanner) return null;
 
   return (
-    <Modal
+    <>
+      <Modal
       visible={visible}
       transparent
       animationType="slide"
@@ -373,7 +355,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
 
-              {/* Option 3: Scan Payment Screenshot (AI Auto-detect) */}
+              {/* Option 3: Scan Bill or Payment (AI Auto-detect) */}
               <TouchableOpacity
                 style={[
                   styles.choiceCard,
@@ -382,23 +364,23 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     borderColor: isDark ? colors.border : '#FEF08A',
                   },
                 ]}
-                onPress={handleScanScreenshot}
+                onPress={handleScanBill}
                 activeOpacity={0.8}
               >
                 <View style={[styles.iconCircle, { backgroundColor: '#EAB308' }]}>
-                  <Ionicons name="sparkles" size={24} color="#FFFFFF" />
+                  <Ionicons name="scan" size={24} color="#FFFFFF" />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.choiceTitle, { color: colors.text }]}>
-                      Scan Payment Screenshot
+                      Scan Bill or Payment
                     </Text>
                     <View style={styles.ocrChoiceBadge}>
-                      <Text style={styles.ocrChoiceBadgeText}>AI OCR</Text>
+                      <Text style={styles.ocrChoiceBadgeText}>AI SCANNER</Text>
                     </View>
                   </View>
                   <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
-                    Auto-detect amount, receiver & UPI from GPay, PhonePe, Paytm
+                    Auto-scan bills, restaurant receipts & UPI from camera or gallery
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
@@ -840,6 +822,11 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
         </View>
       </KeyboardAvoidingView>
     </Modal>
+    <BillScannerModal
+      visible={showBillScanner}
+      onClose={() => setShowBillScanner(false)}
+    />
+    </>
   );
 }
 

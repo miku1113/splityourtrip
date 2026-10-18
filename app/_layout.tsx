@@ -9,8 +9,13 @@ import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, useThemeStore } from '../src/theme/useThemeStore';
 import { useContactsStore } from '../src/features/contacts/useContactsStore';
 import { subscribeToSharedData } from '../src/services/receiptOcr';
-import { Platform, StatusBar, View, Text, TextInput } from 'react-native';
+import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native';
 import * as Linking from 'expo-linking';
+
+// Suppress known Supabase auth crypto fallback notice in development
+LogBox.ignoreLogs([
+  'WebCrypto API is not supported',
+]);
 
 
 // Standardize responsive font behavior across devices (prevents accessibility zoom layout breakage)
@@ -203,6 +208,8 @@ export default function RootLayout() {
           <Stack.Screen name="trip/[id]/settings" options={{ headerShown: false }} />
           <Stack.Screen name="chat/[id]/settings" options={{ headerShown: false }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+          <Stack.Screen name="about" options={{ title: 'About Us' }} />
+          <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
           <Stack.Screen name="add-expense" options={{ headerShown: false }} />
           <Stack.Screen name="add-trip" options={{ headerShown: false }} />
           <Stack.Screen name="add-contact" options={{ headerShown: false }} />

@@ -11,7 +11,13 @@ import {
   Linking,
   Easing,
   Image,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, usePathname } from 'expo-router';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
@@ -26,7 +32,7 @@ export default function SplashScreen() {
   const { user, isLoading: authLoading } = useAuthStore();
   const fetchTrips = useTripStore(state => state.fetchTrips);
   const initTrips = useTripStore(state => state.initTrips);
-  const { colors, isDark, themeMode, hasChosenTheme, completeThemeOnboarding, isHydrated } = useTheme();
+  const { colors, isDark, themeMode, hasChosenTheme, completeThemeOnboarding, isHydrated, setThemeMode } = useTheme();
 
   const [selectedMode, setSelectedMode] = useState<ThemeMode>(themeMode || 'dark');
   const [showThemePrompt, setShowThemePrompt] = useState(false);
@@ -81,6 +87,62 @@ export default function SplashScreen() {
   const textOpacity = useRef(new Animated.Value(0)).current;
 
   const containerOpacity = useRef(new Animated.Value(1)).current;
+
+  // Smooth theme transition animation values
+  const themeAnim = useRef(new Animated.Value(isDark ? 0 : 1)).current;
+  const darkCardScale = useRef(new Animated.Value(selectedMode === 'dark' ? 1.02 : 0.98)).current;
+  const lightCardScale = useRef(new Animated.Value(selectedMode === 'light' ? 1.02 : 0.98)).current;
+
+  // Smooth color transitions (0 = Dark, 1 = Light)
+  const containerBg = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#151B25', '#F4F6F8'],
+  });
+
+  const cardBg = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#242D3B', '#FFFFFF'],
+  });
+
+  const cardBorder = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#2E3A4B', '#D7DEE8'],
+  });
+
+  const titleTextColor = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#F0F2E9', '#151B25'],
+  });
+
+  const subtitleTextColor = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#A3AFC2', '#556274'],
+  });
+
+  const glowTopBg = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(99, 102, 241, 0.12)', 'rgba(91, 120, 154, 0.15)'],
+  });
+
+  const glowBottomBg = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(56, 189, 248, 0.08)', 'rgba(120, 155, 128, 0.15)'],
+  });
+
+  const badgeBg = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(99, 102, 241, 0.15)', 'rgba(91, 120, 154, 0.08)'],
+  });
+
+  const badgeBorder = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(99, 102, 241, 0.30)', 'rgba(91, 120, 154, 0.20)'],
+  });
+
+  const continueBtnBg = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#7895B7', '#5B789A'],
+  });
 
   useEffect(() => {
     let isCancelled = false;
@@ -428,7 +490,32 @@ export default function SplashScreen() {
   }, [user, authLoading, isHydrated, hasChosenTheme]);
 
   const handleSelectMode = (mode: ThemeMode) => {
+    if (selectedMode === mode) return;
     setSelectedMode(mode);
+
+    Animated.parallel([
+      Animated.timing(themeAnim, {
+        toValue: mode === 'light' ? 1 : 0,
+        duration: 450,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+      Animated.spring(mode === 'dark' ? darkCardScale : lightCardScale, {
+        toValue: 1.02,
+        friction: 6,
+        tension: 60,
+        useNativeDriver: true,
+      }),
+      Animated.spring(mode === 'dark' ? lightCardScale : darkCardScale, {
+        toValue: 0.98,
+        friction: 6,
+        tension: 60,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Sync theme store smoothly
+    setThemeMode(mode);
   };
 
   const handleConfirmTheme = async (chosenMode?: ThemeMode) => {
@@ -517,16 +604,17 @@ export default function SplashScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <Animated.View style={[styles.container, { backgroundColor: containerBg }]}>
       <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
+        barStyle={selectedMode === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor="transparent"
         translucent={Platform.OS === 'android'}
+        animated={true}
       />
 
       {/* Decorative background glow */}
-      <View style={[styles.glowTop, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#EEF2FF' }]} />
-      <View style={[styles.glowBottom, { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.08)' : '#E0F2FE' }]} />
+      <Animated.View style={[styles.glowTop, { backgroundColor: glowTopBg }]} />
+      <Animated.View style={[styles.glowBottom, { backgroundColor: glowBottomBg }]} />
 
       <Animated.View
         style={[
@@ -626,82 +714,107 @@ export default function SplashScreen() {
             },
           ]}
         >
-          <Text style={[styles.brandTitle, { color: colors.text }]}>Split Your Trip</Text>
-          <Text style={[styles.brandTagline, { color: colors.textSecondary }]}>
+          <Animated.Text style={[styles.brandTitle, { color: titleTextColor }]}>Split Your Trip</Animated.Text>
+          <Animated.Text style={[styles.brandTagline, { color: subtitleTextColor }]}>
             Travel Together • Split Effortlessly
-          </Text>
+          </Animated.Text>
+
+          {/* Made by MJ Studios Badge */}
+          <Animated.View style={[styles.madeByBadge, { backgroundColor: badgeBg, borderColor: badgeBorder }]}>
+            <Animated.Text style={[styles.madeByText, { color: subtitleTextColor }]}>
+              Made by <Animated.Text style={[styles.madeByStudio, { color: continueBtnBg }]}>MJ Studios</Animated.Text>
+            </Animated.Text>
+          </Animated.View>
         </Animated.View>
       </Animated.View>
 
       {/* First-time Theme Selection Card */}
       {showThemePrompt ? (
-        <View style={[styles.themeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.themeCardTitle, { color: colors.text }]}>Choose Your Theme</Text>
-          <Text style={[styles.themeCardSub, { color: colors.textSecondary }]}>
-            Personalize your experience. Dark mode is enabled by default.
-          </Text>
+        <Animated.View style={[styles.themeCard, { backgroundColor: cardBg, borderColor: cardBorder, shadowOpacity: selectedMode === 'dark' ? 0.35 : 0.08 }]}>
+          <Animated.Text style={[styles.themeCardTitle, { color: titleTextColor }]}>Choose Your Theme</Animated.Text>
+          <Animated.Text style={[styles.themeCardSub, { color: subtitleTextColor }]}>
+            Personalize your experience. Tap an option below to preview.
+          </Animated.Text>
 
           <View style={styles.themeOptionsRow}>
             {/* Dark Mode Option */}
-            <TouchableOpacity
-              style={[
-                styles.themeOptionBtn,
-                {
-                  backgroundColor: '#151B25',
-                  borderColor: selectedMode === 'dark' ? colors.primary : colors.border,
-                },
-                selectedMode === 'dark' && styles.themeOptionActive,
-              ]}
-              onPress={() => handleSelectMode('dark')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.themeEmoji}>🌙</Text>
-              <Text style={[styles.themeOptionTitle, { color: '#F0F2E9' }]}>Dark Theme</Text>
-              <Text style={styles.themeOptionBadge}>Default</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ flex: 1, transform: [{ scale: darkCardScale }] }}>
+              <TouchableOpacity
+                style={[
+                  styles.themeOptionBtn,
+                  {
+                    backgroundColor: '#151B25',
+                    borderColor: selectedMode === 'dark' ? '#7895B7' : '#2E3A4B',
+                  },
+                  selectedMode === 'dark' && [
+                    styles.themeOptionActive,
+                    { borderColor: '#7895B7', shadowColor: '#7895B7' },
+                  ],
+                ]}
+                onPress={() => handleSelectMode('dark')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.themeEmoji}>🌙</Text>
+                <Text style={[styles.themeOptionTitle, { color: '#F0F2E9' }]}>Dark Theme</Text>
+                <Text style={[styles.themeOptionBadge, selectedMode === 'dark' ? { color: '#34D399', fontWeight: '700' } : { color: '#94A3B8' }]}>
+                  {selectedMode === 'dark' ? '✓ Active' : 'Default'}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
 
             {/* Light Mode Option */}
-            <TouchableOpacity
-              style={[
-                styles.themeOptionBtn,
-                {
-                  backgroundColor: '#F8FAFC',
-                  borderColor: selectedMode === 'light' ? colors.primary : colors.border,
-                },
-                selectedMode === 'light' && styles.themeOptionActive,
-              ]}
-              onPress={() => handleSelectMode('light')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.themeEmoji}>☀️</Text>
-              <Text style={[styles.themeOptionTitle, { color: '#0F172A' }]}>Light Theme</Text>
-              <Text style={[styles.themeOptionSub, { color: '#64748B' }]}>Classic</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ flex: 1, transform: [{ scale: lightCardScale }] }}>
+              <TouchableOpacity
+                style={[
+                  styles.themeOptionBtn,
+                  {
+                    backgroundColor: '#FFFFFF',
+                    borderColor: selectedMode === 'light' ? '#5B789A' : '#D7DEE8',
+                  },
+                  selectedMode === 'light' && [
+                    styles.themeOptionActive,
+                    { borderColor: '#5B789A', shadowColor: '#5B789A' },
+                  ],
+                ]}
+                onPress={() => handleSelectMode('light')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.themeEmoji}>☀️</Text>
+                <Text style={[styles.themeOptionTitle, { color: '#0F172A' }]}>Light Theme</Text>
+                <Text style={[styles.themeOptionSub, selectedMode === 'light' ? { color: '#5B789A', fontWeight: '700' } : { color: '#64748B' }]}>
+                  {selectedMode === 'light' ? '✓ Active' : 'Classic'}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
           </View>
 
           <TouchableOpacity
-            style={[styles.continueBtn, { backgroundColor: colors.primary, opacity: isConfirming ? 0.75 : 1 }]}
+            style={{ width: '100%' }}
             onPress={() => handleConfirmTheme()}
             disabled={isConfirming}
             activeOpacity={0.85}
           >
-            {isConfirming ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.continueBtnText}>Continue →</Text>
-            )}
+            <Animated.View
+              style={[styles.continueBtn, { backgroundColor: continueBtnBg, opacity: isConfirming ? 0.75 : 1 }]}
+            >
+              {isConfirming ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.continueBtnText}>Continue →</Text>
+              )}
+            </Animated.View>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       ) : (
         /* Loading indicator for standard transition */
         <View style={[styles.footer, { bottom: Math.max(insets.bottom, 24) + 16 }]}>
           <ActivityIndicator size="small" color={colors.primary} />
           <Text style={[styles.footerText, { color: colors.textMuted }]}>
-            Loading your travel experience...
+            by MJ Studios • Loading your travel experience...
           </Text>
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -875,12 +988,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   themeOptionBtn: {
-    flex: 1,
     paddingVertical: 18,
     paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 2,
     alignItems: 'center',
+    width: '100%',
   },
   themeOptionActive: {
     shadowColor: '#6366F1',
@@ -928,5 +1041,21 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 13,
     fontWeight: '500',
+  },
+  madeByBadge: {
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignSelf: 'center',
+  },
+  madeByText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  madeByStudio: {
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });

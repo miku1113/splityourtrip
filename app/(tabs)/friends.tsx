@@ -20,8 +20,10 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact, getEffectiveContactName, normalizeNameForMatch, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
+import { AppStorage } from '../../src/lib/storage';
+import FriendsListSkeleton from '../../src/components/FriendsListSkeleton';
 
-type FilterType = 'all' | 'owes_you' | 'you_owe' | 'registered';
+type FilterType = 'all' | 'owes_you' | 'you_owe';
 
 const PAGE_SIZE = 10;
 
@@ -170,23 +172,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                 </Text>
               </View>
             )}
-            {item.isRegistered ? (
-              <View
-                style={[
-                  styles.appBadge,
-                  { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.appBadgeText,
-                    { color: isDark ? '#A5B4FC' : '#4F46E5' },
-                  ]}
-                >
-                  ✨ On App
-                </Text>
-              </View>
-            ) : isGuest ? (
+            {isGuest ? (
               <View
                 style={[
                   styles.appBadge,
@@ -483,7 +469,6 @@ export default function FriendsScreen() {
 
       if (activeFilter === 'owes_you') return toGet > 0;
       if (activeFilter === 'you_owe') return toGive > 0;
-      if (activeFilter === 'registered') return c.isRegistered;
       return true;
     });
   }, [activeFriends, searchQuery, activeFilter]);
@@ -505,7 +490,18 @@ export default function FriendsScreen() {
 
   const handleOpenFriendChat = useCallback(async (friend: FriendContact) => {
     const directTripId = friend.defaultTripId || (friend as any).tripId;
+
+    // Immediately mark unseen count as 0 for this contact so the badge clears instantaneously
+    useContactsStore.setState(s => ({
+      contacts: s.contacts.map(c =>
+        c.id === friend.id || (directTripId && (c.defaultTripId === directTripId || (c as any).trips?.some((t: any) => t.id === directTripId)))
+          ? { ...c, unseenMessagesCount: 0 }
+          : c
+      ),
+    }));
+
     if (directTripId) {
+      AppStorage.setItem(`@splityourtrip_last_read_${directTripId}`, String(Date.now())).catch(() => {});
       // Direct instant navigation, matching the exact speed of Trips screen! 0ms latency!
       router.push(`/trip/${directTripId}`);
       return;
@@ -518,6 +514,7 @@ export default function FriendsScreen() {
     try {
       const targetTrip = await findOrCreateFriendSplitTrip(friend);
       if (targetTrip) {
+        AppStorage.setItem(`@splityourtrip_last_read_${targetTrip.id}`, String(Date.now())).catch(() => {});
         router.push(`/trip/${targetTrip.id}`);
       }
     } catch (e) {
@@ -690,23 +687,6 @@ export default function FriendsScreen() {
             You Owe
           </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.filterPill,
-            activeFilter === 'registered' && [styles.filterPillActive, { backgroundColor: colors.primaryDark }],
-          ]}
-          onPress={() => setActiveFilter('registered')}
-        >
-          <Text
-            style={[
-              styles.filterPillText,
-              { color: activeFilter === 'registered' ? '#FFFFFF' : colors.textSecondary },
-            ]}
-          >
-            ✨ On App
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {/* Friends List (Paginated 10 at a time, smooth un-flickering list) */}
@@ -726,12 +706,7 @@ export default function FriendsScreen() {
         }
         ListEmptyComponent={
           initialLoading || (isLoading && contacts.length === 0) ? (
-            <View style={styles.emptyView}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 12 }]}>
-                Loading Friends...
-              </Text>
-            </View>
+            <FriendsListSkeleton colors={colors} isDark={isDark} count={5} />
           ) : (
             <View style={styles.emptyView}>
               <Text style={{ fontSize: 44, marginBottom: 8 }}>👥</Text>

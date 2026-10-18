@@ -158,6 +158,168 @@ describe('UPI Parser', () => {
     expect(parsed.receiverName).toBe('Sharma Sweets');
     expect(parsed.suggestedCategory).toBe('Food');
   });
+
+  test('extracts Grand Total / Net Payable from restaurant receipt with taxes & items', () => {
+    const restaurantBill = `
+      CAFE DELHI HEIGHTS
+      Table: 04  Order: #8921
+      Date: 18-10-2026 Time: 14:32
+
+      Juicy Lucy Burger    1    450    450.00
+      Iced Americano       1    220    220.00
+      Red Velvet Cake      1    280    280.00
+      ---------------------------------------
+      SUB TOTAL                        950.00
+      CGST @ 2.5%                       23.75
+      SGST @ 2.5%                       23.75
+      Service Charge 5%                 47.50
+      ---------------------------------------
+      GRAND TOTAL                    1,045.00
+      ROUND OFF                          0.00
+      NET PAYABLE                    1,045.00
+      ---------------------------------------
+      Thank You! Visit Again
+    `;
+    const parsed = parseUpiReceipt(restaurantBill);
+    expect(parsed.amountPaise).toBe(104500); // 1,045.00 -> 104500 paise
+    expect(parsed.suggestedCategory).toBe('Food');
+  });
+
+  test('extracts Total Amount Due from supermarket receipt excluding Cash Tendered and Change', () => {
+    const dmartBill = `
+      RELIANCE SMART POINT
+      STORE # 4102
+
+      AMUL BUTTER 500G     1    275.00   275.00
+      FORTUNE OIL 1L       2    145.00   290.00
+      AASHIRVAAD ATTA 5K   1    240.00   240.00
+      TATA SALT 1KG        1     28.00    28.00
+
+      TOTAL ITEMS: 5
+      SUB TOTAL: 833.00
+      SAVINGS: 45.00
+      TOTAL AMOUNT DUE: 833.00
+      CASH TENDERED: 1000.00
+      CHANGE: 167.00
+    `;
+    const parsed = parseUpiReceipt(dmartBill);
+    expect(parsed.amountPaise).toBe(83300); // 833.00 -> 83300 paise
+    expect(parsed.suggestedCategory).toBe('Groceries');
+  });
+
+  test('extracts two-line total from receipt', () => {
+    const bill = `
+      THE IRANI CHAI
+      BILL NO: 402
+      BUN MASKA             60.00
+      IRANI CHAI            40.00
+      SAMOSA (2 PCS)        50.00
+
+      TOTAL
+      150.00
+    `;
+    const parsed = parseUpiReceipt(bill);
+    expect(parsed.amountPaise).toBe(15000);
+  });
+
+  test('extracts amount with Rs. and trailing dash /-', () => {
+    const bill = `
+      SHREE GANESH BHOJANALAYA
+      THALI x 3: Rs. 450/-
+      SWEET: Rs. 90/-
+      NET AMOUNT PAYABLE: Rs. 540/-
+    `;
+    const parsed = parseUpiReceipt(bill);
+    expect(parsed.amountPaise).toBe(54000);
+  });
+
+  test('extracts fuel / petrol pump sale amount', () => {
+    const fuelBill = `
+      INDIAN OIL CORPORATION
+      PUMP NO: 02
+      FUEL: PETROL
+      VOLUME: 15.51 L
+      SALE AMOUNT: Rs. 1500.00
+    `;
+    const parsed = parseUpiReceipt(fuelBill);
+    expect(parsed.amountPaise).toBe(150000);
+    expect(parsed.suggestedCategory).toBe('Fuel');
+  });
+
+  test('extracts hotel / stay invoice total with comma formatting', () => {
+    const hotelBill = `
+      HOTEL PALACE INN
+      ROOM CHARGES (2 NIGHTS): 4000.00
+      FOOD & BEVERAGES: 850.00
+      CGST 6%: 303.00
+      SGST 6%: 303.00
+      INVOICE TOTAL: INR 5,656.00
+    `;
+    const parsed = parseUpiReceipt(hotelBill);
+    expect(parsed.amountPaise).toBe(565600);
+    expect(parsed.suggestedCategory).toBe('Stay');
+  });
+
+  test('extracts accurate Grand Total when line contains Table, Order, Cash and Change', () => {
+    const bill = `
+      PUNJABI TADKA
+      Table: 4   Order: #8921   Waiter: 2
+      Paneer Tikka     2    220.00    440.00
+      Dal Makhani      1    260.00    260.00
+      Butter Roti      6     25.00    150.00
+      Grand Total: 850.00   Cash Tendered: 1000.00   Change Due: 150.00
+      Thank You!
+    `;
+    const parsed = parseUpiReceipt(bill);
+    expect(parsed.amountPaise).toBe(85000); // 850.00 -> 85000 paise (not 4, not 8921, not 1000, not 150)
+    expect(parsed.suggestedCategory).toBe('Food');
+  });
+
+  test('extracts Total when line contains tax percentages like (incl 5% GST)', () => {
+    const bill = `
+      PIZZA HEAVEN
+      Margherita Pizza   1   350.00
+      Coke               1    50.00
+      Total (incl. 5% GST): 420.00
+    `;
+    const parsed = parseUpiReceipt(bill);
+    expect(parsed.amountPaise).toBe(42000); // 420.00 -> 42000 paise (not 5)
+  });
+
+  test('extracts Indian Lakh comma formatted amounts accurately', () => {
+    const tourBill = `
+      MAKEMYTRIP INDIA PVT LTD
+      FLIGHT + RESORT PACKAGE (KASHMIR 6D/5N)
+      NET PAYABLE AMOUNT: ₹ 1,45,000.00
+    `;
+    const parsed = parseUpiReceipt(tourBill);
+    expect(parsed.amountPaise).toBe(14500000); // 1,45,000.00 -> 14500000 paise
+    expect(parsed.suggestedCategory).toBe('Tickets');
+  });
+
+  test('extracts European comma decimal format', () => {
+    const bill = `
+      GLOBAL STORE
+      ITEM A    100,00
+      ITEM B    240,50
+      TOTAL : 340,50
+    `;
+    const parsed = parseUpiReceipt(bill);
+    expect(parsed.amountPaise).toBe(34050); // 340.50 -> 34050 paise
+  });
+
+  test('extracts bottom decimal number when bill has no keyword recognized', () => {
+    const faintBill = `
+      CHAI CORNER
+      TEA              20.00
+      SAMOSA           30.00
+      MASKA BUN        40.00
+      ----------------------
+      90.00
+    `;
+    const parsed = parseUpiReceipt(faintBill);
+    expect(parsed.amountPaise).toBe(9000); // 90.00 -> 9000 paise
+  });
 });
 
 describe('WhatsApp Summary Message Generator', () => {

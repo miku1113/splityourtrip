@@ -26,6 +26,7 @@ import { useContactsStore, normalizePhone } from '../../src/features/contacts/us
 import { useTheme } from '../../src/theme/useThemeStore';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 import TripCoverBadge from '../../src/components/TripCoverBadge';
+import TripsListSkeleton from '../../src/components/TripsListSkeleton';
 
 const PAGE_SIZE = 10;
 
@@ -451,12 +452,7 @@ export default function MyTripsScreen() {
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           (!isHydrated || (isLoading && groupTrips.length === 0)) ? (
-            <View style={styles.emptyContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[styles.emptyTitle, { color: colors.text, marginTop: 12 }]}>
-                Loading your trips...
-              </Text>
-            </View>
+            <TripsListSkeleton colors={colors} isDark={isDark} count={4} />
           ) : (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyIcon}>🏖️</Text>

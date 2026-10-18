@@ -16,6 +16,7 @@ import {
   Keyboard,
   InteractionManager,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +45,7 @@ import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
 import TripCoverBadge from './TripCoverBadge';
+import ChatFeedSkeleton from './ChatFeedSkeleton';
 import { getFriendSettings } from '../services/friendSettings';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
@@ -174,32 +176,59 @@ export default function ChatView({
   const [friendNetPaise, setFriendNetPaise] = useState<number>(0);
   const [sharedTripLabels, setSharedTripLabels] = useState<string[]>([]);
   const [sharedExpenseMessages, setSharedExpenseMessages] = useState<TripMessage[]>([]);
+  const [isFriendDataLoaded, setIsFriendDataLoaded] = useState<boolean>(isGroup);
+  const [isTripDataLoaded, setIsTripDataLoaded] = useState<boolean>(!isGroup);
+  const bannerPulseAnim = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bannerPulseAnim, {
+          toValue: 0.88,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bannerPulseAnim, {
+          toValue: 0.35,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [bannerPulseAnim]);
 
   // Pagination state for messages (10 at a time, loaded from the last/newest message)
   const [messagesVisibleCount, setMessagesVisibleCount] = useState(PAGE_SIZE);
   const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
   const [optionsSidebarVisible, setOptionsSidebarVisible] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  const isKeyboardActive = isKeyboardVisible || isInputFocused;
   const [isChatLoading, setIsChatLoading] = useState(true);
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const showSub = Keyboard.addListener(showEvent, () => {
+    const onShow = () => {
       setIsKeyboardVisible(true);
       setTimeout(() => {
         flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
       }, 50);
-    });
+    };
 
-    const hideSub = Keyboard.addListener(hideEvent, () => {
+    const onHide = () => {
       setIsKeyboardVisible(false);
-    });
+    };
+
+    const subscriptions = [
+      Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', onShow),
+      Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', onHide),
+      Keyboard.addListener('keyboardDidShow', onShow),
+      Keyboard.addListener('keyboardDidHide', onHide),
+    ];
 
     return () => {
-      showSub.remove();
-      hideSub.remove();
+      subscriptions.forEach(sub => sub.remove());
     };
   }, []);
 
@@ -563,9 +592,13 @@ export default function ChatView({
   };
 
   const computeSharedFriendData = useCallback(async () => {
-    if (isGroup) return;
+    if (isGroup) {
+      setIsFriendDataLoaded(true);
+      return;
+    }
 
-    const cleanFriendName = displayTitle.trim().toLowerCase();
+    try {
+      const cleanFriendName = displayTitle.trim().toLowerCase();
     const cleanFriendPhone = normalizePhone(displayPhone);
 
     // Also check matched contact from contacts store
@@ -736,6 +769,9 @@ export default function ChatView({
     setFriendNetPaise(totalNet);
     setSharedTripLabels(Array.from(new Set(tripBreakdownLabels)));
     setSharedExpenseMessages(synthesizedExpMsgs);
+  } finally {
+    setIsFriendDataLoaded(true);
+  }
   }, [isGroup, displayTitle, displayPhone, friendId, contacts, tripId, user?.id, currentUserId, currentUserName]);
 
   useEffect(() => {
@@ -747,26 +783,42 @@ export default function ChatView({
     if (tripId) {
       // Mark trip as read and mark messages seen immediately
       markTripMessagesAsSeen(tripId, currentUserId);
-      AppStorage.setItem(`@splityourtrip_last_read_${tripId}`, new Date().toISOString()).catch(() => {});
+      AppStorage.setItem(`@splityourtrip_last_read_${tripId}`, String(Date.now())).catch(() => {});
       try {
         useContactsStore.setState(s => ({
           contacts: s.contacts.map(c =>
-            c.defaultTripId === tripId ? { ...c, unseenMessagesCount: 0 } : c
+            c.defaultTripId === tripId || (c as any).id === friendId ? { ...c, unseenMessagesCount: 0 } : c
           ),
         }));
       } catch {}
 
-      const hasLocalTrip = trips.some(t => t.id === tripId);
-      const hasLocalMessages = messages && messages.length > 0;
-      if (!hasLocalTrip && !hasLocalMessages) {
-        setIsChatLoading(true);
+      if (isGroup) {
+        const hasLocalTrip = trips.some(t => t.id === tripId);
+        const hasLocalTripMessages = messages && messages.some(m => !m.trip_id || m.trip_id === tripId);
+        const hasLocalTripExpenses = expenses && expenses.some(e => !e.trip_id || e.trip_id === tripId);
+        if (!hasLocalTrip || (!hasLocalTripMessages && !hasLocalTripExpenses)) {
+          setIsChatLoading(true);
+          setIsTripDataLoaded(false);
+        } else {
+          setIsChatLoading(false);
+          setIsTripDataLoaded(true);
+        }
       } else {
-        setIsChatLoading(false);
+        const hasLocalTrip = trips.some(t => t.id === tripId);
+        const hasLocalMessages = messages && messages.length > 0;
+        if (!hasLocalTrip || !hasLocalMessages) {
+          setIsChatLoading(true);
+        } else {
+          setIsChatLoading(false);
+        }
       }
 
       const safetyTimer = setTimeout(() => {
-        if (isMounted) setIsChatLoading(false);
-      }, 400);
+        if (isMounted) {
+          setIsChatLoading(false);
+          setIsTripDataLoaded(true);
+        }
+      }, 1000);
 
       loadTripDetails(tripId)
         .catch(err => console.log('loadTripDetails error in ChatView:', err))
@@ -774,6 +826,9 @@ export default function ChatView({
           clearTimeout(safetyTimer);
           if (isMounted) {
             setIsChatLoading(false);
+            setIsTripDataLoaded(true);
+            // Re-mark seen once fresh remote messages are loaded
+            markTripMessagesAsSeen(tripId, currentUserId);
           }
         });
 
@@ -789,6 +844,11 @@ export default function ChatView({
         clearTimeout(safetyTimer);
         clearInterval(heartbeat);
         unsub();
+        // Record final read timestamp upon leaving chat
+        AppStorage.setItem(`@splityourtrip_last_read_${tripId}`, String(Date.now())).catch(() => {});
+        if (currentUserId) {
+          useContactsStore.getState().fetchFriendsSummary(currentUserId);
+        }
       };
     } else {
       setIsChatLoading(false);
@@ -808,9 +868,18 @@ export default function ChatView({
 
   useEffect(() => {
     if (!isGroup) {
+      setIsFriendDataLoaded(false);
       computeSharedFriendData();
+    } else {
+      setIsFriendDataLoaded(true);
+      const hasLocalTripMessages = messages && messages.some(m => !m.trip_id || m.trip_id === tripId);
+      const hasLocalTripExpenses = expenses && expenses.some(e => !e.trip_id || e.trip_id === tripId);
+      if (!hasLocalTripMessages && !hasLocalTripExpenses) {
+        setIsTripDataLoaded(false);
+        setIsChatLoading(true);
+      }
     }
-  }, [isGroup, friendId, displayTitle, displayPhone, computeSharedFriendData]);
+  }, [isGroup, friendId, displayTitle, displayPhone, tripId, computeSharedFriendData]);
 
   useFocusEffect(
     useCallback(() => {
@@ -950,6 +1019,7 @@ export default function ChatView({
   useEffect(() => {
     if (combinedMessages.length > 0) {
       setIsChatLoading(false);
+      setIsTripDataLoaded(true);
     }
   }, [combinedMessages.length]);
 
@@ -1028,6 +1098,11 @@ export default function ChatView({
   }, [isGroup, tripMembers, balances, tripId, user?.id, displayTitle]);
 
   const activeBannerNetPaise = isGroup ? groupMyNetPaise : friendNetPaise;
+  const isBannerLoading = !isGroup ? !isFriendDataLoaded : (!isTripDataLoaded || (isChatLoading && !currentTrip));
+  const isFeedLoading =
+    (isChatLoading && paginatedMessages.length === 0) ||
+    (!isGroup && !isFriendDataLoaded && paginatedMessages.length === 0) ||
+    (isGroup && !isTripDataLoaded && paginatedMessages.length === 0);
 
   // Format time (e.g. 10:45 AM)
   const formatTime = (isoString?: string) => {
@@ -1639,8 +1714,8 @@ export default function ChatView({
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : (StatusBar.currentHeight || 0)}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
     >
       {/* Top Header with Trip/Chat Icon + Name + Info Subtitle (Click Name/Icon to open Info Screen) */}
       {showHeader && (
@@ -1760,87 +1835,133 @@ export default function ChatView({
         style={[
           styles.balanceBanner,
           {
-            backgroundColor:
-              activeBannerNetPaise < 0
-                ? colors.dangerBg
-                : activeBannerNetPaise > 0
-                ? colors.successBg
-                : colors.cardSecondary,
-            borderBottomColor:
-              activeBannerNetPaise < 0
-                ? colors.danger
-                : activeBannerNetPaise > 0
-                ? colors.success
-                : colors.border,
+            backgroundColor: isBannerLoading
+              ? colors.cardSecondary
+              : activeBannerNetPaise < 0
+              ? colors.dangerBg
+              : activeBannerNetPaise > 0
+              ? colors.successBg
+              : colors.cardSecondary,
+            borderBottomColor: isBannerLoading
+              ? colors.border
+              : activeBannerNetPaise < 0
+              ? colors.danger
+              : activeBannerNetPaise > 0
+              ? colors.success
+              : colors.border,
           },
         ]}
       >
-        <View style={styles.balanceBannerLeft}>
-          <View
-            style={[
-              styles.balanceBannerIcon,
-              {
-                backgroundColor:
-                  activeBannerNetPaise < 0
-                    ? colors.dangerBg
-                    : activeBannerNetPaise > 0
-                    ? colors.successBg
-                    : colors.borderLight,
-              },
-            ]}
-          >
-            <Ionicons
-              name={
-                activeBannerNetPaise < 0
-                  ? 'arrow-up-circle'
-                  : activeBannerNetPaise > 0
-                  ? 'arrow-down-circle'
-                  : 'checkmark-circle'
-              }
-              size={20}
-              color={
-                activeBannerNetPaise < 0
-                  ? colors.danger
-                  : activeBannerNetPaise > 0
-                  ? colors.success
-                  : colors.textSecondary
-              }
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text
+        {isBannerLoading ? (
+          <View style={styles.balanceBannerLeft}>
+            <Animated.View
               style={[
-                styles.balanceBannerTitle,
+                styles.balanceBannerIcon,
                 {
-                  color:
+                  backgroundColor: isDark ? '#2A3649' : '#E2E8F0',
+                  opacity: bannerPulseAnim,
+                },
+              ]}
+            />
+            <View style={{ flex: 1, gap: 5 }}>
+              <Animated.View
+                style={{
+                  height: 14,
+                  width: '60%',
+                  borderRadius: 6,
+                  backgroundColor: isDark ? '#2A3649' : '#E2E8F0',
+                  opacity: bannerPulseAnim,
+                }}
+              />
+              <Animated.View
+                style={{
+                  height: 10,
+                  width: '38%',
+                  borderRadius: 5,
+                  backgroundColor: isDark ? '#1F2937' : '#EDF2F7',
+                  opacity: bannerPulseAnim,
+                }}
+              />
+            </View>
+          </View>
+        ) : (
+          <View style={styles.balanceBannerLeft}>
+            <View
+              style={[
+                styles.balanceBannerIcon,
+                {
+                  backgroundColor:
                     activeBannerNetPaise < 0
-                      ? colors.danger
+                      ? colors.dangerBg
                       : activeBannerNetPaise > 0
-                      ? colors.success
-                      : colors.text,
+                      ? colors.successBg
+                      : colors.borderLight,
                 },
               ]}
             >
-              {activeBannerNetPaise < 0
-                ? isGroup
-                  ? `You owe ${formatCurrencyAmount(Math.abs(activeBannerNetPaise), currentTrip?.currency)}`
-                  : `You owe ${displayTitle} ${formatCurrencyAmount(Math.abs(activeBannerNetPaise), currentTrip?.currency)}`
-                : activeBannerNetPaise > 0
-                ? isGroup
-                  ? `You are owed ${formatCurrencyAmount(activeBannerNetPaise, currentTrip?.currency)}`
-                  : `${displayTitle} owes you ${formatCurrencyAmount(activeBannerNetPaise, currentTrip?.currency)}`
-                : `Settled up with ${displayTitle}`}
-            </Text>
-            {!isGroup && sharedTripLabels.length > 0 && activeBannerNetPaise !== 0 ? (
-              <Text style={[styles.balanceBannerSub, { color: colors.textSecondary }]} numberOfLines={1}>
-                From: {sharedTripLabels.join(', ')}
+              <Ionicons
+                name={
+                  activeBannerNetPaise < 0
+                    ? 'arrow-up-circle'
+                    : activeBannerNetPaise > 0
+                    ? 'arrow-down-circle'
+                    : 'checkmark-circle'
+                }
+                size={20}
+                color={
+                  activeBannerNetPaise < 0
+                    ? colors.danger
+                    : activeBannerNetPaise > 0
+                    ? colors.success
+                    : colors.textSecondary
+                }
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.balanceBannerTitle,
+                  {
+                    color:
+                      activeBannerNetPaise < 0
+                        ? colors.danger
+                        : activeBannerNetPaise > 0
+                        ? colors.success
+                        : colors.text,
+                  },
+                ]}
+              >
+                {activeBannerNetPaise < 0
+                  ? isGroup
+                    ? `You owe ${formatCurrencyAmount(Math.abs(activeBannerNetPaise), currentTrip?.currency)}`
+                    : `You owe ${displayTitle} ${formatCurrencyAmount(Math.abs(activeBannerNetPaise), currentTrip?.currency)}`
+                  : activeBannerNetPaise > 0
+                  ? isGroup
+                    ? `You are owed ${formatCurrencyAmount(activeBannerNetPaise, currentTrip?.currency)}`
+                    : `${displayTitle} owes you ${formatCurrencyAmount(activeBannerNetPaise, currentTrip?.currency)}`
+                  : `Settled up with ${displayTitle}`}
               </Text>
-            ) : null}
+              {!isGroup && sharedTripLabels.length > 0 && activeBannerNetPaise !== 0 ? (
+                <Text style={[styles.balanceBannerSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                  From: {sharedTripLabels.join(', ')}
+                </Text>
+              ) : null}
+            </View>
           </View>
-        </View>
+        )}
 
         <View style={styles.balanceBannerActions}>
-          {activeBannerNetPaise < 0 ? (
+          {isBannerLoading ? (
+            <Animated.View
+              style={{
+                width: 68,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: isDark ? '#2A3649' : '#E2E8F0',
+                opacity: bannerPulseAnim,
+              }}
+            />
+          ) : activeBannerNetPaise < 0 ? (
             <TouchableOpacity
               style={[styles.payNowMiniBtn, { backgroundColor: colors.danger, minWidth: 74, justifyContent: 'center' }]}
               onPress={() => {
@@ -1875,13 +1996,8 @@ export default function ChatView({
 
       {/* Messages Feed */}
       <View style={{ flex: 1, position: 'relative' }}>
-        {isChatLoading && paginatedMessages.length === 0 ? (
-          <View style={styles.chatLoadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[styles.chatLoadingText, { color: colors.textSecondary }]}>
-              Loading messages...
-            </Text>
-          </View>
+        {isFeedLoading ? (
+          <ChatFeedSkeleton colors={colors} isDark={isDark} />
         ) : (
           <FlatList
             ref={flatListRef}
@@ -2597,7 +2713,7 @@ export default function ChatView({
               backgroundColor: colors.card,
               borderTopColor: colors.border,
               borderTopWidth: editingMessage ? 0 : 1,
-              paddingBottom: isKeyboardVisible
+              paddingBottom: isKeyboardActive
                 ? 8
                 : Math.max(insets.bottom, 8),
             },
@@ -2629,9 +2745,13 @@ export default function ChatView({
             value={inputText}
             onChangeText={setInputText}
             onFocus={() => {
+              setIsInputFocused(true);
               setTimeout(() => {
                 flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
               }, 120);
+            }}
+            onBlur={() => {
+              setIsInputFocused(false);
             }}
             multiline
           />
@@ -2669,7 +2789,7 @@ export default function ChatView({
         onRequestClose={() => setLinkContactModalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.linkModalOverlay}
         >
           <View
