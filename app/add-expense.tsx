@@ -22,6 +22,7 @@ import { useTripStore } from '../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../src/features/contacts/useContactsStore';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { formatCurrencyAmount } from '../src/services/currency';
+import { DraggableBottomSheet } from '../src/components/DraggableBottomSheet';
 
 const PAGE_SIZE = 12;
 
@@ -626,30 +627,16 @@ export default function AddExpenseScreen() {
       )}
 
       {/* CREATE NEW TRIP MODAL */}
-      <Modal
+      <DraggableBottomSheet
         visible={showCreateTripModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowCreateTripModal(false)}
+        onClose={() => setShowCreateTripModal(false)}
+        maxHeight="75%"
+        sheetStyle={{
+          paddingBottom: Math.max(insets.bottom, 20) + 16,
+          paddingHorizontal: 20,
+        }}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity
-            style={styles.backdrop}
-            activeOpacity={1}
-            onPress={() => setShowCreateTripModal(false)}
-          />
-          <View
-            style={[
-              styles.dialogSheet,
-              {
-                backgroundColor: colors.card,
-                paddingBottom: Math.max(insets.bottom, 20) + 16,
-              },
-            ]}
-          >
+        <View style={{ flex: 1 }}>
             <View style={styles.dialogHeader}>
               <View style={[styles.dialogIconWrap, { backgroundColor: '#E0F2FE' }]}>
                 <Ionicons name="airplane" size={22} color="#0284C7" />
@@ -705,35 +692,20 @@ export default function AddExpenseScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </DraggableBottomSheet>
 
       {/* ADD CONTACT MODAL */}
-      <Modal
+      <DraggableBottomSheet
         visible={showAddContactModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddContactModal(false)}
+        onClose={() => setShowAddContactModal(false)}
+        maxHeight="82%"
+        sheetStyle={{
+          paddingBottom: Math.max(insets.bottom, 20) + 16,
+          paddingHorizontal: 20,
+        }}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity
-            style={styles.backdrop}
-            activeOpacity={1}
-            onPress={() => setShowAddContactModal(false)}
-          />
-          <View
-            style={[
-              styles.dialogSheet,
-              {
-                backgroundColor: colors.card,
-                paddingBottom: Math.max(insets.bottom, 20) + 16,
-              },
-            ]}
-          >
+        <View style={{ flex: 1 }}>
             <View style={styles.dialogHeader}>
               <View style={[styles.dialogIconWrap, { backgroundColor: '#F3E8FF' }]}>
                 <Ionicons name="person-add" size={20} color="#7C3AED" />
@@ -809,9 +781,8 @@ export default function AddExpenseScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </DraggableBottomSheet>
     </View>
   );
 }

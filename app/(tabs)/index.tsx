@@ -27,6 +27,7 @@ import { useTheme } from '../../src/theme/useThemeStore';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 import TripCoverBadge from '../../src/components/TripCoverBadge';
 import TripsListSkeleton from '../../src/components/TripsListSkeleton';
+import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
 
 const PAGE_SIZE = 10;
 
@@ -608,24 +609,23 @@ export default function MyTripsScreen() {
 
       {/* Create Trip Stepper Modal */}
       {createModalVisible && (
-        <Modal visible={createModalVisible} transparent animationType="slide">
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalOverlay}
-          >
-            <View
-              style={[
-                styles.modalContent,
-                {
-                  backgroundColor: colors.card,
-                  borderTopColor: colors.border,
-                  height: createStep === 'members' ? '88%' : undefined,
-                  minHeight: createStep === 'members' ? 520 : undefined,
-                  maxHeight: '94%',
-                  paddingBottom: Math.max(insets.bottom, 20) + 12,
-                },
-              ]}
-            >
+        <DraggableBottomSheet
+          visible={createModalVisible}
+          onClose={() => {
+            setCreateModalVisible(false);
+            setCreateStep('details');
+          }}
+          maxHeight="94%"
+          sheetStyle={{
+            backgroundColor: colors.card,
+            borderTopColor: colors.border,
+            height: createStep === 'members' ? '88%' : undefined,
+            minHeight: createStep === 'members' ? 520 : undefined,
+            paddingBottom: Math.max(insets.bottom, 20) + 12,
+            paddingHorizontal: moderateScale(20),
+          }}
+        >
+          <View style={{ flex: 1 }}>
               {/* Stepper Progress Bar Header */}
               <View style={styles.stepperHeader}>
                 <View style={styles.stepIndicatorRow}>
@@ -1176,33 +1176,32 @@ export default function MyTripsScreen() {
                 </View>
               )}
             </View>
-          </KeyboardAvoidingView>
-        </Modal>
+        </DraggableBottomSheet>
       )}
 
       {/* Join Trip Modal */}
       {joinModalVisible && (
-      <Modal visible={joinModalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
+        <DraggableBottomSheet
+          visible={joinModalVisible}
+          onClose={() => {
+            setJoinModalVisible(false);
+            setJoinErrorMsg(null);
+          }}
+          maxHeight="85%"
+          sheetStyle={{
+            backgroundColor: colors.card,
+            borderTopColor: colors.border,
+            paddingBottom: Math.max(insets.bottom, 24) + 16,
+            paddingHorizontal: 20,
+          }}
         >
           <ScrollView
             bounces={false}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}
+            contentContainerStyle={{ flexGrow: 1 }}
           >
-            <View
-              style={[
-                styles.modalContent,
-                {
-                  backgroundColor: colors.card,
-                  borderTopColor: colors.border,
-                  paddingBottom: Math.max(insets.bottom, 24) + 16,
-                },
-              ]}
-            >
+            <View>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Join a Trip</Text>
               <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
                 Paste the 6-character invite code shared by your trip admin.
@@ -1282,8 +1281,7 @@ export default function MyTripsScreen() {
               </View>
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
+        </DraggableBottomSheet>
       )}
     </View>
   );

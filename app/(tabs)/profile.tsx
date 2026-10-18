@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { SUPPORTED_CURRENCIES, CurrencyItem, getCurrencyInfo } from '../../src/services/currency';
+import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -480,17 +481,16 @@ export default function ProfileScreen() {
       </ScrollView>
 
       {/* Currency & Country Selector Modal */}
-      <Modal visible={currencyModalVisible} transparent animationType="slide">
-        <View style={styles.currencyModalOverlay}>
-          <View
-            style={[
-              styles.currencyModalContent,
-              {
-                backgroundColor: colors.card,
-                borderTopColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={currencyModalVisible}
+        onClose={() => {
+          setCurrencyModalVisible(false);
+          setCurrencySearch('');
+        }}
+        maxHeight="80%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Select Preferred Currency
@@ -560,22 +560,17 @@ export default function ProfileScreen() {
                 );
               }}
             />
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* Photo Picker Modal */}
-      <Modal visible={photoPickerVisible} transparent animationType="fade">
-        <View style={styles.photoModalOverlay}>
-          <View
-            style={[
-              styles.photoModalContent,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={photoPickerVisible}
+        onClose={() => setPhotoPickerVisible(false)}
+        maxHeight="42%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Profile Photo</Text>
               <TouchableOpacity onPress={() => setPhotoPickerVisible(false)}>
@@ -636,9 +631,8 @@ export default function ProfileScreen() {
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             )}
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
     </KeyboardAvoidingView>
   );
 }

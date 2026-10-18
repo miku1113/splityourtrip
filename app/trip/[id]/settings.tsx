@@ -27,6 +27,7 @@ import { useContactsStore } from '../../../src/features/contacts/useContactsStor
 import { SUPPORTED_CURRENCIES, getCurrencyInfo } from '../../../src/services/currency';
 import { uploadTripCoverImage } from '../../../src/services/imageUpload';
 import { scaleFont } from '../../../src/theme/responsive';
+import { DraggableBottomSheet } from '../../../src/components/DraggableBottomSheet';
 
 const TRAVEL_PRESET_ICONS = [
   { label: 'Beach', icon: '🏖️' },
@@ -1355,17 +1356,13 @@ export default function TripSettingsScreen() {
       </KeyboardAvoidingView>
 
       {/* Photo Picker Modal */}
-      <Modal visible={photoPickerVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.photoModalContent,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={photoPickerVisible}
+        onClose={() => setPhotoPickerVisible(false)}
+        maxHeight="40%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>Trip Cover Photo</Text>
               <TouchableOpacity onPress={() => setPhotoPickerVisible(false)}>
@@ -1400,22 +1397,20 @@ export default function TripSettingsScreen() {
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </TouchableOpacity>
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* Currency Modal */}
-      <Modal visible={currencyModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.currencyModalContent,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={currencyModalVisible}
+        onClose={() => {
+          setCurrencyModalVisible(false);
+          setCurrencySearch('');
+        }}
+        maxHeight="80%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>
                 Select Trip Currency
@@ -1486,25 +1481,17 @@ export default function TripSettingsScreen() {
                 );
               }}
             />
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* Add Member Modal */}
-      <Modal visible={addMemberModalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <View
-            style={[
-              styles.drawerModalContent,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={addMemberModalVisible}
+        onClose={() => setAddMemberModalVisible(false)}
+        maxHeight="88%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>Add Member to Trip</Text>
@@ -1766,25 +1753,17 @@ export default function TripSettingsScreen() {
                 </TouchableOpacity>
               </View>
             )}
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </DraggableBottomSheet>
 
       {/* Link Guest Member Modal */}
-      <Modal visible={linkModalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <View
-            style={[
-              styles.drawerModalContent,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={linkModalVisible}
+        onClose={() => setLinkModalVisible(false)}
+        maxHeight="88%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>
@@ -1958,9 +1937,8 @@ export default function TripSettingsScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </DraggableBottomSheet>
     </View>
   );
 }

@@ -29,6 +29,7 @@ import { AppStorage } from '../../src/lib/storage';
 import { Trip, TripMember, TripBalanceRow } from '../../src/types/database';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import AnalyserSkeleton from '../../src/components/AnalyserSkeleton';
+import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
 
 const PAGE_SIZE = 10;
 const INLINE_TRIPS_LIMIT = 5;
@@ -1732,14 +1733,13 @@ export default function AnalyserScreen() {
       </View>
 
       {/* FILTER MODAL */}
-      <Modal
+      <DraggableBottomSheet
         visible={filterModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setFilterModalVisible(false)}
+        onClose={() => setFilterModalVisible(false)}
+        maxHeight="85%"
+        sheetStyle={{ paddingBottom: 20 }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+        <View style={{ flex: 1 }}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Filters</Text>
@@ -1893,19 +1893,17 @@ export default function AnalyserScreen() {
                 <Text style={styles.modalApplyBtnText}>Apply Filters</Text>
               </TouchableOpacity>
             </View>
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* SORT MODAL ("short") */}
-      <Modal
+      <DraggableBottomSheet
         visible={sortModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSortModalVisible(false)}
+        onClose={() => setSortModalVisible(false)}
+        maxHeight="60%"
+        sheetStyle={{ paddingBottom: 20 }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalSheet, { backgroundColor: colors.card, borderTopColor: colors.border, maxHeight: '60%' }]}>
+        <View style={{ flex: 1 }}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Sort By</Text>
@@ -1964,31 +1962,18 @@ export default function AnalyserScreen() {
                 );
               })}
             </View>
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* View All Group Trips Modal (Paginated by 10) */}
       {allTripsModalVisible && (
-        <Modal
+        <DraggableBottomSheet
           visible={allTripsModalVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setAllTripsModalVisible(false)}
+          onClose={() => setAllTripsModalVisible(false)}
+          maxHeight="88%"
+          sheetStyle={{ paddingBottom: 20 }}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.modalOverlay}
-          >
-            <View
-              style={[
-                styles.modalSheet,
-                {
-                  backgroundColor: colors.card,
-                  borderTopColor: colors.border,
-                },
-              ]}
-            >
+          <View style={{ flex: 1 }}>
               <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                 <View>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>
@@ -2107,9 +2092,8 @@ export default function AnalyserScreen() {
                   );
                 }}
               />
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+          </View>
+        </DraggableBottomSheet>
       )}
     </ScrollView>
   );

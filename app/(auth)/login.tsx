@@ -22,6 +22,7 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { SUPPORTED_CURRENCIES, CurrencyItem } from '../../src/services/currency';
 import { AppLogo } from '../../src/components/AppLogo';
+import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -753,17 +754,16 @@ export default function LoginScreen() {
         </View>
       </ScrollView>
       {/* Currency & Country Selector Modal */}
-      <Modal visible={currencyModalVisible} transparent animationType="slide">
-        <View style={styles.currencyModalOverlay}>
-          <View
-            style={[
-              styles.currencyModalContent,
-              {
-                backgroundColor: colors.card,
-                borderTopColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={currencyModalVisible}
+        onClose={() => {
+          setCurrencyModalVisible(false);
+          setCurrencySearch('');
+        }}
+        maxHeight="80%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Select Country & Currency
@@ -834,35 +834,21 @@ export default function LoginScreen() {
                 );
               }}
             />
-          </View>
         </View>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* Forgot Password Modal */}
-      <Modal
+      <DraggableBottomSheet
         visible={forgotModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        onClose={() => {
           Keyboard.dismiss();
           setForgotModalVisible(false);
           setPendingNavigation(false);
         }}
-        onDismiss={() => {
-          if (pendingNavigation) {
-            setPendingNavigation(false);
-            router.replace('/(tabs)');
-          }
-        }}
+        maxHeight="85%"
+        sheetStyle={{ padding: 24 }}
       >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.forgotModalOverlay}
-          >
-            <View
-              style={[
-                styles.forgotModalContent,
-                {
+        <View style={{ flex: 1 }}>
                   backgroundColor: colors.card,
                   borderTopColor: colors.border,
                   paddingBottom: Math.max(insets.bottom, 24) + 16,
@@ -1073,9 +1059,8 @@ export default function LoginScreen() {
                   </View>
                 </ScrollView>
               )}
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+        </View>
+      </DraggableBottomSheet>
     </KeyboardAvoidingView>
   );
 }

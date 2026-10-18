@@ -23,6 +23,7 @@ import { useContactsStore, FriendContact } from '../features/contacts/useContact
 import { useAuthStore } from '../features/auth/useAuthStore';
 import { scaleFont, moderateScale } from '../theme/responsive';
 import BillScannerModal from './BillScannerModal';
+import { DraggableBottomSheet } from './DraggableBottomSheet';
 
 const PAGE_SIZE = 10;
 
@@ -236,32 +237,16 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
 
   return (
     <>
-      <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={handleClose}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.modalOverlay}
+      <DraggableBottomSheet
+        visible={visible}
+        onClose={handleClose}
+        maxHeight="86%"
+        sheetStyle={{
+          paddingBottom: Math.max(insets.bottom, 20) + 16,
+          paddingHorizontal: moderateScale(20),
+        }}
       >
-        <TouchableOpacity
-          style={styles.backdropTouch}
-          activeOpacity={1}
-          onPress={handleClose}
-        />
-
-        <View
-          style={[
-            styles.sheetContainer,
-            {
-              backgroundColor: colors.card,
-              borderTopColor: colors.border,
-              paddingBottom: Math.max(insets.bottom, 20) + 16,
-            },
-          ]}
-        >
+        <View style={{ flex: 1 }}>
           {/* Header Bar */}
           <View style={styles.headerRow}>
             {step !== 'choose_type' ? (
@@ -820,8 +805,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
             </View>
           )}
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+      </DraggableBottomSheet>
     <BillScannerModal
       visible={showBillScanner}
       onClose={() => setShowBillScanner(false)}

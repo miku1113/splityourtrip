@@ -27,6 +27,7 @@ import { formatCurrencyAmount } from '../services/currency';
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
 import { scaleFont, moderateScale } from '../theme/responsive';
 import TripCoverBadge from './TripCoverBadge';
+import { DraggableBottomSheet } from './DraggableBottomSheet';
 
 interface SettleUpModalProps {
   visible: boolean;
@@ -325,22 +326,17 @@ export default function SettleUpModal({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardContainer}
-        >
-          <View
-            style={[
-              styles.sheetContainer,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-                paddingBottom: Math.max(insets.bottom, 20),
-              },
-            ]}
-          >
+    <DraggableBottomSheet
+      visible={visible}
+      onClose={onClose}
+      maxHeight="92%"
+      sheetStyle={{
+        backgroundColor: colors.card,
+        borderColor: colors.border,
+        paddingBottom: Math.max(insets.bottom, 20),
+      }}
+    >
+      <View style={{ flex: 1 }}>
             {/* Header */}
             <View style={styles.sheetHeader}>
               <View style={{ flex: 1 }}>
@@ -756,9 +752,7 @@ export default function SettleUpModal({
               </ScrollView>
             )}
           </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
+    </DraggableBottomSheet>
   );
 }
 

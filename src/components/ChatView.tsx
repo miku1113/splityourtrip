@@ -46,6 +46,7 @@ import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
 import TripCoverBadge from './TripCoverBadge';
 import ChatFeedSkeleton from './ChatFeedSkeleton';
+import { DraggableBottomSheet } from './DraggableBottomSheet';
 import { getFriendSettings } from '../services/friendSettings';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
@@ -2782,22 +2783,13 @@ export default function ChatView({
 
       {/* Link Guest Friend with Phone Contact Modal (Paginated by 10) */}
       {linkContactModalVisible && (
-      <Modal
-        visible={linkContactModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setLinkContactModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.linkModalOverlay}
+        <DraggableBottomSheet
+          visible={linkContactModalVisible}
+          onClose={() => setLinkContactModalVisible(false)}
+          maxHeight="88%"
+          sheetStyle={{ paddingBottom: 20 }}
         >
-          <View
-            style={[
-              styles.linkModalContent,
-              { backgroundColor: colors.card, borderTopColor: colors.border },
-            ]}
-          >
+          <View style={{ flex: 1 }}>
             <View style={styles.linkModalHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.linkModalTitle, { color: colors.text }]}>
@@ -2946,29 +2938,18 @@ export default function ChatView({
               />
             )}
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </DraggableBottomSheet>
       )}
 
       {/* WhatsApp Attachment Menu Sheet */}
       {attachmentModalVisible && (
-      <Modal
-        visible={attachmentModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAttachmentModalVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.attachmentOverlay}
-          activeOpacity={1}
-          onPress={() => setAttachmentModalVisible(false)}
+        <DraggableBottomSheet
+          visible={attachmentModalVisible}
+          onClose={() => setAttachmentModalVisible(false)}
+          maxHeight="45%"
+          sheetStyle={{ padding: 20 }}
         >
-          <View
-            style={[
-              styles.attachmentSheet,
-              { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
-            ]}
-          >
+          <View style={{ flex: 1 }}>
             <Text style={[styles.attachmentHeader, { color: colors.textSecondary }]}>
               SHARE TO CHAT
             </Text>
@@ -3032,22 +3013,17 @@ export default function ChatView({
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
-      </Modal>
+        </DraggableBottomSheet>
       )}
 
       {/* 1. Pay with Screenshot Modal */}
-      <Modal
+      <DraggableBottomSheet
         visible={payModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPayModalVisible(false)}
+        onClose={() => setPayModalVisible(false)}
+        maxHeight="88%"
+        sheetStyle={{ padding: 20 }}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.payModalBackdrop}
-        >
-          <View style={[styles.payModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={{ flex: 1 }}>
             <View style={styles.payModalHeader}>
               <View>
                 <Text style={[styles.payModalTitle, { color: colors.text }]}>Pay / Settle Up</Text>
@@ -3206,21 +3182,16 @@ export default function ChatView({
               )}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* 2. Request Money / Select Amount to Receive Modal */}
-      <Modal
+      <DraggableBottomSheet
         visible={requestMoneyModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setRequestMoneyModalVisible(false)}
+        onClose={() => setRequestMoneyModalVisible(false)}
+        maxHeight="88%"
+        sheetStyle={{ padding: 20 }}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.payModalBackdrop}
-        >
-          <View style={[styles.payModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={{ flex: 1 }}>
             <View style={styles.payModalHeader}>
               <View>
                 <Text style={[styles.payModalTitle, { color: colors.text }]}>Request Money</Text>
@@ -3335,8 +3306,7 @@ export default function ChatView({
               )}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </DraggableBottomSheet>
 
       {/* Photo Full-Screen Modal Preview */}
       {Boolean(selectedPhotoPreview) && (

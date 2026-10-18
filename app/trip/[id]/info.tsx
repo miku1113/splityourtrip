@@ -39,6 +39,7 @@ import { formatCurrencyAmount } from '../../../src/services/currency';
 import { theme } from '../../../src/theme/colors';
 import { useTheme } from '../../../src/theme/useThemeStore';
 import TripCoverBadge from '../../../src/components/TripCoverBadge';
+import { DraggableBottomSheet } from '../../../src/components/DraggableBottomSheet';
 
 type InfoTabKey = 'expenses' | 'members' | 'balances' | 'settle';
 
@@ -1444,17 +1445,17 @@ export default function TripInfoScreen() {
 
       {/* Add / Search Member Modal */}
       {memberModalOpen && (
-        <Modal visible={memberModalOpen} transparent animationType="slide">
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.modalOverlay}
-          >
-            <View
-              style={[
-                styles.memberModalContainer,
-                { backgroundColor: colors.card, borderTopColor: colors.border },
-              ]}
-            >
+        <DraggableBottomSheet
+          visible={memberModalOpen}
+          onClose={() => {
+            setMemberModalOpen(false);
+            setSearchQuery('');
+            setRegisteredUsers([]);
+          }}
+          maxHeight="90%"
+          sheetStyle={{ paddingBottom: 20 }}
+        >
+          <View style={{ flex: 1 }}>
               <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
                 <View>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
@@ -1859,29 +1860,19 @@ export default function TripInfoScreen() {
                   </View>
                 ) : null}
               </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+          </View>
+        </DraggableBottomSheet>
       )}
 
       {/* Link Guest Member with a Phone Contact Modal (Paginated by 10) */}
       {Boolean(linkingGuestMember) && (
-        <Modal
+        <DraggableBottomSheet
           visible={Boolean(linkingGuestMember)}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setLinkingGuestMember(null)}
+          onClose={() => setLinkingGuestMember(null)}
+          maxHeight="88%"
+          sheetStyle={{ paddingBottom: 20 }}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.modalOverlay}
-          >
-            <View
-              style={[
-                styles.memberModalContainer,
-                { backgroundColor: colors.card, borderTopColor: colors.border },
-              ]}
-            >
+          <View style={{ flex: 1 }}>
               <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>
@@ -2087,9 +2078,8 @@ export default function TripInfoScreen() {
                   );
                 }}
               />
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+          </View>
+        </DraggableBottomSheet>
       )}
 
       {/* Three-Dots Options Sidebar Drawer for Info Screen */}

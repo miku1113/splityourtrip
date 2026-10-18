@@ -26,6 +26,7 @@ import {
   setUserCurrencyPreference,
 } from '../src/services/currency';
 import { AppStorage } from '../src/lib/storage';
+import { DraggableBottomSheet } from '../src/components/DraggableBottomSheet';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -383,20 +384,16 @@ export default function SettingsScreen() {
       )}
 
       {/* Currency Picker Modal */}
-      <Modal visible={currencyModalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <View
-            style={[
-              styles.modalContent,
-              {
-                backgroundColor: colors.card,
-                borderTopColor: colors.border,
-              },
-            ]}
-          >
+      <DraggableBottomSheet
+        visible={currencyModalVisible}
+        onClose={() => {
+          setCurrencyModalVisible(false);
+          setCurrencySearch('');
+        }}
+        maxHeight="80%"
+        sheetStyle={{ padding: 20 }}
+      >
+        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Select Default Currency
@@ -466,9 +463,8 @@ export default function SettingsScreen() {
                 );
               }}
             />
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </DraggableBottomSheet>
     </ScrollView>
   );
 }
