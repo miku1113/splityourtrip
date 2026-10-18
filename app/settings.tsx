@@ -393,7 +393,6 @@ export default function SettingsScreen() {
         maxHeight="80%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Select Default Currency
@@ -463,7 +462,6 @@ export default function SettingsScreen() {
                 );
               }}
             />
-        </View>
       </DraggableBottomSheet>
     </ScrollView>
   );

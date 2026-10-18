@@ -636,7 +636,6 @@ export default function AddExpenseScreen() {
           paddingHorizontal: 20,
         }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.dialogHeader}>
               <View style={[styles.dialogIconWrap, { backgroundColor: '#E0F2FE' }]}>
                 <Ionicons name="airplane" size={22} color="#0284C7" />
@@ -692,7 +691,6 @@ export default function AddExpenseScreen() {
                 )}
               </TouchableOpacity>
             </View>
-        </View>
       </DraggableBottomSheet>
 
       {/* ADD CONTACT MODAL */}
@@ -705,7 +703,6 @@ export default function AddExpenseScreen() {
           paddingHorizontal: 20,
         }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.dialogHeader}>
               <View style={[styles.dialogIconWrap, { backgroundColor: '#F3E8FF' }]}>
                 <Ionicons name="person-add" size={20} color="#7C3AED" />
@@ -781,7 +778,6 @@ export default function AddExpenseScreen() {
                 )}
               </TouchableOpacity>
             </View>
-        </View>
       </DraggableBottomSheet>
     </View>
   );

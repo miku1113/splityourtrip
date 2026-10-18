@@ -1455,7 +1455,6 @@ export default function TripInfoScreen() {
           maxHeight="90%"
           sheetStyle={{ paddingBottom: 20 }}
         >
-          <View style={{ flex: 1 }}>
               <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
                 <View>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
@@ -1860,7 +1859,6 @@ export default function TripInfoScreen() {
                   </View>
                 ) : null}
               </ScrollView>
-          </View>
         </DraggableBottomSheet>
       )}
 
@@ -1872,7 +1870,6 @@ export default function TripInfoScreen() {
           maxHeight="88%"
           sheetStyle={{ paddingBottom: 20 }}
         >
-          <View style={{ flex: 1 }}>
               <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>
@@ -2078,7 +2075,6 @@ export default function TripInfoScreen() {
                   );
                 }}
               />
-          </View>
         </DraggableBottomSheet>
       )}
 

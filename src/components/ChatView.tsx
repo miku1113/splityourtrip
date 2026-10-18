@@ -2789,7 +2789,6 @@ export default function ChatView({
           maxHeight="88%"
           sheetStyle={{ paddingBottom: 20 }}
         >
-          <View style={{ flex: 1 }}>
             <View style={styles.linkModalHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.linkModalTitle, { color: colors.text }]}>
@@ -2937,7 +2936,6 @@ export default function ChatView({
                 )}
               />
             )}
-          </View>
         </DraggableBottomSheet>
       )}
 
@@ -2946,10 +2944,9 @@ export default function ChatView({
         <DraggableBottomSheet
           visible={attachmentModalVisible}
           onClose={() => setAttachmentModalVisible(false)}
-          maxHeight="45%"
+          dragEntireSheet={true}
           sheetStyle={{ padding: 20 }}
         >
-          <View style={{ flex: 1 }}>
             <Text style={[styles.attachmentHeader, { color: colors.textSecondary }]}>
               SHARE TO CHAT
             </Text>
@@ -3012,7 +3009,6 @@ export default function ChatView({
                 <Text style={[styles.attachLabel, { color: colors.text }]}>Request Money</Text>
               </TouchableOpacity>
             </View>
-          </View>
         </DraggableBottomSheet>
       )}
 
@@ -3023,7 +3019,6 @@ export default function ChatView({
         maxHeight="88%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.payModalHeader}>
               <View>
                 <Text style={[styles.payModalTitle, { color: colors.text }]}>Pay / Settle Up</Text>
@@ -3181,7 +3176,6 @@ export default function ChatView({
                 </>
               )}
             </TouchableOpacity>
-          </View>
       </DraggableBottomSheet>
 
       {/* 2. Request Money / Select Amount to Receive Modal */}
@@ -3191,7 +3185,6 @@ export default function ChatView({
         maxHeight="88%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.payModalHeader}>
               <View>
                 <Text style={[styles.payModalTitle, { color: colors.text }]}>Request Money</Text>
@@ -3305,7 +3298,6 @@ export default function ChatView({
                 </>
               )}
             </TouchableOpacity>
-          </View>
       </DraggableBottomSheet>
 
       {/* Photo Full-Screen Modal Preview */}

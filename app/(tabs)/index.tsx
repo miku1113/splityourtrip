@@ -625,7 +625,6 @@ export default function MyTripsScreen() {
             paddingHorizontal: moderateScale(20),
           }}
         >
-          <View style={{ flex: 1 }}>
               {/* Stepper Progress Bar Header */}
               <View style={styles.stepperHeader}>
                 <View style={styles.stepIndicatorRow}>
@@ -1175,7 +1174,6 @@ export default function MyTripsScreen() {
                   </View>
                 </View>
               )}
-            </View>
         </DraggableBottomSheet>
       )}
 

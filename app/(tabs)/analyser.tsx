@@ -1739,7 +1739,6 @@ export default function AnalyserScreen() {
         maxHeight="85%"
         sheetStyle={{ paddingBottom: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Filters</Text>
@@ -1893,17 +1892,15 @@ export default function AnalyserScreen() {
                 <Text style={styles.modalApplyBtnText}>Apply Filters</Text>
               </TouchableOpacity>
             </View>
-        </View>
       </DraggableBottomSheet>
 
       {/* SORT MODAL ("short") */}
       <DraggableBottomSheet
         visible={sortModalVisible}
         onClose={() => setSortModalVisible(false)}
-        maxHeight="60%"
+        dragEntireSheet={true}
         sheetStyle={{ paddingBottom: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Sort By</Text>
@@ -1962,7 +1959,6 @@ export default function AnalyserScreen() {
                 );
               })}
             </View>
-        </View>
       </DraggableBottomSheet>
 
       {/* View All Group Trips Modal (Paginated by 10) */}
@@ -1973,7 +1969,6 @@ export default function AnalyserScreen() {
           maxHeight="88%"
           sheetStyle={{ paddingBottom: 20 }}
         >
-          <View style={{ flex: 1 }}>
               <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                 <View>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>
@@ -2092,7 +2087,6 @@ export default function AnalyserScreen() {
                   );
                 }}
               />
-          </View>
         </DraggableBottomSheet>
       )}
     </ScrollView>

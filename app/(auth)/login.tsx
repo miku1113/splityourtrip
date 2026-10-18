@@ -763,7 +763,6 @@ export default function LoginScreen() {
         maxHeight="80%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Select Country & Currency
@@ -834,7 +833,6 @@ export default function LoginScreen() {
                 );
               }}
             />
-        </View>
       </DraggableBottomSheet>
 
       {/* Forgot Password Modal */}
@@ -846,15 +844,13 @@ export default function LoginScreen() {
           setPendingNavigation(false);
         }}
         maxHeight="85%"
-        sheetStyle={{ padding: 24 }}
+        sheetStyle={{
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
+          padding: 24,
+          paddingBottom: Math.max(insets.bottom, 24) + 16,
+        }}
       >
-        <View style={{ flex: 1 }}>
-                  backgroundColor: colors.card,
-                  borderTopColor: colors.border,
-                  paddingBottom: Math.max(insets.bottom, 24) + 16,
-                },
-              ]}
-            >
               {/* Header */}
               <View style={styles.modalHeaderRow}>
                 <View style={{ flex: 1 }}>
@@ -1059,7 +1055,6 @@ export default function LoginScreen() {
                   </View>
                 </ScrollView>
               )}
-        </View>
       </DraggableBottomSheet>
     </KeyboardAvoidingView>
   );

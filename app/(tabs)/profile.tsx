@@ -490,7 +490,6 @@ export default function ProfileScreen() {
         maxHeight="80%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Select Preferred Currency
@@ -560,17 +559,15 @@ export default function ProfileScreen() {
                 );
               }}
             />
-        </View>
       </DraggableBottomSheet>
 
       {/* Photo Picker Modal */}
       <DraggableBottomSheet
         visible={photoPickerVisible}
         onClose={() => setPhotoPickerVisible(false)}
-        maxHeight="42%"
+        dragEntireSheet={true}
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Profile Photo</Text>
               <TouchableOpacity onPress={() => setPhotoPickerVisible(false)}>
@@ -631,7 +628,6 @@ export default function ProfileScreen() {
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             )}
-        </View>
       </DraggableBottomSheet>
     </KeyboardAvoidingView>
   );

@@ -241,12 +241,12 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
         visible={visible}
         onClose={handleClose}
         maxHeight="86%"
+        dragEntireSheet={step === 'choose_type'}
         sheetStyle={{
           paddingBottom: Math.max(insets.bottom, 20) + 16,
           paddingHorizontal: moderateScale(20),
         }}
       >
-        <View style={{ flex: 1 }}>
           {/* Header Bar */}
           <View style={styles.headerRow}>
             {step !== 'choose_type' ? (
@@ -804,7 +804,6 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
               )}
             </View>
           )}
-        </View>
       </DraggableBottomSheet>
     <BillScannerModal
       visible={showBillScanner}

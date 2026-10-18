@@ -329,6 +329,7 @@ export default function SettleUpModal({
     <DraggableBottomSheet
       visible={visible}
       onClose={onClose}
+      minHeight={450}
       maxHeight="92%"
       sheetStyle={{
         backgroundColor: colors.card,
@@ -336,7 +337,6 @@ export default function SettleUpModal({
         paddingBottom: Math.max(insets.bottom, 20),
       }}
     >
-      <View style={{ flex: 1 }}>
             {/* Header */}
             <View style={styles.sheetHeader}>
               <View style={{ flex: 1 }}>
@@ -751,7 +751,6 @@ export default function SettleUpModal({
                 </TouchableOpacity>
               </ScrollView>
             )}
-          </View>
     </DraggableBottomSheet>
   );
 }

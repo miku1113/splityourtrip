@@ -1359,10 +1359,9 @@ export default function TripSettingsScreen() {
       <DraggableBottomSheet
         visible={photoPickerVisible}
         onClose={() => setPhotoPickerVisible(false)}
-        maxHeight="40%"
+        dragEntireSheet={true}
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>Trip Cover Photo</Text>
               <TouchableOpacity onPress={() => setPhotoPickerVisible(false)}>
@@ -1397,7 +1396,6 @@ export default function TripSettingsScreen() {
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </TouchableOpacity>
-        </View>
       </DraggableBottomSheet>
 
       {/* Currency Modal */}
@@ -1410,7 +1408,6 @@ export default function TripSettingsScreen() {
         maxHeight="80%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>
                 Select Trip Currency
@@ -1481,7 +1478,6 @@ export default function TripSettingsScreen() {
                 );
               }}
             />
-        </View>
       </DraggableBottomSheet>
 
       {/* Add Member Modal */}
@@ -1491,7 +1487,6 @@ export default function TripSettingsScreen() {
         maxHeight="88%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>Add Member to Trip</Text>
@@ -1753,7 +1748,6 @@ export default function TripSettingsScreen() {
                 </TouchableOpacity>
               </View>
             )}
-        </View>
       </DraggableBottomSheet>
 
       {/* Link Guest Member Modal */}
@@ -1763,7 +1757,6 @@ export default function TripSettingsScreen() {
         maxHeight="88%"
         sheetStyle={{ padding: 20 }}
       >
-        <View style={{ flex: 1 }}>
             <View style={styles.modalHeaderRow}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.text }]} allowFontScaling={false}>
@@ -1937,7 +1930,6 @@ export default function TripSettingsScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-        </View>
       </DraggableBottomSheet>
     </View>
   );
