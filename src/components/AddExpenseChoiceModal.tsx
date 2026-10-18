@@ -240,8 +240,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
       <DraggableBottomSheet
         visible={visible}
         onClose={handleClose}
-        defaultHeight="56%"
-        maxHeight="90%"
+        defaultHeight="70%"
+        maxHeight="92%"
         sheetStyle={{
           paddingBottom: Math.max(insets.bottom, 20),
           paddingHorizontal: moderateScale(20),
@@ -280,7 +280,12 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
 
           {/* STEP 1: Two Options (Add to Trip OR Split with a Single Friend) */}
           {step === 'choose_type' && (
-            <View style={styles.optionsContainer}>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={styles.optionsContainer}
+              showsVerticalScrollIndicator={false}
+              bounces={true}
+            >
               <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
                 Choose how you want to split this expense:
               </Text>
@@ -409,7 +414,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           )}
 
           {/* STEP 2A: Trip Selector (Paginated by 10) */}
@@ -858,19 +863,20 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   optionsContainer: {
-    paddingVertical: moderateScale(12),
+    paddingVertical: moderateScale(8),
+    paddingBottom: moderateScale(28),
   },
   sectionSubtitle: {
     fontSize: scaleFont(14),
-    marginBottom: moderateScale(16),
+    marginBottom: moderateScale(14),
   },
   choiceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: moderateScale(16),
+    padding: moderateScale(14),
     borderRadius: 16,
     borderWidth: 1,
-    marginBottom: moderateScale(14),
+    marginBottom: moderateScale(11),
   },
   iconCircle: {
     width: moderateScale(48),
