@@ -329,16 +329,18 @@ export default function SettleUpModal({
     <DraggableBottomSheet
       visible={visible}
       onClose={onClose}
-      minHeight={450}
-      maxHeight="92%"
+      defaultHeight="56%"
+      maxHeight="90%"
       sheetStyle={{
         backgroundColor: colors.card,
         borderColor: colors.border,
         paddingBottom: Math.max(insets.bottom, 20),
       }}
     >
-            {/* Header */}
-            <View style={styles.sheetHeader}>
+      {({ isExpanded, snapOffset }) => (
+        <View style={{ flex: 1 }}>
+          {/* Header */}
+          <View style={styles.sheetHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sheetTitle, { color: colors.text }]}>
                   {step === 'select_target'
@@ -439,7 +441,11 @@ export default function SettleUpModal({
                   <FlatList
                     data={filteredTrips}
                     keyExtractor={item => item.id}
-                    contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{
+                      paddingHorizontal: 16,
+                      paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                    }}
                     renderItem={({ item }) => (
                       <TouchableOpacity
                         style={[styles.targetRow, { borderColor: colors.borderLight }]}
@@ -467,7 +473,11 @@ export default function SettleUpModal({
                   <FlatList
                     data={filteredFriends}
                     keyExtractor={item => item.id}
-                    contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{
+                      paddingHorizontal: 16,
+                      paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                    }}
                     renderItem={({ item }) => (
                       <TouchableOpacity
                         style={[styles.targetRow, { borderColor: colors.borderLight }]}
@@ -508,7 +518,11 @@ export default function SettleUpModal({
                 <FlatList
                   data={tripMembersList}
                   keyExtractor={item => item.id}
-                  contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{
+                    paddingHorizontal: 16,
+                    paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                  }}
                   renderItem={({ item }) => (
                     <TouchableOpacity
                       style={[styles.targetRow, { borderColor: colors.borderLight }]}
@@ -536,7 +550,10 @@ export default function SettleUpModal({
             {step === 'enter_details' && (
               <ScrollView
                 style={{ flex: 1 }}
-                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+                contentContainerStyle={{
+                  paddingHorizontal: 16,
+                  paddingBottom: isExpanded ? 36 : snapOffset + 36,
+                }}
                 keyboardShouldPersistTaps="handled"
               >
                 {/* Receiver Banner */}
@@ -751,6 +768,8 @@ export default function SettleUpModal({
                 </TouchableOpacity>
               </ScrollView>
             )}
+        </View>
+      )}
     </DraggableBottomSheet>
   );
 }
@@ -827,6 +846,12 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: scaleFont(14),
+  },
+  targetList: {
+    flex: 1,
+  },
+  detailsScroll: {
+    flex: 1,
   },
   targetRow: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
 import {
   Modal,
   View,
@@ -16,12 +16,42 @@ import { useTheme } from '../theme/useThemeStore';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
+export interface DraggableBottomSheetContextType {
+  isExpanded: boolean;
+  snapIndex: 0 | 1;
+  snapOffset: number;
+  maxHeight: number;
+  defaultHeight: number;
+  expand: () => void;
+  collapse: () => void;
+  close: () => void;
+  panHandlers: any;
+}
+
+export const DraggableBottomSheetContext = createContext<DraggableBottomSheetContextType>({
+  isExpanded: false,
+  snapIndex: 0,
+  snapOffset: 0,
+  maxHeight: 0,
+  defaultHeight: 0,
+  expand: () => {},
+  collapse: () => {},
+  close: () => {},
+  panHandlers: {},
+});
+
+export const useDraggableBottomSheet = () => useContext(DraggableBottomSheetContext);
+
 export interface DraggableBottomSheetProps {
   visible: boolean;
   onClose: () => void;
-  children: React.ReactNode;
+  children:
+    | React.ReactNode
+    | ((props: { isExpanded: boolean; snapIndex: 0 | 1; snapOffset: number }) => React.ReactNode);
   maxHeight?: number | string;
   minHeight?: number | string;
+  defaultHeight?: number | string;
+  initialHeight?: number | string;
   height?: number | string;
   sheetStyle?: StyleProp<ViewStyle>;
   overlayStyle?: StyleProp<ViewStyle>;
@@ -31,7 +61,18 @@ export interface DraggableBottomSheetProps {
   dragThreshold?: number;
   enableExpandUp?: boolean;
   dragEntireSheet?: boolean;
+  initialExpanded?: boolean;
+  onSnapChange?: (snap: 'default' | 'expanded') => void;
 }
+
+const resolveDimension = (val: number | string | undefined, defaultVal: number): number => {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string' && val.endsWith('%')) {
+    const pct = parseFloat(val) / 100;
+    return isNaN(pct) ? defaultVal : SCREEN_HEIGHT * pct;
+  }
+  return defaultVal;
+};
 
 export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
   visible,
@@ -39,6 +80,8 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
   children,
   maxHeight = '90%',
   minHeight,
+  defaultHeight,
+  initialHeight,
   height,
   sheetStyle,
   overlayStyle,
@@ -48,27 +91,71 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
   dragThreshold = 80,
   enableExpandUp = true,
   dragEntireSheet = false,
+  initialExpanded = false,
+  onSnapChange,
 }) => {
   const { colors } = useTheme();
   const [modalVisible, setModalVisible] = useState(visible);
+  const [isExpanded, setIsExpanded] = useState(initialExpanded);
+
+  // Check if snap points architecture is enabled (when defaultHeight or initialHeight is specified)
+  const hasSnapPoints = Boolean(defaultHeight || initialHeight);
+  const resolvedMaxHeight = resolveDimension(maxHeight, SCREEN_HEIGHT * 0.90);
+  const resolvedDefaultHeight = resolveDimension(defaultHeight || initialHeight, SCREEN_HEIGHT * 0.56);
+  const snapOffset = hasSnapPoints ? Math.max(0, resolvedMaxHeight - resolvedDefaultHeight) : 0;
 
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  // Track snap state: 0 = Default (Base content height), 1 = Expanded (pulled UP)
-  const currentSnap = useRef<0 | 1>(0);
+  // Track snap state: 0 = Default, 1 = Expanded
+  const currentSnap = useRef<0 | 1>(initialExpanded ? 1 : 0);
 
-  // Maximum distance the user can pull the sheet UP
+  // Maximum distance the user can pull the sheet UP for legacy auto-content mode
   const maxUpOffsetRef = useRef(180);
   const measuredHeightRef = useRef(0);
 
   // Track if dismissing animation is underway
   const isClosingRef = useRef(false);
 
+  const expand = () => {
+    if (isClosingRef.current) return;
+    currentSnap.current = 1;
+    setIsExpanded(true);
+    onSnapChange?.('expanded');
+    Animated.spring(translateY, {
+      toValue: 0,
+      damping: 22,
+      mass: 0.8,
+      stiffness: 260,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const collapse = () => {
+    if (isClosingRef.current) return;
+    currentSnap.current = 0;
+    setIsExpanded(false);
+    onSnapChange?.('default');
+    const targetY = hasSnapPoints ? snapOffset : 0;
+    Animated.spring(translateY, {
+      toValue: targetY,
+      damping: 22,
+      mass: 0.8,
+      stiffness: 260,
+      useNativeDriver: true,
+    }).start();
+  };
+
   const animateIn = () => {
     isClosingRef.current = false;
-    currentSnap.current = 0;
-    translateY.setValue(SCREEN_HEIGHT * 0.7);
+    const shouldStartExpanded = Boolean(initialExpanded);
+    currentSnap.current = shouldStartExpanded ? 1 : 0;
+    setIsExpanded(shouldStartExpanded);
+    onSnapChange?.(shouldStartExpanded ? 'expanded' : 'default');
+
+    const targetY = hasSnapPoints ? (shouldStartExpanded ? 0 : snapOffset) : 0;
+    translateY.setValue(SCREEN_HEIGHT);
+
     Animated.parallel([
       Animated.timing(backdropOpacity, {
         toValue: 1,
@@ -76,7 +163,7 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
         useNativeDriver: true,
       }),
       Animated.spring(translateY, {
-        toValue: 0,
+        toValue: targetY,
         damping: 24,
         mass: 0.8,
         stiffness: 280,
@@ -95,7 +182,7 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
         useNativeDriver: true,
       }),
       Animated.timing(translateY, {
-        toValue: SCREEN_HEIGHT * 0.9,
+        toValue: SCREEN_HEIGHT,
         duration: 200,
         useNativeDriver: true,
       }),
@@ -103,6 +190,7 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
       setModalVisible(false);
       isClosingRef.current = false;
       currentSnap.current = 0;
+      setIsExpanded(false);
       translateY.setValue(0);
       if (callback) callback();
       onClose();
@@ -118,76 +206,112 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
     } else if (modalVisible) {
       animateOut();
     }
-  }, [visible]);
+  }, [visible, initialExpanded]);
 
   // Shared move handler
   const handlePanMove = (_: any, gestureState: any) => {
-    const baseOffset = currentSnap.current === 1 ? -maxUpOffsetRef.current : 0;
-    const target = baseOffset + gestureState.dy;
+    if (hasSnapPoints) {
+      const baseOffset = currentSnap.current === 1 ? 0 : snapOffset;
+      const target = baseOffset + gestureState.dy;
 
-    if (target < -maxUpOffsetRef.current) {
-      // Past max expanded limit: apply gentle rubber-band resistance
-      const over = -maxUpOffsetRef.current - target;
-      translateY.setValue(-maxUpOffsetRef.current - over * 0.25);
+      if (target < 0) {
+        // Past expanded ceiling: gentle rubber-band resistance
+        translateY.setValue(target * 0.25);
+      } else {
+        // Smooth 1:1 tracking
+        translateY.setValue(target);
+      }
     } else {
-      // Smooth 1:1 tracking for both UP and DOWN movement
-      translateY.setValue(target);
+      // Legacy auto-content behavior
+      const baseOffset = currentSnap.current === 1 ? -maxUpOffsetRef.current : 0;
+      const target = baseOffset + gestureState.dy;
+
+      if (target < -maxUpOffsetRef.current) {
+        const over = -maxUpOffsetRef.current - target;
+        translateY.setValue(-maxUpOffsetRef.current - over * 0.25);
+      } else {
+        translateY.setValue(target);
+      }
     }
   };
 
   // Shared release handler
   const handlePanRelease = (_: any, gestureState: any) => {
-    const maxUp = maxUpOffsetRef.current;
-
-    if (currentSnap.current === 0) {
-      // Starting at DEFAULT (Base Height)
-      if (enableExpandUp && maxUp > 30 && (gestureState.dy < -45 || gestureState.vy < -0.35)) {
-        // Dragged or flicked UP -> Expand upward!
-        currentSnap.current = 1;
-        Animated.spring(translateY, {
-          toValue: -maxUp,
-          damping: 22,
-          mass: 0.8,
-          stiffness: 260,
-          useNativeDriver: true,
-        }).start();
-      } else if (gestureState.dy > dragThreshold || gestureState.vy > 0.5) {
-        // Dragged or flicked DOWN -> Dismiss!
-        animateOut();
+    if (hasSnapPoints) {
+      if (currentSnap.current === 0) {
+        // Starting at DEFAULT snap (snapOffset)
+        if (enableExpandUp && (gestureState.dy < -35 || gestureState.vy < -0.3)) {
+          // Dragged or flicked UP -> Expand!
+          expand();
+        } else if (gestureState.dy > dragThreshold || gestureState.vy > 0.5) {
+          // Dragged or flicked DOWN -> Dismiss!
+          animateOut();
+        } else {
+          // Settle back to DEFAULT
+          collapse();
+        }
       } else {
-        // Settle back to DEFAULT (Base Height)
-        currentSnap.current = 0;
-        Animated.spring(translateY, {
-          toValue: 0,
-          damping: 20,
-          stiffness: 300,
-          useNativeDriver: true,
-        }).start();
+        // Starting at EXPANDED snap (0)
+        if (gestureState.dy > snapOffset + 80 || gestureState.vy > 1.2) {
+          // Strong swipe down from top -> Dismiss directly!
+          animateOut();
+        } else if (gestureState.dy > 40 || gestureState.vy > 0.35) {
+          // Dragged DOWN -> Snap to DEFAULT
+          collapse();
+        } else {
+          // Settle back at EXPANDED
+          expand();
+        }
       }
     } else {
-      // Starting at EXPANDED (Pulled Up)
-      if (gestureState.dy > maxUp + 60 || gestureState.vy > 1.1) {
-        // Strong pull down from expanded -> Dismiss!
-        animateOut();
-      } else if (gestureState.dy > 45 || gestureState.vy > 0.35) {
-        // Pull down -> Return to DEFAULT (Base Height)
-        currentSnap.current = 0;
-        Animated.spring(translateY, {
-          toValue: 0,
-          damping: 22,
-          mass: 0.8,
-          stiffness: 260,
-          useNativeDriver: true,
-        }).start();
+      // Legacy auto-content behavior
+      const maxUp = maxUpOffsetRef.current;
+      if (currentSnap.current === 0) {
+        if (enableExpandUp && maxUp > 30 && (gestureState.dy < -45 || gestureState.vy < -0.35)) {
+          currentSnap.current = 1;
+          setIsExpanded(true);
+          Animated.spring(translateY, {
+            toValue: -maxUp,
+            damping: 22,
+            mass: 0.8,
+            stiffness: 260,
+            useNativeDriver: true,
+          }).start();
+        } else if (gestureState.dy > dragThreshold || gestureState.vy > 0.5) {
+          animateOut();
+        } else {
+          currentSnap.current = 0;
+          setIsExpanded(false);
+          Animated.spring(translateY, {
+            toValue: 0,
+            damping: 20,
+            stiffness: 300,
+            useNativeDriver: true,
+          }).start();
+        }
       } else {
-        // Settle back at EXPANDED
-        currentSnap.current = 1;
-        Animated.spring(translateY, {
-          toValue: -maxUp,
-          damping: 20,
-          stiffness: 300,
-          useNativeDriver: true,
-        }).start();
+        if (gestureState.dy > maxUp + 60 || gestureState.vy > 1.1) {
+          animateOut();
+        } else if (gestureState.dy > 45 || gestureState.vy > 0.35) {
+          currentSnap.current = 0;
+          setIsExpanded(false);
+          Animated.spring(translateY, {
+            toValue: 0,
+            damping: 22,
+            mass: 0.8,
+            stiffness: 260,
+            useNativeDriver: true,
+          }).start();
+        } else {
+          currentSnap.current = 1;
+          setIsExpanded(true);
+          Animated.spring(translateY, {
+            toValue: -maxUp,
+            damping: 20,
+            stiffness: 300,
+            useNativeDriver: true,
+          }).start();
+        }
       }
     }
   };
@@ -216,84 +340,107 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
 
   if (!modalVisible) return null;
 
-  const content = (
-    <View style={[styles.overlayContainer, overlayStyle]}>
-      {/* 1. Backdrop Touch Area: Clicking on the dark area outside closes the sheet */}
-      <TouchableWithoutFeedback onPress={() => animateOut()}>
-        <Animated.View
-          style={[
-            styles.backdrop,
-            {
-              opacity: backdropOpacity.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, 0.6],
-              }),
-            },
-          ]}
-        />
-      </TouchableWithoutFeedback>
+  const sheetH = hasSnapPoints ? resolvedMaxHeight : height;
+  const sheetMaxH = hasSnapPoints ? resolvedMaxHeight : maxHeight;
 
-      {/* 2. Draggable Bottom Sheet */}
-      <Animated.View
-        {...(dragEntireSheet ? sheetPanResponder.panHandlers : {})}
-        style={[
-          styles.sheetContainer,
-          {
-            backgroundColor: colors.card,
-            borderTopColor: colors.border,
-            maxHeight: maxHeight as any,
-            minHeight: minHeight as any,
-            height: height as any,
-            transform: [{ translateY }],
-          },
-          sheetStyle,
-        ]}
-      >
-        {/* Bottom overdraw filler so when pulled UP, no gap appears underneath */}
-        <View
+  const contextValue: DraggableBottomSheetContextType = {
+    isExpanded,
+    snapIndex: currentSnap.current,
+    snapOffset,
+    maxHeight: resolvedMaxHeight,
+    defaultHeight: resolvedDefaultHeight,
+    expand,
+    collapse,
+    close: animateOut,
+    panHandlers: handlePanResponder.panHandlers,
+  };
+
+  const content = (
+    <DraggableBottomSheetContext.Provider value={contextValue}>
+      <View style={[styles.overlayContainer, overlayStyle]}>
+        {/* 1. Backdrop Touch Area: Clicking on the dark area outside closes the sheet */}
+        <TouchableWithoutFeedback onPress={() => animateOut()}>
+          <Animated.View
+            style={[
+              styles.backdrop,
+              {
+                opacity: backdropOpacity.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 0.6],
+                }),
+              },
+            ]}
+          />
+        </TouchableWithoutFeedback>
+
+        {/* 2. Draggable Bottom Sheet */}
+        <Animated.View
+          {...(dragEntireSheet ? sheetPanResponder.panHandlers : {})}
           style={[
-            styles.bottomFiller,
+            styles.sheetContainer,
             {
               backgroundColor: colors.card,
+              borderTopColor: colors.border,
+              height: sheetH as any,
+              maxHeight: sheetMaxH as any,
+              minHeight: minHeight as any,
+              transform: [{ translateY }],
             },
+            sheetStyle,
           ]}
-          pointerEvents="none"
-        />
-
-        {/* Drag Handle Bar with generous hit zone that captures handlePanResponder */}
-        {showHandle && (
-          <View
-            style={styles.handleHitZone}
-            hitSlop={{ top: 16, bottom: 16, left: 40, right: 40 }}
-            {...handlePanResponder.panHandlers}
-          >
+        >
+          {/* Bottom overdraw filler ONLY needed when NOT hasSnapPoints */}
+          {!hasSnapPoints && (
             <View
               style={[
-                styles.handlePill,
+                styles.bottomFiller,
                 {
-                  backgroundColor: handleColor || colors.border,
+                  backgroundColor: colors.card,
                 },
               ]}
+              pointerEvents="none"
             />
-          </View>
-        )}
+          )}
 
-        {/* Content container with layout measurement for dynamic maxUp calculation */}
-        <View
-          onLayout={(e) => {
-            const h = e.nativeEvent.layout.height;
-            if (h > 60) {
-              measuredHeightRef.current = h;
-              // Space available between top of content and screen ceiling (leaving 80px top margin)
-              const availableUp = Math.max(0, SCREEN_HEIGHT - h - 100);
-              maxUpOffsetRef.current = Math.min(availableUp, SCREEN_HEIGHT * 0.5);
-            }
-          }}
-        >
-          {children}
-        </View>
-      </Animated.View>
-    </View>
+          {/* Drag Handle Bar with generous hit zone that captures handlePanResponder */}
+          {showHandle && (
+            <View
+              style={styles.handleHitZone}
+              hitSlop={{ top: 16, bottom: 16, left: 40, right: 40 }}
+              {...handlePanResponder.panHandlers}
+            >
+              <View
+                style={[
+                  styles.handlePill,
+                  {
+                    backgroundColor: handleColor || colors.border,
+                  },
+                ]}
+              />
+            </View>
+          )}
+
+          {/* Content container */}
+          <View
+            style={[styles.contentWrap, hasSnapPoints && { flex: 1 }]}
+            onLayout={(e) => {
+              if (!hasSnapPoints) {
+                const h = e.nativeEvent.layout.height;
+                if (h > 60) {
+                  measuredHeightRef.current = h;
+                  const availableUp = Math.max(0, SCREEN_HEIGHT - h - 100);
+                  maxUpOffsetRef.current = Math.min(availableUp, SCREEN_HEIGHT * 0.5);
+                }
+              }
+            }}
+          >
+            {typeof children === 'function'
+              ? (children as any)({ isExpanded, snapIndex: currentSnap.current, snapOffset })
+              : children}
+          </View>
+        </Animated.View>
+      </View>
+    </DraggableBottomSheetContext.Provider>
   );
 
   return (
@@ -340,6 +487,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.16,
     shadowRadius: 12,
     elevation: 20,
+    overflow: 'hidden',
   },
   bottomFiller: {
     position: 'absolute',
@@ -360,5 +508,8 @@ const styles = StyleSheet.create({
     height: 5,
     borderRadius: 3,
     opacity: 0.8,
+  },
+  contentWrap: {
+    width: '100%',
   },
 });

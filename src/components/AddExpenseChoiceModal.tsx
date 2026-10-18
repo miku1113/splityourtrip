@@ -240,15 +240,17 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
       <DraggableBottomSheet
         visible={visible}
         onClose={handleClose}
-        maxHeight="86%"
-        dragEntireSheet={step === 'choose_type'}
+        defaultHeight="56%"
+        maxHeight="90%"
         sheetStyle={{
-          paddingBottom: Math.max(insets.bottom, 20) + 16,
+          paddingBottom: Math.max(insets.bottom, 20),
           paddingHorizontal: moderateScale(20),
         }}
       >
-          {/* Header Bar */}
-          <View style={styles.headerRow}>
+        {({ isExpanded, snapOffset }) => (
+          <View style={{ flex: 1 }}>
+            {/* Header Bar */}
+            <View style={styles.headerRow}>
             {step !== 'choose_type' ? (
               <TouchableOpacity
                 style={styles.backButton}
@@ -474,6 +476,9 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                   data={paginatedTrips}
                   keyExtractor={item => item.id}
                   style={styles.scrollList}
+                  contentContainerStyle={{
+                    paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                  }}
                   showsVerticalScrollIndicator={false}
                   onEndReached={handleLoadMoreTrips}
                   onEndReachedThreshold={0.3}
@@ -701,6 +706,9 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                   data={paginatedFriends}
                   keyExtractor={item => item.id}
                   style={styles.scrollList}
+                  contentContainerStyle={{
+                    paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                  }}
                   showsVerticalScrollIndicator={false}
                   onEndReached={handleLoadMoreFriends}
                   onEndReachedThreshold={0.3}
@@ -804,6 +812,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
               )}
             </View>
           )}
+          </View>
+        )}
       </DraggableBottomSheet>
     <BillScannerModal
       visible={showBillScanner}
@@ -882,8 +892,8 @@ const styles = StyleSheet.create({
     fontSize: scaleFont(13),
   },
   listSection: {
-    paddingVertical: moderateScale(10),
-    maxHeight: moderateScale(440),
+    flex: 1,
+    paddingVertical: moderateScale(6),
   },
   searchBox: {
     flexDirection: 'row',
@@ -900,7 +910,7 @@ const styles = StyleSheet.create({
     fontSize: scaleFont(14),
   },
   scrollList: {
-    maxHeight: moderateScale(380),
+    flex: 1,
   },
   listItemRow: {
     flexDirection: 'row',
