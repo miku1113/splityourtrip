@@ -352,29 +352,47 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     // 4. Mask out 12-digit UPI transaction IDs / UTR
     norm = norm.replace(/\b\d{12}\b/g, ' ');
 
-    // 5. Mask out times (e.g. 11:02 PM, 14:32) and dates (e.g. 19-10-2026, 19/10/2026)
-    norm = norm.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm))?\b/gi, ' ');
+    // 5. Mask out times (e.g. 11:02 PM, 14:32, 11:34 pm) and full dates (numeric, dot, and written months)
+    norm = norm.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm|hrs))?\b/gi, ' ');
     norm = norm.replace(/\b\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}\b/g, ' ');
+    norm = norm.replace(/\b\d{1,2}\.\d{1,2}\.\d{2,4}\b/g, ' ');
+    norm = norm.replace(
+      /\b\d{1,2}(?:st|nd|rd|th)?[\s\-\/.](?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b(?:[\s\-\/.,]\d{2,4})?/gi,
+      ' '
+    );
+    norm = norm.replace(
+      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[-\/.\s]+\d{1,2}(?:st|nd|rd|th)?\b(?:[\s\-\/.,]\d{2,4})?/gi,
+      ' '
+    );
+    norm = norm.replace(/\b(?:dated?|on|at)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, ' ');
+    norm = norm.replace(/\b20[2-3]\d\b/g, ' ');
 
     // 6. Mask out obscured bank account / card numbers: •••• 1234, xxxx 5678
     norm = norm.replace(/[•x*.\-]{3,}\s*\d{3,6}\b/gi, ' ');
 
-    // 7. Remove currency symbols, trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >)
+    // 7. Normalize OCR misread thousand separators (. or space instead of ,)
+    // In INR and USD currency, numbers never have 3 decimal places.
+    // e.g. "25.000" -> "25,000", "1.45.000" -> "1,45,000", "25 000" -> "25,000"
+    norm = norm.replace(/\b(\d{1,2})\.(\d{2})\.(\d{3})(?!\d)/g, '$1,$2,$3');
+    norm = norm.replace(/\b(\d{1,3})\.(\d{3})(?!\d)/g, '$1,$2');
+    norm = norm.replace(/\b(\d{1,3})\s+(\d{3})(?!\d)/g, '$1,$2');
+
+    // 8. Remove currency symbols, checkmarks, trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V)
     norm = norm
-      .replace(/[₹\u20B9$€£]/g, ' ')
+      .replace(/[₹\u20B9$€£✓✔]/g, ' ')
       .replace(/\b(?:rs\.?|inr|inr\.?|rp|usd|eur|gbp)\b/gi, ' ')
-      .replace(/(?:^|\s)[?*#TFzrt>]\s*(?=\d)/g, ' ')
+      .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•:\-~'"]\s*(?=\d)/g, ' ')
       .replace(/[\/\-=:;|]+$/, '')
       .trim();
 
-    // 8. Match all number tokens:
+    // 9. Match all number tokens:
     // Supports:
     // - Indian format: 1,45,000.00 or 12,500.00 or 1,500.00
     // - Western format: 1,000,000.00
     // - Standard decimal: 450.50
-    // - European comma decimal: 450,50
+    // - European comma decimal: 450,50 (must not be followed by comma or another digit)
     // - Plain integer: 450
-    const numRegex = /\d[\d,]*\.\d{1,2}|\d+,\d{2}\b|\d[\d,]*/g;
+    const numRegex = /\d[\d,]*\.\d{1,2}|\d+,\d{2}(?!\d|,)\b|\d[\d,]*/g;
     const candidates: Array<{ paise: number; raw: string; hasDecimals: boolean }> = [];
     let m: RegExpExecArray | null;
 
@@ -461,7 +479,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       const afterKeyword = line.slice(match.index + match[0].length);
       const candidates = extractAmountCandidatesFromSlice(afterKeyword);
       if (candidates.length > 0) {
-        const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
+        const chosen = candidates.find(c => c.hasDecimals) || candidates.find(c => c.raw.includes(',')) || candidates[0];
         amountPaise = chosen.paise;
         amountConfidence = 0.99;
         break;
@@ -478,7 +496,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         }
         const nextCandidates = extractAmountCandidatesFromSlice(nextLine);
         if (nextCandidates.length > 0) {
-          const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates[0];
+          const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates.find(c => c.raw.includes(',')) || nextCandidates[0];
           amountPaise = chosen.paise;
           amountConfidence = 0.98;
           break;
@@ -500,7 +518,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         // In Google Pay:
         // Line i-1: ₹1,810.50 (or ? 1,810.50 or * 1,810.50 or 1,810.50 or 650)
         // Line i:   Completed • Oct 19, 2026, 11:02 PM
-        for (let j = i - 1; j >= Math.max(0, i - 2); j--) {
+        for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
           const prevLine = lines[j];
           if (
             /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking|to|from)\b/i.test(prevLine) ||
@@ -510,7 +528,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
           }
           const prevCandidates = extractAmountCandidatesFromSlice(prevLine);
           if (prevCandidates.length > 0) {
-            const chosen = prevCandidates.find(c => c.hasDecimals) || prevCandidates[0];
+            const chosen = prevCandidates.find(c => c.hasDecimals) || prevCandidates.find(c => c.raw.includes(',')) || prevCandidates[0];
             amountPaise = chosen.paise;
             amountConfidence = 0.99;
             break;
@@ -521,7 +539,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         // 2B. Check SAME line (e.g. "Paid ₹1,500 to Cafe Coffee Day" or "Payment to Rahul ₹60")
         const sameCandidates = extractAmountCandidatesFromSlice(line);
         if (sameCandidates.length > 0) {
-          const chosen = sameCandidates.find(c => c.hasDecimals) || sameCandidates[0];
+          const chosen = sameCandidates.find(c => c.hasDecimals) || sameCandidates.find(c => c.raw.includes(',')) || sameCandidates[0];
           amountPaise = chosen.paise;
           amountConfidence = 0.97;
           break;
@@ -530,14 +548,14 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         // 2C. Check lines IMMEDIATELY BELOW (Standard PhonePe / Super.money / Paytm Layout!)
         // Line i:   Payment Successful
         // Line i+1: ₹25
-        for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
+        for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
           const nextLine = lines[j];
           if (/^(?:upi|utr|txn|ref|from|to|google\s*transaction)\b/i.test(nextLine)) {
             continue;
           }
           const nextCandidates = extractAmountCandidatesFromSlice(nextLine);
           if (nextCandidates.length > 0) {
-            const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates[0];
+            const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates.find(c => c.raw.includes(',')) || nextCandidates[0];
             amountPaise = chosen.paise;
             amountConfidence = 0.96;
             break;
@@ -549,17 +567,17 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   }
 
   // Strategy 3: Dedicated Amount Line with Currency Symbol or Rupee OCR Glyph
-  // (₹, Rs, INR, or common OCR substitutes ?, *, T, F, z, r, > followed by numbers)
+  // (₹, Rs, INR, checkmark ✓, or common OCR substitutes ?, *, T, F, z, r, > followed by numbers)
   if (!amountPaise) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/(?:upi|utr|txn|ref|order|inv|tax|fssai|phone|tel)\b/i.test(line)) {
         continue;
       }
-      if (/(?:[₹\u20B9]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+(?:\.[0-9]{1,2})?/i.test(line)) {
+      if (/(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(line)) {
         const candidates = extractAmountCandidatesFromSlice(line);
         if (candidates.length > 0) {
-          const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
+          const chosen = candidates.find(c => c.hasDecimals) || candidates.find(c => c.raw.includes(',')) || candidates[0];
           amountPaise = chosen.paise;
           amountConfidence = 0.92;
           break;
@@ -585,7 +603,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       }
       const candidates = extractAmountCandidatesFromSlice(line);
       if (candidates.length > 0) {
-        const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
+        const chosen = candidates.find(c => c.hasDecimals) || candidates.find(c => c.raw.includes(',')) || candidates[0];
         amountPaise = chosen.paise;
         amountConfidence = 0.88;
         break;
@@ -606,7 +624,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         const afterKeyword = line.slice(match.index + match[0].length);
         const candidates = extractAmountCandidatesFromSlice(afterKeyword);
         if (candidates.length > 0) {
-          const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
+          const chosen = candidates.find(c => c.hasDecimals) || candidates.find(c => c.raw.includes(',')) || candidates[0];
           amountPaise = chosen.paise;
           amountConfidence = 0.95;
           break;
@@ -616,7 +634,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
           if (!/^[=\-_*#~.]+$/.test(nextLine) && !/\b(?:cash|tendered|change|items?|qty)\b/i.test(nextLine)) {
             const nextCandidates = extractAmountCandidatesFromSlice(nextLine);
             if (nextCandidates.length > 0) {
-              const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates[0];
+              const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates.find(c => c.raw.includes(',')) || nextCandidates[0];
               amountPaise = chosen.paise;
               amountConfidence = 0.94;
               break;

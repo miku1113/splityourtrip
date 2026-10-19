@@ -428,6 +428,32 @@ describe('UPI Parser', () => {
     expect(parsed.receiverName).toBe('Namma Yatri');
     expect(parsed.suggestedCategory).toBe('Tickets');
   });
+
+  test('extracts Google Pay ₹25,000 payment to Jainam Shah ignoring date (19 October 2026)', () => {
+    const gpayOcr = `
+      Google Pay
+      Paid to Jainam Shah
+      ₹25,000
+      Completed • 19 October 2026, 11:34 pm
+      UPI transaction ID: 629381726192
+    `;
+    const parsed = parseUpiReceipt(gpayOcr);
+    expect(parsed.app).toBe('gpay');
+    expect(parsed.amountPaise).toBe(2500000); // Must be ₹25,000 (2,500,000 paise), NOT ₹19 (1900 paise)!
+    expect(parsed.receiverName).toBe('Jainam Shah');
+    expect(parsed.upiTxnId).toBe('629381726192');
+  });
+
+  test('extracts ₹25,000 with OCR dot/space thousand separator or checkmark', () => {
+    const ocrWithDot = `
+      ✓ 25.000
+      Paid to Jainam Shah
+      19 October 2026
+    `;
+    const parsed = parseUpiReceipt(ocrWithDot);
+    expect(parsed.amountPaise).toBe(2500000);
+    expect(parsed.receiverName).toBe('Jainam Shah');
+  });
 });
 
 describe('WhatsApp Summary Message Generator', () => {
