@@ -16,7 +16,7 @@ export type { Trip, TripMember, Expense, ExpenseSplit } from '../../types/databa
 import { splitEqual } from '../../services/split';
 import { formatCurrencyAmount } from '../../services/currency';
 import { getContactNameByPhone, getEffectiveContactName, normalizeNameForMatch } from '../contacts/useContactsStore';
-import { uploadTripCoverImage } from '../../services/imageUpload';
+import { uploadTripCoverImage, persistLocalAttachment, uploadExpenseAttachment } from '../../services/imageUpload';
 
 // Universal helper to reliably find the active user's TripMember row without assuming admin
 export function findMyMember(
@@ -1623,8 +1623,34 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           (exp.paid_by && memberNameById.has(exp.paid_by) ? exp.paid_by : undefined) ||
           exp.paid_by;
 
+        const resolvedAttachmentUrl =
+          exp.attachment_url ||
+          localExp?.attachment_url ||
+          exp.screenshot_path ||
+          localExp?.screenshot_path ||
+          (exp as any).media_url ||
+          null;
+        const resolvedScreenshotPath =
+          exp.screenshot_path ||
+          localExp?.screenshot_path ||
+          exp.attachment_url ||
+          localExp?.attachment_url ||
+          null;
+        const resolvedAttachmentName =
+          exp.attachment_name ||
+          localExp?.attachment_name ||
+          (resolvedAttachmentUrl ? 'Receipt Photo' : null);
+        const resolvedAttachmentType =
+          exp.attachment_type ||
+          localExp?.attachment_type ||
+          (resolvedAttachmentUrl ? 'image' : null);
+
         return {
           ...exp,
+          attachment_url: resolvedAttachmentUrl,
+          screenshot_path: resolvedScreenshotPath,
+          attachment_name: resolvedAttachmentName,
+          attachment_type: resolvedAttachmentType,
           splits: bestSplits,
           payment_mode: exp.payment_mode || localExp?.payment_mode || 'upi',
           split_type: exp.split_type || metaSplitType || localExp?.split_type || 'equal',
@@ -1919,8 +1945,34 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             localExp?.paid_by ||
             (exp.paid_by && memberNameById.has(exp.paid_by) ? exp.paid_by : undefined) ||
             exp.paid_by;
+          const resolvedAttachmentUrl =
+            exp.attachment_url ||
+            localExp?.attachment_url ||
+            exp.screenshot_path ||
+            localExp?.screenshot_path ||
+            (exp as any).media_url ||
+            null;
+          const resolvedScreenshotPath =
+            exp.screenshot_path ||
+            localExp?.screenshot_path ||
+            exp.attachment_url ||
+            localExp?.attachment_url ||
+            null;
+          const resolvedAttachmentName =
+            exp.attachment_name ||
+            localExp?.attachment_name ||
+            (resolvedAttachmentUrl ? 'Receipt Photo' : null);
+          const resolvedAttachmentType =
+            exp.attachment_type ||
+            localExp?.attachment_type ||
+            (resolvedAttachmentUrl ? 'image' : null);
+
           return {
             ...exp,
+            attachment_url: resolvedAttachmentUrl,
+            screenshot_path: resolvedScreenshotPath,
+            attachment_name: resolvedAttachmentName,
+            attachment_type: resolvedAttachmentType,
             splits: bestSplits,
             payment_mode: exp.payment_mode || localExp?.payment_mode || 'upi',
             split_type: exp.split_type || metaSplitType || localExp?.split_type || 'equal',
@@ -2600,6 +2652,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     const newExpenseId = generateUUID();
     const creatorId = userId || payerProfileId || payerMember?.id || 'local_user';
+
+    // Persist local file to documentDirectory so it is never purged by OS cache cleaners
+    const permanentAttachmentUri = await persistLocalAttachment(data.attachmentUrl);
+    const resolvedAttachmentUrl = permanentAttachmentUri || data.attachmentUrl || null;
+    const resolvedAttachmentName = data.attachmentName || (resolvedAttachmentUrl ? 'Receipt Photo' : null);
+    const resolvedAttachmentType = data.attachmentType || (resolvedAttachmentUrl ? 'image' : null);
+
     const localExpense = {
       id: newExpenseId,
       trip_id: tripId,
@@ -2616,9 +2675,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       location: data.location || null,
       latitude: data.latitude || null,
       longitude: data.longitude || null,
-      attachment_url: data.attachmentUrl || null,
-      attachment_name: data.attachmentName || null,
-      attachment_type: data.attachmentType || null,
+      attachment_url: resolvedAttachmentUrl,
+      screenshot_path: resolvedAttachmentUrl,
+      attachment_name: resolvedAttachmentName,
+      attachment_type: resolvedAttachmentType,
       splits: computedSplits.map(s => ({
         id: generateUUID(),
         expense_id: newExpenseId,
@@ -2725,9 +2785,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             currency: 'INR',
             date: new Date().toISOString(),
             expense_date: new Date().toISOString(),
-            attachment_url: data.attachmentUrl || null,
-            attachment_name: data.attachmentName || null,
-            attachment_type: data.attachmentType || null,
+            attachment_url: resolvedAttachmentUrl,
+            screenshot_path: resolvedAttachmentUrl,
+            attachment_name: resolvedAttachmentName,
+            attachment_type: resolvedAttachmentType,
             location: data.location || null,
             latitude: data.latitude || null,
             longitude: data.longitude || null,
@@ -2853,9 +2914,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           location: data.location || null,
           latitude: data.latitude || null,
           longitude: data.longitude || null,
-          attachment_url: data.attachmentUrl || null,
-          attachment_name: data.attachmentName || null,
-          attachment_type: data.attachmentType || null,
+          attachment_url: resolvedAttachmentUrl,
+          screenshot_path: resolvedAttachmentUrl,
+          attachment_name: resolvedAttachmentName,
+          attachment_type: resolvedAttachmentType,
           date: new Date().toISOString(),
         },
       });
@@ -2867,6 +2929,26 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       await get().sendMessage(tripId, creatorId, creatorName, expensePayload);
     } catch (e: any) {
       console.log('Auto-chat notification error handled:', e?.message);
+    }
+
+    // Background upload attachment to Supabase storage if it's a local file
+    if (resolvedAttachmentUrl && (resolvedAttachmentUrl.startsWith('file:') || resolvedAttachmentUrl.startsWith('content:'))) {
+      uploadExpenseAttachment(tripId, newExpenseId, resolvedAttachmentUrl)
+        .then(async (remoteUrl) => {
+          if (remoteUrl && remoteUrl.startsWith('http')) {
+            if (isSupabaseConfigured && isValidUUID(tripId)) {
+              await supabaseAdmin.from('expenses').update({
+                attachment_url: remoteUrl,
+                screenshot_path: remoteUrl,
+              }).eq('id', newExpenseId);
+            }
+            const currentExps = get().expenses.map(e =>
+              e.id === newExpenseId ? { ...e, attachment_url: remoteUrl, screenshot_path: remoteUrl } : e
+            );
+            set({ expenses: currentExps });
+          }
+        })
+        .catch(() => {});
     }
 
     // Recompute friend balances in background so Friends list is always synchronized
@@ -2923,6 +3005,24 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const payerName = payerMember?.display_name || existingExpense.payerName || 'Member';
     const payerProfileId = payerMember?.profile_id || userId;
 
+    // Persist local file to documentDirectory so it is never purged by OS cache cleaners
+    let permanentAttachmentUri: string | null | undefined = undefined;
+    if (data.attachmentUrl !== undefined) {
+      permanentAttachmentUri = data.attachmentUrl ? await persistLocalAttachment(data.attachmentUrl) : null;
+    }
+    const resolvedAttachmentUrl =
+      permanentAttachmentUri !== undefined
+        ? permanentAttachmentUri
+        : (existingExpense.attachment_url || existingExpense.screenshot_path || null);
+    const resolvedAttachmentName =
+      data.attachmentName !== undefined
+        ? data.attachmentName
+        : (existingExpense.attachment_name || (resolvedAttachmentUrl ? 'Receipt Photo' : null));
+    const resolvedAttachmentType =
+      data.attachmentType !== undefined
+        ? data.attachmentType
+        : (existingExpense.attachment_type || (resolvedAttachmentUrl ? 'image' : null));
+
     const updatedExpense = {
       ...existingExpense,
       amount: amountPaise,
@@ -2935,9 +3035,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       location: data.location !== undefined ? data.location : existingExpense.location,
       latitude: data.latitude !== undefined ? data.latitude : existingExpense.latitude,
       longitude: data.longitude !== undefined ? data.longitude : existingExpense.longitude,
-      attachment_url: data.attachmentUrl !== undefined ? data.attachmentUrl : existingExpense.attachment_url,
-      attachment_name: data.attachmentName !== undefined ? data.attachmentName : existingExpense.attachment_name,
-      attachment_type: data.attachmentType !== undefined ? data.attachmentType : existingExpense.attachment_type,
+      attachment_url: resolvedAttachmentUrl,
+      screenshot_path: resolvedAttachmentUrl,
+      attachment_name: resolvedAttachmentName,
+      attachment_type: resolvedAttachmentType,
       splits: computedSplits.map(s => ({
         id: generateUUID(),
         expense_id: expenseId,
@@ -3012,9 +3113,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             location: data.location !== undefined ? data.location : undefined,
             latitude: data.latitude !== undefined ? data.latitude : undefined,
             longitude: data.longitude !== undefined ? data.longitude : undefined,
-            attachment_url: data.attachmentUrl !== undefined ? data.attachmentUrl : undefined,
-            attachment_name: data.attachmentName !== undefined ? data.attachmentName : undefined,
-            attachment_type: data.attachmentType !== undefined ? data.attachmentType : undefined,
+            attachment_url: resolvedAttachmentUrl !== undefined ? resolvedAttachmentUrl : undefined,
+            screenshot_path: resolvedAttachmentUrl !== undefined ? resolvedAttachmentUrl : undefined,
+            attachment_name: resolvedAttachmentName !== undefined ? resolvedAttachmentName : undefined,
+            attachment_type: resolvedAttachmentType !== undefined ? resolvedAttachmentType : undefined,
           })
           .eq('id', expenseId);
 
@@ -3075,9 +3177,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         location: data.location !== undefined ? data.location : existingExpense.location,
         latitude: data.latitude !== undefined ? data.latitude : existingExpense.latitude,
         longitude: data.longitude !== undefined ? data.longitude : existingExpense.longitude,
-        attachment_url: data.attachmentUrl !== undefined ? data.attachmentUrl : existingExpense.attachment_url,
-        attachment_name: data.attachmentName !== undefined ? data.attachmentName : existingExpense.attachment_name,
-        attachment_type: data.attachmentType !== undefined ? data.attachmentType : existingExpense.attachment_type,
+        attachment_url: resolvedAttachmentUrl,
+        screenshot_path: resolvedAttachmentUrl,
+        attachment_name: resolvedAttachmentName,
+        attachment_type: resolvedAttachmentType,
         date: existingExpense.date || new Date().toISOString(),
       };
 
@@ -3146,6 +3249,26 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       useContactsStore.getState().computeFriendBalances(get().trips, userId).catch(() => {});
       useContactsStore.getState().fetchFriendsSummary(userId).catch(() => {});
     } catch {}
+
+    // Background upload attachment to Supabase storage if it's a local file
+    if (permanentAttachmentUri && (permanentAttachmentUri.startsWith('file:') || permanentAttachmentUri.startsWith('content:'))) {
+      uploadExpenseAttachment(tripId, expenseId, permanentAttachmentUri)
+        .then(async (remoteUrl) => {
+          if (remoteUrl && remoteUrl.startsWith('http')) {
+            if (isSupabaseConfigured && isValidUUID(tripId) && isValidUUID(expenseId)) {
+              await supabaseAdmin.from('expenses').update({
+                attachment_url: remoteUrl,
+                screenshot_path: remoteUrl,
+              }).eq('id', expenseId);
+            }
+            const currentExps = get().expenses.map(e =>
+              e.id === expenseId ? { ...e, attachment_url: remoteUrl, screenshot_path: remoteUrl } : e
+            );
+            set({ expenses: currentExps });
+          }
+        })
+        .catch(() => {});
+    }
 
     return true;
   },

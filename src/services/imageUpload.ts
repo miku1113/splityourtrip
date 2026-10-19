@@ -99,6 +99,67 @@ export async function uploadImageToSupabase(
 }
 
 /**
+ * Persists an image or document locally to FileSystem.documentDirectory
+ * so that it is never purged by Android or iOS OS cache cleaners.
+ */
+export async function persistLocalAttachment(uri: string | null | undefined): Promise<string | null> {
+  if (!uri) return null;
+  if (
+    uri.startsWith('http://') ||
+    uri.startsWith('https://') ||
+    uri.startsWith('data:')
+  ) {
+    return uri;
+  }
+  if (Platform.OS === 'web') return uri;
+
+  try {
+    const docDir = FileSystem.documentDirectory;
+    if (!docDir) return uri;
+    if (uri.startsWith(docDir)) return uri;
+
+    const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
+    const cleanExt = ext.length <= 5 ? ext.toLowerCase() : 'jpg';
+    const targetPath = `${docDir}receipt_${Date.now()}_${Math.floor(Math.random() * 10000)}.${cleanExt}`;
+    await FileSystem.copyAsync({ from: uri, to: targetPath });
+    return targetPath;
+  } catch (e) {
+    console.warn('Could not copy receipt to documentDirectory:', e);
+    return uri;
+  }
+}
+
+/**
+ * Uploads an expense screenshot / receipt / ticket to Supabase Storage and returns its permanent URL.
+ */
+export async function uploadExpenseAttachment(
+  tripId: string,
+  expenseId: string,
+  imageUri: string | null | undefined,
+  customMimeType?: string
+): Promise<string | null> {
+  if (!imageUri) return null;
+  if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
+    return imageUri;
+  }
+
+  const ext = imageUri.split('.').pop()?.split('?')[0] || 'jpg';
+  const cleanExt = ext.length <= 4 ? ext.toLowerCase() : 'jpg';
+  const mimeType =
+    customMimeType ||
+    (cleanExt === 'pdf'
+      ? 'application/pdf'
+      : cleanExt === 'png'
+      ? 'image/png'
+      : 'image/jpeg');
+  const fileName = `expense_${tripId}_${expenseId}_${Date.now()}.${cleanExt}`;
+  const storagePath = `expense_receipts/${fileName}`;
+
+  const uploadedUrl = await uploadImageToSupabase('attachments', storagePath, imageUri, mimeType);
+  return uploadedUrl || imageUri;
+}
+
+/**
  * Uploads a trip cover image to Supabase Storage and returns its permanent URL.
  */
 export async function uploadTripCoverImage(tripId: string, imageUri: string | null): Promise<string | null> {

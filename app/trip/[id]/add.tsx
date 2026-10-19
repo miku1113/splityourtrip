@@ -182,9 +182,14 @@ export default function AddExpenseScreen() {
   const [fetchingLocation, setFetchingLocation] = useState(false);
 
   // Ticket / Receipt / Document attachment state
-  const [attachmentUri, setAttachmentUri] = useState<string | null>(
-    existingExpense?.attachment_url || paramAttachmentUri || null
-  );
+  const initialAttachment =
+    existingExpense?.attachment_url ||
+    existingExpense?.screenshot_path ||
+    (existingExpense as any)?.media_url ||
+    paramAttachmentUri ||
+    null;
+
+  const [attachmentUri, setAttachmentUri] = useState<string | null>(initialAttachment);
   const [attachmentName, setAttachmentName] = useState<string | null>(
     existingExpense?.attachment_name ||
       (paramAttachmentUri
@@ -192,8 +197,18 @@ export default function AddExpenseScreen() {
         : null)
   );
   const [attachmentType, setAttachmentType] = useState<'image' | 'pdf' | 'doc' | null>(
-    (existingExpense?.attachment_type as any) || (paramAttachmentUri ? 'image' : null)
+    (existingExpense?.attachment_type as any) || (initialAttachment ? 'image' : null)
   );
+
+  React.useEffect(() => {
+    if (paramAttachmentUri) {
+      setAttachmentUri(paramAttachmentUri);
+      setAttachmentType('image');
+      setAttachmentName(
+        `Payment_Screenshot_${(paramPaymentApp || 'upi').replace(/[^a-zA-Z0-9]/g, '')}.jpg`
+      );
+    }
+  }, [paramAttachmentUri, paramPaymentApp]);
 
   const handleScanComplete = (scanned: ScannedBillResult) => {
     if (scanned.amount) {
@@ -311,9 +326,13 @@ export default function AddExpenseScreen() {
       setPaymentMode((existingExpense.payment_mode as PaymentMode) || 'upi');
       setSplitType((existingExpense.split_type as SplitType) || 'equal');
       if (existingExpense.paid_by) setPaidBy(existingExpense.paid_by);
-      if (existingExpense.attachment_url) {
-        setAttachmentUri(existingExpense.attachment_url);
-        setAttachmentName(existingExpense.attachment_name || 'Attached File');
+      const existingAttachment =
+        existingExpense.attachment_url ||
+        existingExpense.screenshot_path ||
+        (existingExpense as any).media_url;
+      if (existingAttachment) {
+        setAttachmentUri(existingAttachment);
+        setAttachmentName(existingExpense.attachment_name || 'Receipt Photo');
         setAttachmentType((existingExpense.attachment_type as any) || 'image');
       }
       if (existingExpense.splits && existingExpense.splits.length > 0) {
@@ -599,8 +618,8 @@ export default function AddExpenseScreen() {
         </View>
       )}
 
-      {/* Auto-detected Receipt Banner if Scanned */}
-      {attachmentUri && (detectedApp || paramPaymentApp || upiTxnId) && (
+      {/* Auto-detected Receipt Banner if Scanned or Attached */}
+      {Boolean(attachmentUri) && (
         <View
           style={[
             styles.ocrBannerCard,
@@ -611,7 +630,11 @@ export default function AddExpenseScreen() {
           ]}
         >
           <View style={styles.ocrBannerLeft}>
-            <Image source={{ uri: attachmentUri }} style={styles.ocrThumb} />
+            <Image
+              source={{ uri: attachmentUri }}
+              style={styles.ocrThumb}
+              resizeMode="cover"
+            />
             <View style={{ flex: 1, marginLeft: 10 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Ionicons name="sparkles" size={14} color={colors.primary} />
@@ -628,7 +651,11 @@ export default function AddExpenseScreen() {
                 <Text style={[styles.ocrUpiText, { color: colors.textSecondary }]} numberOfLines={1}>
                   UPI Ref: {upiTxnId}
                 </Text>
-              ) : null}
+              ) : (
+                <Text style={[styles.ocrUpiText, { color: colors.textSecondary }]} numberOfLines={1}>
+                  Attached to this expense
+                </Text>
+              )}
             </View>
           </View>
         </View>
@@ -929,8 +956,8 @@ export default function AddExpenseScreen() {
               { backgroundColor: colors.card, borderColor: colors.border },
             ]}
           >
-            {attachmentType === 'image' ? (
-              <Image source={{ uri: attachmentUri }} style={styles.attachmentThumbImage} />
+            {attachmentType === 'image' || !attachmentType || !attachmentType.match(/pdf|doc/i) ? (
+              <Image source={{ uri: attachmentUri }} style={styles.attachmentThumbImage} resizeMode="cover" />
             ) : (
               <View style={[styles.attachmentDocIcon, { backgroundColor: colors.dangerBg }]}>
                 <Ionicons

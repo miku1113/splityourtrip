@@ -139,6 +139,14 @@ export default function BillDetailScreen() {
   };
 
   const handleOpenAttachment = (url: string) => {
+    if (
+      !url.toLowerCase().endsWith('.pdf') &&
+      !url.toLowerCase().endsWith('.doc') &&
+      !url.toLowerCase().endsWith('.docx')
+    ) {
+      setSelectedImagePreview(url);
+      return;
+    }
     Linking.openURL(url).catch(() => {
       Alert.alert('File', 'Unable to open file preview on this device.');
     });
@@ -253,9 +261,15 @@ export default function BillDetailScreen() {
         setEditParticipants(tripMembers.map(m => m.id));
       }
 
-      if (expense.attachment_url) {
-        setEditAttachmentUrl(expense.attachment_url);
-        setEditAttachmentName(expense.attachment_name || 'Attached File');
+      const effectiveAttachment =
+        expense.attachment_url ||
+        expense.screenshot_path ||
+        (expense as any).attachmentUrl ||
+        (expense as any).media_url;
+
+      if (effectiveAttachment) {
+        setEditAttachmentUrl(effectiveAttachment);
+        setEditAttachmentName(expense.attachment_name || 'Receipt Photo');
         setEditAttachmentType((expense.attachment_type as any) || 'image');
       } else {
         setEditAttachmentUrl(null);
@@ -809,82 +823,102 @@ export default function BillDetailScreen() {
             </>
           )}
 
-          {/* Attached Bill / Ticket / Document */}
-          {Boolean(expense.attachment_url) && (
-            <>
-              <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
-                ATTACHED BILL / TICKET / DOCUMENT
-              </Text>
-              <View
-                style={[
-                  styles.infoCard,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                ]}
-              >
-                {expense.attachment_type === 'image' || expense.attachment_url?.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i) ? (
-                  <View style={styles.attachmentViewWrapper}>
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => setSelectedImagePreview(expense.attachment_url)}
-                      style={styles.attachmentImageContainer}
-                    >
-                      <Image
-                        source={{ uri: expense.attachment_url }}
-                        style={styles.attachmentViewImage}
-                        resizeMode="cover"
-                      />
-                      <View style={styles.imageEnlargeOverlay}>
-                        <Ionicons name="expand-outline" size={15} color="#FFFFFF" />
-                        <Text style={styles.imageEnlargeText}>Tap to preview</Text>
+          {/* Attached Bill / Ticket / Document / Screenshot */}
+          {(() => {
+            const effectiveAttachmentUri =
+              expense.attachment_url ||
+              expense.screenshot_path ||
+              (expense as any).attachmentUrl ||
+              (expense as any).media_url ||
+              null;
+
+            if (!effectiveAttachmentUri) return null;
+
+            const isExplicitDoc = Boolean(
+              expense.attachment_type === 'pdf' ||
+              expense.attachment_type === 'doc' ||
+              effectiveAttachmentUri.toLowerCase().endsWith('.pdf') ||
+              effectiveAttachmentUri.toLowerCase().endsWith('.doc') ||
+              effectiveAttachmentUri.toLowerCase().endsWith('.docx')
+            );
+            const isAttachmentImage = !isExplicitDoc;
+
+            return (
+              <>
+                <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+                  {isAttachmentImage ? 'PAYMENT SCREENSHOT / RECEIPT' : 'ATTACHED BILL / TICKET / DOCUMENT'}
+                </Text>
+                <View
+                  style={[
+                    styles.infoCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  {isAttachmentImage ? (
+                    <View style={styles.attachmentViewWrapper}>
+                      <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={() => setSelectedImagePreview(effectiveAttachmentUri)}
+                        style={styles.attachmentImageContainer}
+                      >
+                        <Image
+                          source={{ uri: effectiveAttachmentUri }}
+                          style={styles.attachmentViewImage}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.imageEnlargeOverlay}>
+                          <Ionicons name="expand-outline" size={15} color="#FFFFFF" />
+                          <Text style={styles.imageEnlargeText}>Tap to preview</Text>
+                        </View>
+                      </TouchableOpacity>
+                      <View style={styles.attachmentMetaRow}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={[styles.attachmentViewTitle, { color: colors.text }]} numberOfLines={1}>
+                            {expense.attachment_name || 'Receipt Photo'}
+                          </Text>
+                          <Text style={[styles.attachmentViewSubtitle, { color: colors.textMuted }]}>
+                            Payment Screenshot / Receipt
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.attachmentOpenBtn, { backgroundColor: colors.primaryLight }]}
+                          onPress={() => setSelectedImagePreview(effectiveAttachmentUri)}
+                        >
+                          <Ionicons name="eye-outline" size={15} color={colors.primary} />
+                          <Text style={[styles.attachmentOpenBtnText, { color: colors.primary }]}>View</Text>
+                        </TouchableOpacity>
                       </View>
-                    </TouchableOpacity>
-                    <View style={styles.attachmentMetaRow}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
+                    </View>
+                  ) : (
+                    <View style={styles.attachmentDocRow}>
+                      <View style={[styles.attachmentDocIconBig, { backgroundColor: colors.dangerBg }]}>
+                        <Ionicons
+                          name={expense.attachment_type === 'pdf' ? 'document-text' : 'document-attach'}
+                          size={26}
+                          color={colors.danger}
+                        />
+                      </View>
+                      <View style={{ flex: 1, marginHorizontal: 10 }}>
                         <Text style={[styles.attachmentViewTitle, { color: colors.text }]} numberOfLines={1}>
-                          {expense.attachment_name || 'Receipt Photo'}
+                          {expense.attachment_name || 'Attached Ticket / Document'}
                         </Text>
                         <Text style={[styles.attachmentViewSubtitle, { color: colors.textMuted }]}>
-                          Receipt / Bill Photo
+                          {expense.attachment_type === 'pdf' ? 'PDF Ticket / Document' : 'Document File'}
                         </Text>
                       </View>
                       <TouchableOpacity
-                        style={[styles.attachmentOpenBtn, { backgroundColor: colors.primaryLight }]}
-                        onPress={() => handleOpenAttachment(expense.attachment_url)}
+                        style={[styles.attachmentOpenBtn, { backgroundColor: colors.primary }]}
+                        onPress={() => handleOpenAttachment(effectiveAttachmentUri)}
                       >
-                        <Ionicons name="open-outline" size={15} color={colors.primary} />
-                        <Text style={[styles.attachmentOpenBtnText, { color: colors.primary }]}>Open</Text>
+                        <Ionicons name="download-outline" size={15} color="#FFFFFF" />
+                        <Text style={[styles.attachmentOpenBtnText, { color: '#FFFFFF' }]}>Open</Text>
                       </TouchableOpacity>
                     </View>
-                  </View>
-                ) : (
-                  <View style={styles.attachmentDocRow}>
-                    <View style={[styles.attachmentDocIconBig, { backgroundColor: colors.dangerBg }]}>
-                      <Ionicons
-                        name={expense.attachment_type === 'pdf' ? 'document-text' : 'document-attach'}
-                        size={26}
-                        color={colors.danger}
-                      />
-                    </View>
-                    <View style={{ flex: 1, marginHorizontal: 10 }}>
-                      <Text style={[styles.attachmentViewTitle, { color: colors.text }]} numberOfLines={1}>
-                        {expense.attachment_name || 'Attached Ticket / Document'}
-                      </Text>
-                      <Text style={[styles.attachmentViewSubtitle, { color: colors.textMuted }]}>
-                        {expense.attachment_type === 'pdf' ? 'PDF Ticket / Document' : 'Document File'}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={[styles.attachmentOpenBtn, { backgroundColor: colors.primary }]}
-                      onPress={() => handleOpenAttachment(expense.attachment_url)}
-                    >
-                      <Ionicons name="download-outline" size={15} color="#FFFFFF" />
-                      <Text style={[styles.attachmentOpenBtnText, { color: '#FFFFFF' }]}>Open</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            </>
-          )}
+                  )}
+                </View>
+              </>
+            );
+          })()}
 
           {/* Paid By Section */}
           <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
@@ -1287,8 +1321,8 @@ export default function BillDetailScreen() {
                 { backgroundColor: colors.card, borderColor: colors.border },
               ]}
             >
-              {editAttachmentType === 'image' ? (
-                <Image source={{ uri: editAttachmentUrl }} style={styles.attachmentThumbImage} />
+              {editAttachmentType === 'image' || !editAttachmentType || !editAttachmentType.match(/pdf|doc/i) ? (
+                <Image source={{ uri: editAttachmentUrl }} style={styles.attachmentThumbImage} resizeMode="cover" />
               ) : (
                 <View style={[styles.attachmentDocIcon, { backgroundColor: colors.dangerBg }]}>
                   <Ionicons

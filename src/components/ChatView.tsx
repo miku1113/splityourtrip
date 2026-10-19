@@ -798,6 +798,11 @@ export default function ChatView({
             split_count: expSplits.length || tMembers.length,
             category: exp.category || 'General',
             impact_paise: impactPaise,
+            attachment_url: exp.attachment_url || exp.screenshot_path || (exp as any).media_url || null,
+            screenshot_path: exp.screenshot_path || exp.attachment_url || (exp as any).media_url || null,
+            attachment_name: exp.attachment_name || (exp.attachment_url || exp.screenshot_path ? 'Receipt Photo' : null),
+            attachment_type: exp.attachment_type || (exp.attachment_url || exp.screenshot_path ? 'image' : null),
+            location: exp.location || null,
             date: exp.created_at || exp.date || new Date().toISOString(),
           },
           created_at: exp.created_at || exp.date || new Date().toISOString(),
@@ -1009,6 +1014,11 @@ export default function ChatView({
             paid_by_id: exp.paid_by,
             split_count: exp.splits?.length || tripMembers.length || 2,
             category: exp.category || 'General',
+            attachment_url: exp.attachment_url || exp.screenshot_path || (exp as any).media_url || null,
+            screenshot_path: exp.screenshot_path || exp.attachment_url || (exp as any).media_url || null,
+            attachment_name: exp.attachment_name || (exp.attachment_url || exp.screenshot_path ? 'Receipt Photo' : null),
+            attachment_type: exp.attachment_type || (exp.attachment_url || exp.screenshot_path ? 'image' : null),
+            location: exp.location || null,
             date: exp.created_at || exp.date || new Date().toISOString(),
           },
           created_at: exp.created_at || exp.date || new Date().toISOString(),
@@ -1103,6 +1113,20 @@ export default function ChatView({
               paid_by_name:
                 localExp.payerName ||
                 (isPayerMe ? 'You' : (friendMem?.display_name || displayTitle)),
+              attachment_url:
+                localExp.attachment_url ||
+                localExp.screenshot_path ||
+                (localExp as any).media_url ||
+                m.expense_data?.attachment_url ||
+                null,
+              screenshot_path:
+                localExp.screenshot_path ||
+                localExp.attachment_url ||
+                (localExp as any).media_url ||
+                m.expense_data?.screenshot_path ||
+                null,
+              attachment_name: localExp.attachment_name || m.expense_data?.attachment_name || null,
+              attachment_type: localExp.attachment_type || m.expense_data?.attachment_type || null,
             },
           };
         }
@@ -2369,14 +2393,49 @@ export default function ChatView({
                           </Text>
                         </View>
                       ) : null}
-                      {exp.attachment_url ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 3 }}>
-                          <Ionicons name="attach" size={12} color={colors.primary} />
-                          <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
-                            {exp.attachment_name || (exp.attachment_type === 'image' ? 'Receipt Photo' : 'Ticket / Document')}
-                          </Text>
-                        </View>
-                      ) : null}
+                      {(() => {
+                        const cardAttachment =
+                          exp.attachment_url ||
+                          exp.screenshot_path ||
+                          (exp as any).media_url ||
+                          (exp as any).attachmentUrl;
+                        if (!cardAttachment) return null;
+                        const isDoc =
+                          exp.attachment_type === 'pdf' ||
+                          exp.attachment_type === 'doc' ||
+                          cardAttachment.toLowerCase().endsWith('.pdf') ||
+                          cardAttachment.toLowerCase().endsWith('.doc') ||
+                          cardAttachment.toLowerCase().endsWith('.docx');
+                        return (
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => {
+                              if (!isDoc) {
+                                setSelectedPhotoPreview(cardAttachment);
+                              } else {
+                                handleOpenDoc(cardAttachment);
+                              }
+                            }}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              marginTop: 4,
+                              gap: 4,
+                              backgroundColor: colors.primaryLight,
+                              alignSelf: 'flex-start',
+                              paddingHorizontal: 7,
+                              paddingVertical: 3,
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Ionicons name={isDoc ? 'document-text' : 'image'} size={12} color={colors.primary} />
+                            <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }} numberOfLines={1}>
+                              {exp.attachment_name || (isDoc ? 'Ticket / Document' : 'Receipt Screenshot')}
+                            </Text>
+                            <Ionicons name="eye-outline" size={11} color={colors.primary} style={{ marginLeft: 2 }} />
+                          </TouchableOpacity>
+                        );
+                      })()}
                     </View>
                     <Text style={[styles.expenseCardAmount, { color: colors.primary }]}>
                       {formatCurrencyAmount(exp.amount, exp.currency || currentTrip?.currency)}
