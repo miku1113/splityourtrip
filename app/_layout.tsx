@@ -213,6 +213,7 @@ export default function RootLayout() {
           <Stack.Screen name="add-expense" options={{ headerShown: false }} />
           <Stack.Screen name="add-trip" options={{ headerShown: false }} />
           <Stack.Screen name="add-contact" options={{ headerShown: false }} />
+          <Stack.Screen name="all-expenses" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
         </Stack>
       </ThemeProvider>

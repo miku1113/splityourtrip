@@ -33,6 +33,7 @@ import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet'
 
 const PAGE_SIZE = 10;
 const INLINE_TRIPS_LIMIT = 5;
+const INLINE_EXPENSES_LIMIT = 10;
 
 const CATEGORY_ICONS: Record<string, { icon: any; color: string; bg: string }> = {
   Food: { icon: 'fast-food', color: '#F59E0B', bg: '#FEF3C7' },
@@ -1482,22 +1483,46 @@ export default function AnalyserScreen() {
       {showTransactionsSection && (
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderWithAction}>
-            <View>
+            <View style={{ flex: 1, marginRight: 8 }}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
                 Expenses Explorer ({filteredAndSortedExpenses.length})
               </Text>
               <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
-                Sorted by {SORT_OPTIONS.find(s => s.id === selectedSort)?.label}
+                {filteredAndSortedExpenses.length > INLINE_EXPENSES_LIMIT
+                  ? `Showing first 10 • Sorted by ${SORT_OPTIONS.find(s => s.id === selectedSort)?.label}`
+                  : `Sorted by ${SORT_OPTIONS.find(s => s.id === selectedSort)?.label}`}
               </Text>
             </View>
-            {activeFiltersCount > 0 && (
-              <TouchableOpacity
-                style={[styles.clearCatChip, { backgroundColor: colors.dangerBg }]}
-                onPress={resetAllFilters}
-              >
-                <Text style={[styles.clearCatText, { color: colors.danger }]}>Clear Filters</Text>
-              </TouchableOpacity>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {activeFiltersCount > 0 && (
+                <TouchableOpacity
+                  style={[styles.clearCatChip, { backgroundColor: colors.dangerBg }]}
+                  onPress={resetAllFilters}
+                >
+                  <Text style={[styles.clearCatText, { color: colors.danger }]}>Clear</Text>
+                </TouchableOpacity>
+              )}
+              {filteredAndSortedExpenses.length > INLINE_EXPENSES_LIMIT && (
+                <TouchableOpacity
+                  style={[styles.viewMoreTopBtn, { backgroundColor: colors.primaryLight }]}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/all-expenses',
+                      params: {
+                        search: searchQuery || undefined,
+                        category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
+                        sort: selectedSort,
+                      },
+                    })
+                  }
+                >
+                  <Text style={[styles.viewMoreTopText, { color: colors.primary }]}>
+                    View All ({filteredAndSortedExpenses.length})
+                  </Text>
+                  <Ionicons name="arrow-forward" size={14} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           {filteredAndSortedExpenses.length === 0 ? (
@@ -1517,9 +1542,11 @@ export default function AnalyserScreen() {
             </View>
           ) : (
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              {filteredAndSortedExpenses.map((exp, idx) => {
+              {filteredAndSortedExpenses.slice(0, INLINE_EXPENSES_LIMIT).map((exp, idx) => {
                 const meta = CATEGORY_ICONS[exp.category] || CATEGORY_ICONS.General;
-                const isLast = idx === filteredAndSortedExpenses.length - 1;
+                const isLast =
+                  idx === Math.min(filteredAndSortedExpenses.length, INLINE_EXPENSES_LIMIT) - 1 &&
+                  filteredAndSortedExpenses.length <= INLINE_EXPENSES_LIMIT;
                 return (
                   <TouchableOpacity
                     key={exp.id || idx}
@@ -1609,6 +1636,35 @@ export default function AnalyserScreen() {
                   </TouchableOpacity>
                 );
               })}
+
+              {filteredAndSortedExpenses.length > INLINE_EXPENSES_LIMIT && (
+                <TouchableOpacity
+                  style={[
+                    styles.viewMoreCardBtn,
+                    {
+                      backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
+                      borderTopWidth: 1,
+                      borderTopColor: colors.borderLight,
+                      marginTop: 6,
+                    },
+                  ]}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/all-expenses',
+                      params: {
+                        search: searchQuery || undefined,
+                        category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
+                        sort: selectedSort,
+                      },
+                    })
+                  }
+                >
+                  <Text style={[styles.viewMoreCardBtnText, { color: colors.primary }]}>
+                    View All Expenses ({filteredAndSortedExpenses.length})
+                  </Text>
+                  <Ionicons name="arrow-forward" size={15} color={colors.primary} />
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
