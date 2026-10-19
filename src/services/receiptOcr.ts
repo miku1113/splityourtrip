@@ -218,7 +218,9 @@ export async function extractPaymentFromScreenshot(
 ): Promise<OcrResult> {
   const rawText = await recognizeTextFromImage(imageUri);
   const combined = additionalText ? `${rawText}\n\n${additionalText}` : rawText;
+  console.log('[receiptOcr] RAW OCR TEXT:\n' + combined);
   const parsed = parseUpiReceipt(combined);
+  console.log('[receiptOcr] PARSED PAYMENT:', JSON.stringify(parsed));
 
   return {
     rawText: combined,

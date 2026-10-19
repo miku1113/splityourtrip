@@ -354,38 +354,50 @@ export function parseUpiReceipt(text: string): ParsedPayment {
 
     // 5. Mask out times (e.g. 11:02 PM, 14:32, 11:34 pm) and full dates (numeric, dot, and written months)
     norm = norm.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm|hrs))?\b/gi, ' ');
-    norm = norm.replace(/\b\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}\b/g, ' ');
-    norm = norm.replace(/\b\d{1,2}\.\d{1,2}\.\d{2,4}\b/g, ' ');
+    norm = norm.replace(/\b\d{1,2}\.\d{2}\s*(?:am|pm|hrs)\b/gi, ' ');
+    norm = norm.replace(/\b\d{1,4}\s*[-\/.]\s*\d{1,2}\s*[-\/.]\s*\d{1,4}\b/g, ' ');
     norm = norm.replace(
-      /\b\d{1,2}(?:st|nd|rd|th)?[\s\-\/.](?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b(?:[\s\-\/.,]\d{2,4})?/gi,
+      /\b\d{1,2}(?:st|nd|rd|th)?[\s\-\/.,]*(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:[\s\-\/.,]*\d{2,4})?/gi,
       ' '
     );
     norm = norm.replace(
-      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[-\/.\s]+\d{1,2}(?:st|nd|rd|th)?\b(?:[\s\-\/.,]\d{2,4})?/gi,
+      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?[\s\-\/.,]*(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?(?:[\s\-\/.,]*\d{2,4})?/gi,
       ' '
     );
-    norm = norm.replace(/\b(?:dated?|on|at)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, ' ');
+    norm = norm.replace(/\b(?:dated?|on|at|date)\s*[:\-]?\s*\d{1,2}(?:st|nd|rd|th)?\b/gi, ' ');
     norm = norm.replace(/\b20[2-3]\d\b/g, ' ');
 
-    // 6. Mask out obscured bank account / card numbers: •••• 1234, xxxx 5678
+    // 6. On payment status/timestamp lines (e.g. "Completed • 19 October 2026, 11:34 pm" or "Status: Completed • 19"),
+    // strip any remaining small numbers (1 to 31) because they are calendar days or hours, NEVER payment amounts!
+    if (/\b(?:completed|status|successful|timestamp|debited\s*on|paid\s*on)\b/i.test(slice)) {
+      norm = norm.replace(/\b(?:[1-9]|[12]\d|3[01])\b/g, ' ');
+    }
+
+    // 7. Mask out bank account / card numbers: ending 1234, •••• 1234, xxxx 5678
+    norm = norm.replace(/\b(?:a\/c|acc|ending|card)\s*(?:no\.?|ending)?\s*[:\-]?\s*\d{3,6}\b/gi, ' ');
     norm = norm.replace(/[•x*.\-]{3,}\s*\d{3,6}\b/gi, ' ');
 
-    // 7. Normalize OCR misread thousand separators (. or space instead of ,)
-    // In INR and USD currency, numbers never have 3 decimal places.
-    // e.g. "25.000" -> "25,000", "1.45.000" -> "1,45,000", "25 000" -> "25,000"
-    norm = norm.replace(/\b(\d{1,2})\.(\d{2})\.(\d{3})(?!\d)/g, '$1,$2,$3');
-    norm = norm.replace(/\b(\d{1,3})\.(\d{3})(?!\d)/g, '$1,$2');
-    norm = norm.replace(/\b(\d{1,3})\s+(\d{3})(?!\d)/g, '$1,$2');
+    // 8. Normalize OCR misread zeros (O or o) in number sequences (e.g. 25,OOO -> 25,000)
+    norm = norm.replace(/\b(\d{1,3})[,.\s']?([oO0]{3})\b/g, '$1,000');
+    norm = norm.replace(/\b(\d{1,2})[,.\s']?([oO0]{2})[,.\s']?([oO0]{3})\b/g, '$1,$2,000');
+    norm = norm.replace(/(\d)[oO](\d)/g, '$10$2');
+    norm = norm.replace(/(\d)[oO]\b/g, '$10');
 
-    // 8. Remove currency symbols, checkmarks, trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V)
+    // 9. Normalize OCR misread thousand separators (. or space or apostrophe instead of ,)
+    // In INR and USD currency, numbers never have 3 decimal places.
+    // e.g. "25.000" -> "25,000", "1.45.000" -> "1,45,000", "25 000" -> "25,000", "25'000" -> "25,000"
+    norm = norm.replace(/\b(\d{1,2})[.\s'](\d{2})[.\s'](\d{3})(?!\d)/g, '$1,$2,$3');
+    norm = norm.replace(/\b(\d{1,3})[.\s'](\d{3})(?!\d)/g, '$1,$2');
+
+    // 10. Remove currency symbols, checkmarks, trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V, £, €, ¥)
     norm = norm
-      .replace(/[₹\u20B9$€£✓✔]/g, ' ')
+      .replace(/[₹\u20B9$€£¥✓✔]/g, ' ')
       .replace(/\b(?:rs\.?|inr|inr\.?|rp|usd|eur|gbp)\b/gi, ' ')
-      .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•:\-~'"]\s*(?=\d)/g, ' ')
+      .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•:\-~'"`]\s*(?=\d)/g, ' ')
       .replace(/[\/\-=:;|]+$/, '')
       .trim();
 
-    // 9. Match all number tokens:
+    // 11. Match all number tokens:
     // Supports:
     // - Indian format: 1,45,000.00 or 12,500.00 or 1,500.00
     // - Western format: 1,000,000.00
@@ -511,57 +523,89 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     const paymentAnchorRegex =
       /\b(?:completed|paid|payment\s*(?:successful|done|completed)|transaction\s*(?:successful|completed)|transfer\s*(?:successful|completed)|payment\s*to|paid\s*to|sent\s*to|paying|you\s*paid|money\s*sent|request\s*sent|debited|transferred)\b/i;
 
+    // Helper to score and pick the best amount candidate from a pool
+    const pickBestAmountCandidate = (
+      pool: Array<{ paise: number; raw: string; hasDecimals: boolean; lineIdx: number; hasCurrencySymbol: boolean }>
+    ) => {
+      if (!pool || pool.length === 0) return undefined;
+      // Filter out small day numbers (1 to 31) if larger realistic payment amounts exist in the pool
+      const hasLargeAmount = pool.some(c => c.paise >= 5000); // >= ₹50
+      const filtered = hasLargeAmount ? pool.filter(c => c.paise > 3100) : pool;
+      const sorted = [...filtered].sort((a, b) => {
+        // Priority 1: line had currency symbol (₹, Rs, INR, ✓)
+        if (a.hasCurrencySymbol !== b.hasCurrencySymbol) {
+          return a.hasCurrencySymbol ? -1 : 1;
+        }
+        // Priority 2: candidate has decimals
+        if (a.hasDecimals !== b.hasDecimals) {
+          return a.hasDecimals ? -1 : 1;
+        }
+        // Priority 3: candidate raw has thousand separator comma
+        const aHasComma = a.raw.includes(',');
+        const bHasComma = b.raw.includes(',');
+        if (aHasComma !== bHasComma) {
+          return aHasComma ? -1 : 1;
+        }
+        // Priority 4: higher amount (e.g. ₹25,000 > ₹19)
+        return b.paise - a.paise;
+      });
+      return sorted[0];
+    };
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (paymentAnchorRegex.test(line)) {
-        // 2A. Check the line IMMEDIATELY ABOVE (Standard Google Pay / GPay Layout!)
+        const pool: Array<{ paise: number; raw: string; hasDecimals: boolean; lineIdx: number; hasCurrencySymbol: boolean }> = [];
+
+        // 2A. Check lines ABOVE the anchor (Standard Google Pay / GPay Layout!)
         // In Google Pay:
-        // Line i-1: ₹1,810.50 (or ? 1,810.50 or * 1,810.50 or 1,810.50 or 650)
+        // Line i-1: ₹25,000 (or Paid to Jainam Shah)
         // Line i:   Completed • Oct 19, 2026, 11:02 PM
         for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
           const prevLine = lines[j];
           if (
-            /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking|to|from)\b/i.test(prevLine) ||
+            /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking\s*name|account|acc)\b/i.test(prevLine) ||
             prevLine.includes('@')
           ) {
             continue;
           }
+          const hasCurrencySymbol = /(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(prevLine);
           const prevCandidates = extractAmountCandidatesFromSlice(prevLine);
-          if (prevCandidates.length > 0) {
-            const chosen = prevCandidates.find(c => c.hasDecimals) || prevCandidates.find(c => c.raw.includes(',')) || prevCandidates[0];
-            amountPaise = chosen.paise;
-            amountConfidence = 0.99;
-            break;
+          for (const cand of prevCandidates) {
+            pool.push({ ...cand, lineIdx: j, hasCurrencySymbol });
           }
         }
-        if (amountPaise) break;
 
-        // 2B. Check SAME line (e.g. "Paid ₹1,500 to Cafe Coffee Day" or "Payment to Rahul ₹60")
-        const sameCandidates = extractAmountCandidatesFromSlice(line);
-        if (sameCandidates.length > 0) {
-          const chosen = sameCandidates.find(c => c.hasDecimals) || sameCandidates.find(c => c.raw.includes(',')) || sameCandidates[0];
-          amountPaise = chosen.paise;
-          amountConfidence = 0.97;
-          break;
+        // 2B. Check SAME line ONLY if it's NOT a status/completion timestamp line
+        if (!/\b(?:completed|status|successful|timestamp)\b/i.test(line)) {
+          const hasCurrencySymbol = /(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(line);
+          const sameCandidates = extractAmountCandidatesFromSlice(line);
+          for (const cand of sameCandidates) {
+            pool.push({ ...cand, lineIdx: i, hasCurrencySymbol });
+          }
         }
 
-        // 2C. Check lines IMMEDIATELY BELOW (Standard PhonePe / Super.money / Paytm Layout!)
+        // 2C. Check lines BELOW the anchor (Standard PhonePe / Super.money / Paytm Layout!)
         // Line i:   Payment Successful
-        // Line i+1: ₹25
+        // Line i+1: ₹25,000
         for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
           const nextLine = lines[j];
-          if (/^(?:upi|utr|txn|ref|from|to|google\s*transaction)\b/i.test(nextLine)) {
+          if (/^(?:upi|utr|txn|ref|from|to|google\s*transaction|banking\s*name)\b/i.test(nextLine)) {
             continue;
           }
+          const hasCurrencySymbol = /(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(nextLine);
           const nextCandidates = extractAmountCandidatesFromSlice(nextLine);
-          if (nextCandidates.length > 0) {
-            const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates.find(c => c.raw.includes(',')) || nextCandidates[0];
-            amountPaise = chosen.paise;
-            amountConfidence = 0.96;
-            break;
+          for (const cand of nextCandidates) {
+            pool.push({ ...cand, lineIdx: j, hasCurrencySymbol });
           }
         }
-        if (amountPaise) break;
+
+        const best = pickBestAmountCandidate(pool);
+        if (best) {
+          amountPaise = best.paise;
+          amountConfidence = 0.99;
+          break;
+        }
       }
     }
   }
