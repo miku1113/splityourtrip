@@ -320,6 +320,114 @@ describe('UPI Parser', () => {
     const parsed = parseUpiReceipt(faintBill);
     expect(parsed.amountPaise).toBe(9000); // 90.00 -> 9000 paise
   });
+
+  test('extracts Google Pay P2P screenshot with contact, phone, amount and Completed status', () => {
+    const gpayOcr = `
+      Google Pay
+      Khushi
+      +91 95109 10300
+      ₹1,810.50
+      Completed • Oct 19, 2026, 11:02 PM
+      UPI transaction ID: 429384729104
+      To: Khushi
+      State Bank of India •••• 1234
+      From: Mihir Jariwala
+      HDFC Bank •••• 5678
+      Google transaction ID
+      CICAgOD4q-6jHQ
+    `;
+    const parsed = parseUpiReceipt(gpayOcr);
+    expect(parsed.app).toBe('gpay');
+    expect(parsed.amountPaise).toBe(181050); // ₹1,810.50 -> 181050 paise
+    expect(parsed.receiverName).toBe('Khushi');
+    expect(parsed.upiTxnId).toBe('429384729104');
+  });
+
+  test('extracts Google Pay screenshot with integer amount and question mark OCR artifact', () => {
+    const gpayOcr = `
+      Google Pay
+      Khushi
+      +91 95109 10300
+      ? 650
+      Completed • 19 Oct 2026, 9:52 pm
+      UPI transaction ID 429384729104
+    `;
+    const parsed = parseUpiReceipt(gpayOcr);
+    expect(parsed.app).toBe('gpay');
+    expect(parsed.amountPaise).toBe(65000); // ₹650 -> 65000 paise
+    expect(parsed.receiverName).toBe('Khushi');
+    expect(parsed.upiTxnId).toBe('429384729104');
+  });
+
+  test('extracts Google Pay screenshot with unadorned integer amount above Paid status', () => {
+    const gpayOcr = `
+      Google Pay
+      Rahul Sharma
+      rahul@okaxis
+      1,500
+      Paid • 19 Oct 2026, 8:45 pm
+      UPI transaction ID: 412345678901
+    `;
+    const parsed = parseUpiReceipt(gpayOcr);
+    expect(parsed.app).toBe('gpay');
+    expect(parsed.amountPaise).toBe(150000); // ₹1,500 -> 150000 paise
+    expect(parsed.receiverName).toBe('Rahul Sharma');
+    expect(parsed.receiverVpa).toBe('rahul@okaxis');
+    expect(parsed.upiTxnId).toBe('412345678901');
+  });
+
+  test('extracts Google Pay merchant payment with CICAg transaction ID and brand category', () => {
+    const gpayMerchant = `
+      Chai Point
+      chaipoint@icici
+      ₹ 150.00
+      Completed • Oct 19, 2026, 8:30 AM
+      UPI transaction ID: 429384729104
+      To: CHAI POINT
+      Google transaction ID: CICAgOD4q-test
+    `;
+    const parsed = parseUpiReceipt(gpayMerchant);
+    expect(parsed.app).toBe('gpay');
+    expect(parsed.amountPaise).toBe(15000); // ₹150.00 -> 15000 paise
+    expect(parsed.receiverName).toBe('Chai Point');
+    expect(parsed.suggestedCategory).toBe('Food');
+  });
+
+  test('extracts Google Pay chat bubble payment', () => {
+    const chatBubble = `
+      Paid
+      ₹650
+      Oct 19, 2026 • Completed
+    `;
+    const parsed = parseUpiReceipt(chatBubble);
+    expect(parsed.amountPaise).toBe(65000);
+  });
+
+  test('extracts Blinkit quick commerce order bill with Groceries category', () => {
+    const blinkitBill = `
+      BLINKIT COMMERCE PRIVATE LIMITED
+      ORDER # BK-982134
+      TOTAL AMOUNT: ₹ 349.00
+      PAID VIA UPI
+    `;
+    const parsed = parseUpiReceipt(blinkitBill);
+    expect(parsed.amountPaise).toBe(34900);
+    expect(parsed.receiverName).toBe('Blinkit');
+    expect(parsed.suggestedCategory).toBe('Groceries');
+  });
+
+  test('extracts Namma Yatri transit ride receipt with Tickets category', () => {
+    const transitBill = `
+      NAMMA YATRI
+      AUTO RIDE RECEIPT
+      FARE: ₹ 85.00
+      PAID TO DRIVER
+    `;
+    const parsed = parseUpiReceipt(transitBill);
+    expect(parsed.amountPaise).toBe(8500);
+    expect(parsed.receiverName).toBe('Namma Yatri');
+    expect(parsed.suggestedCategory).toBe('Tickets');
+  });
 });
 
 describe('WhatsApp Summary Message Generator', () => {

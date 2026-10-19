@@ -36,7 +36,7 @@ export interface ParsedPayment {
 }
 
 // -------------------------------------------------------------
-// CURATED MERCHANT & BRAND DATASETS (250+ Recognized Brands)
+// CURATED MERCHANT & BRAND DATASETS (350+ Recognized Brands)
 // -------------------------------------------------------------
 
 const FOOD_BRANDS = [
@@ -48,54 +48,70 @@ const FOOD_BRANDS = [
   'blue tokai', 'third wave coffee', 'rebel foods', 'faasos', 'oven story', 'behrouz biryani',
   'zomato', 'swiggy', 'eatclub', 'magicpin', 'box8', 'koolfi', 'naturals ice cream',
   'cream stone', 'gianis', 'rollsking', 'mad over donuts', 'tea post', 'mba chai wala',
-  'amul ice cream', 'chitale bandhu', 'anand sweets', 'mithai', 'sweet', 'sweets', 'bhojanalaya', 'dhaba',
-  'pan center', 'paan center', 'pan shop', 'paan shop', 'pan', 'paan',
+  'chai sutta bar', 'amul ice cream', 'amul parlor', 'chitale bandhu', 'anand sweets', 'mithai',
+  'sweet', 'sweets', 'bhojanalaya', 'dhaba', 'pan center', 'paan center', 'pan shop', 'paan shop', 'pan', 'paan',
   'restaurant', 'cafe', 'kitchen', 'diner', 'bakery', 'patisserie', 'brewery', 'pizzeria',
-  'canteen', 'mess', 'eatery', 'food court', 'bites', 'delight', 'tiffin', 'rasoi'
+  'canteen', 'mess', 'eatery', 'food court', 'bites', 'delight', 'tiffin', 'rasoi',
+  'rameshwaram cafe', 'truffles', 'meghana foods', 'empire restaurant', 'vidyarthi bhavan',
+  'murugan idli', 'adyar ananda bhavan', 'a2b', 'motimahal', 'bawarchi', 'karachi bakery',
+  'pista house', 'shree ganesh', 'honest restaurant', 'keventers', 'nirulas', 'bikaji',
+  'tim hortons', 'pret a manger', 'taco bell', 'wendys', 'smoke house deli', 'farzi cafe',
+  'zepto cafe', 'blinkit kitchen'
 ];
 
 const GROCERY_BRANDS = [
-  'dmart', 'd mart', 'avenue supermarts', 'reliance fresh', 'reliance smart', 'reliance retail',
-  'more retail', 'more supermarket', 'spencers', 'spencer', 'nature basket', 'natures basket',
+  'dmart', 'd mart', 'd-mart', 'avenue supermarts', 'reliance fresh', 'reliance smart', 'reliance retail',
+  'smart bazaar', 'more retail', 'more supermarket', 'spencers', 'spencer', 'nature basket', 'natures basket',
   'star bazaar', 'ratnadeep', 'le marche', 'foodhall', 'hypercity', 'big bazaar',
   'blinkit', 'zepto', 'instamart', 'swiggy instamart', 'bigbasket', 'bb daily', 'bb now',
-  'dunzo', 'jiomart', 'amazon fresh', 'milk basket', 'country delight', 'patanjali',
+  'dunzo', 'jiomart', 'amazon fresh', 'flipkart minutes', 'milk basket', 'country delight', 'patanjali',
+  'otipy', 'fraazo', 'licious', 'freshtohome', 'meatigo', 'tendercuts', 'kisankonnect',
   'kirana', 'provision', 'supermarket', 'mart', 'general store', 'daily needs', 'vegetables',
-  'fruits', 'dairy'
+  'fruits', 'dairy', 'mother dairy', 'nandini', 'amul'
 ];
 
 const FUEL_BRANDS = [
   'indian oil', 'indianoil', 'iocl', 'bharat petroleum', 'bpcl', 'hindustan petroleum',
   'hpcl', 'shell', 'nayara energy', 'nayara', 'jio-bp', 'jio bp', 'reliance petroleum',
   'petrol pump', 'filling station', 'fuel station', 'auto lpg', 'cng station', 'cng pump',
-  'hp auto', 'io auto'
+  'hp auto', 'io auto', 'tata power ev', 'statiq', 'chargezone', 'ather grid', 'zeon charging',
+  'blusmart charge', 'bolt.earth', 'glida', 'ev charging'
 ];
 
 const TRAVEL_TICKET_BRANDS = [
-  'uber', 'ola', 'ola cabs', 'rapido', 'namma yatri', 'blusmart', 'make my trip', 'makemytrip',
-  'goibibo', 'easemytrip', 'yatra', 'cleartrip', 'ixigo', 'irctc', 'indian railways',
-  'delhi metro', 'dmrc', 'bmrc', 'maha metro', 'mumbai metro', 'redbus', 'abhibus',
-  'indigo', 'air india', 'spicejet', 'airasia', 'vistara', 'akasa air', 'fastag',
-  'netc fastag', 'toll plaza', 'toll gate', 'highway toll', 'parking'
+  'uber', 'ola', 'ola cabs', 'rapido', 'namma yatri', 'blusmart', 'indrive', 'make my trip', 'makemytrip',
+  'goibibo', 'easemytrip', 'yatra', 'cleartrip', 'ixigo', 'irctc', 'indian railways', 'uts',
+  'delhi metro', 'dmrc', 'bmrc', 'maha metro', 'mumbai metro', 'chennai metro', 'cmrl',
+  'hyderabad metro', 'pune metro', 'ahmedabad metro', 'kolkata metro', 'redbus', 'abhibus',
+  'zingbus', 'intrcity', 'indigo', 'air india', 'spicejet', 'airasia', 'vistara', 'akasa air',
+  'air india express', 'fastag', 'netc fastag', 'park+', 'toll plaza', 'toll gate', 'highway toll', 'parking'
 ];
 
 const STAY_BRANDS = [
   'oyo', 'oyo rooms', 'airbnb', 'fabhotels', 'treebo', 'taj hotels', 'marriott',
   'hyatt', 'radisson', 'ginger hotel', 'lemon tree', 'itc hotels', 'novotel', 'hilton',
-  'resort', 'homestay', 'guest house', 'lodge', 'lodging', 'hotel', 'inn', 'palace'
+  'courtyard', 'jw marriott', 'sheraton', 'westin', 'ibis', 'mercure', 'pullman',
+  'doubletree', 'sarovar portico', 'pride hotel', 'royal orchid', 'sterling resorts',
+  'club mahindra', 'the leela', 'oberoi', 'trident', 'resort', 'homestay', 'guest house',
+  'lodge', 'lodging', 'hotel', 'inn', 'palace'
 ];
 
 const SHOPPING_BRANDS = [
   'zara', 'h&m', 'uniqlo', 'marks & spencer', 'westside', 'pantaloons', 'shoppers stop',
-  'lifestyle', 'max fashion', 'trends', 'reliance trends', 'decathlon', 'croma',
+  'lifestyle', 'max fashion', 'trends', 'reliance trends', 'zudio', 'decathlon', 'croma',
   'reliance digital', 'vijay sales', 'myntra', 'nykaa', 'ajio', 'flipkart', 'amazon',
-  'titan', 'tanishq', 'caratlane', 'lenskart', 'bata', 'woodland', 'puma', 'nike', 'adidas'
+  'tata cliq', 'meesho', 'snapdeal', 'titan', 'tanishq', 'caratlane', 'bluestone',
+  'kalyan jewellers', 'malabar gold', 'joyalukkas', 'lenskart', 'titan eye+', 'bata',
+  'woodland', 'metro shoes', 'mochi', 'red tape', 'puma', 'nike', 'adidas', 'reebok',
+  'skechers', 'asics', 'apple store', 'samsung', 'oneplus', 'poorvika', 'sangeetha'
 ];
 
 const MEDICAL_BRANDS = [
   'apollo pharmacy', 'apollo', 'medplus', 'netmeds', 'tata 1mg', '1mg', 'pharmeasy',
-  'wellness forever', 'guardian pharmacy', 'chemist', 'druggist', 'pharmacy',
-  'hospital', 'clinic', 'diagnostics', 'dr lal pathlabs', 'metropolis', 'thyrocare'
+  'wellness forever', 'guardian pharmacy', 'frank ross', 'chemist', 'druggist', 'pharmacy',
+  'hospital', 'clinic', 'diagnostics', 'dr lal pathlabs', 'metropolis', 'thyrocare',
+  'suburban diagnostics', 'max healthcare', 'fortis', 'manipal', 'medanta', 'narayana health',
+  'practo'
 ];
 
 /**
@@ -118,6 +134,8 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     lower.includes('google pay') ||
     lower.includes('gpay') ||
     lower.includes('google transaction id') ||
+    lower.includes('google transaction') ||
+    lower.includes('cicag') ||
     lower.includes('@okaxis') ||
     lower.includes('@okhdfcbank') ||
     lower.includes('@okicici') ||
@@ -190,7 +208,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
 
   // A. Standard UPI Payment Headers: "Paid to [Name]", "To: [Name]", "Transfer to [Name]"
   const paymentToMatch = normalized.match(
-    /(?:Paid\s*to|Transfer\s*to|Payment\s*to|Sent\s*to|Paid\s*successfully\s*to|Paying\s*to|To)\s*[:\-]?\s*([A-Za-z0-9 .,&'()\-]{2,50})/i
+    /\b(?:Paid\s*to|Transfer\s*to|Payment\s*to|Sent\s*to|Paid\s*successfully\s*to|Paying\s*to|To)\b\s*[:\-]?\s*([A-Za-z0-9 .,&'()\-]{2,50})/i
   );
   if (paymentToMatch && paymentToMatch[1]) {
     let candidate = paymentToMatch[1].split('\n')[0].trim();
@@ -200,8 +218,18 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     if (
       candidate.length >= 2 &&
       !candidate.includes('@') &&
-      !/^(upi|bank|completed|successful|rs|inr|account|payment)/i.test(candidate)
+      !/^(upi|bank|completed|successful|rs|inr|account|payment|driver|merchant|cashier|user|self|total)/i.test(
+        candidate
+      )
     ) {
+      // Normalize ALL-CAPS merchant names to Title Case (e.g. "CHAI POINT" -> "Chai Point")
+      if (candidate === candidate.toUpperCase() && candidate !== candidate.toLowerCase()) {
+        candidate = candidate
+          .toLowerCase()
+          .split(' ')
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+      }
       receiverName = candidate;
       receiverConfidence = 0.96;
     }
@@ -235,20 +263,24 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     }
   }
 
-  // C. Line above VPA (very standard in PhonePe / GPay receipt layout)
+  // C. Line above VPA or Phone Number (standard in Google Pay / PhonePe receipt layout)
   if (!receiverName) {
     for (let i = 0; i < lines.length - 1; i++) {
       const line = lines[i];
       const nextLine = lines[i + 1];
-      if (nextLine.includes('@') && !line.includes('@')) {
-        const clean = line.replace(/^(?:to|paid to|transfer to)\s*[:\-]?\s*/i, '').trim();
+      const nextIsVpa = nextLine.includes('@');
+      const nextClean = nextLine.replace(/[\s\-]/g, '');
+      const nextIsPhone = /^(?:\+?91)?[6-9]\d{9}$/.test(nextClean);
+
+      if ((nextIsVpa || nextIsPhone) && !line.includes('@')) {
+        const clean = line.replace(/^(?:to|paid to|transfer to|payment to)\s*[:\-]?\s*/i, '').trim();
         if (
           clean.length >= 2 &&
-          !/^(from|date|upi|ref|txn|payment|super|google|phonepe|paytm|bhim|cred|completed|status)/i.test(clean) &&
+          !/^(from|date|upi|ref|txn|payment|super|google|phonepe|paytm|bhim|cred|completed|status|paid)/i.test(clean) &&
           !/^[0-9₹?*>\$]/.test(clean)
         ) {
           receiverName = clean;
-          receiverConfidence = 0.88;
+          receiverConfidence = 0.90;
           break;
         }
       }
@@ -306,19 +338,36 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     if (!slice) return [];
 
     // 1. Strip trailing cash / change / tendered / return sections if they appear in the same slice
-    const isolated = slice.split(/\b(?:cash(?:\s*tendered|\s*received|\s*paid)?|tendered|change(?:\s*due|\s*returned)?|return(?:\s*amt|\s*amount)?|refund|balance\s*return)\b/i)[0];
+    const isolated = slice.split(
+      /\b(?:cash(?:\s*tendered|\s*received|\s*paid)?|tendered|change(?:\s*due|\s*returned)?|return(?:\s*amt|\s*amount)?|refund|balance\s*return)\b/i
+    )[0];
 
     // 2. Normalize spaces around decimal points: e.g. "450 . 00" -> "450.00"
     let norm = isolated.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
 
-    // 3. Remove currency symbols, trailing slashes, dashes, colons
+    // 3. Mask out 10-digit mobile phone numbers and formatted +91 phone numbers
+    norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b/g, ' ');
+    norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{9}\b/g, ' ');
+
+    // 4. Mask out 12-digit UPI transaction IDs / UTR
+    norm = norm.replace(/\b\d{12}\b/g, ' ');
+
+    // 5. Mask out times (e.g. 11:02 PM, 14:32) and dates (e.g. 19-10-2026, 19/10/2026)
+    norm = norm.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm))?\b/gi, ' ');
+    norm = norm.replace(/\b\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}\b/g, ' ');
+
+    // 6. Mask out obscured bank account / card numbers: •••• 1234, xxxx 5678
+    norm = norm.replace(/[•x*.\-]{3,}\s*\d{3,6}\b/gi, ' ');
+
+    // 7. Remove currency symbols, trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >)
     norm = norm
-      .replace(/[₹\u20B9$]/g, ' ')
-      .replace(/\b(?:rs\.?|inr)\b/gi, ' ')
+      .replace(/[₹\u20B9$€£]/g, ' ')
+      .replace(/\b(?:rs\.?|inr|inr\.?|rp|usd|eur|gbp)\b/gi, ' ')
+      .replace(/(?:^|\s)[?*#TFzrt>]\s*(?=\d)/g, ' ')
       .replace(/[\/\-=:;|]+$/, '')
       .trim();
 
-    // 4. Match all number tokens:
+    // 8. Match all number tokens:
     // Supports:
     // - Indian format: 1,45,000.00 or 12,500.00 or 1,500.00
     // - Western format: 1,000,000.00
@@ -340,8 +389,12 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         continue;
       }
 
-      // Check if preceded directly by quantity / item indicators (e.g. "Qty: 2", "Items: 3", "Pcs 4")
-      if (/(?:qty|quantity|items?|pcs|pieces|table|tbl|order|ord|token|tok|no\.?|bill\s*no|inv\s*no)\s*[:\-]?\s*$/i.test(precedingStr)) {
+      // Check if preceded directly by quantity / item / metadata indicators (e.g. "Qty: 2", "Items: 3", "Pcs 4")
+      if (
+        /(?:qty|quantity|items?|pcs|pieces|table|tbl|order|ord|token|tok|no\.?|bill\s*no|inv\s*no|pax)\s*[:\-]?\s*$/i.test(
+          precedingStr
+        )
+      ) {
         continue;
       }
 
@@ -408,7 +461,6 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       const afterKeyword = line.slice(match.index + match[0].length);
       const candidates = extractAmountCandidatesFromSlice(afterKeyword);
       if (candidates.length > 0) {
-        // Prefer candidate with decimal digits or the first post-keyword amount
         const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
         amountPaise = chosen.paise;
         amountConfidence = 0.99;
@@ -418,11 +470,9 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       // 1B. Check next 1 to 3 lines (in case the numeric amount is printed below the label)
       for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
         const nextLine = lines[j].trim();
-        // Skip decorative separators or thank you notes
         if (/^[=\-_*#~.]+$/.test(nextLine) || /thank\s*you|visit\s*again/i.test(nextLine)) {
           continue;
         }
-        // Skip lines that are specifically Cash Tendered or Change lines
         if (/\b(?:cash|tendered|change|return|refund|balance\s*return)\b/i.test(nextLine)) {
           continue;
         }
@@ -438,13 +488,116 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     }
   }
 
-  // Strategy 2: Standalone or Explicit "Total" (Excluding Subtotal / Total Items / Total Qty)
+  // Strategy 2: Digital Payment & UPI Confirmation Anchors (Highest Priority for Google Pay, PhonePe, Paytm, etc.)
+  if (!amountPaise) {
+    const paymentAnchorRegex =
+      /\b(?:completed|paid|payment\s*(?:successful|done|completed)|transaction\s*(?:successful|completed)|transfer\s*(?:successful|completed)|payment\s*to|paid\s*to|sent\s*to|paying|you\s*paid|money\s*sent|request\s*sent|debited|transferred)\b/i;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (paymentAnchorRegex.test(line)) {
+        // 2A. Check the line IMMEDIATELY ABOVE (Standard Google Pay / GPay Layout!)
+        // In Google Pay:
+        // Line i-1: ₹1,810.50 (or ? 1,810.50 or * 1,810.50 or 1,810.50 or 650)
+        // Line i:   Completed • Oct 19, 2026, 11:02 PM
+        for (let j = i - 1; j >= Math.max(0, i - 2); j--) {
+          const prevLine = lines[j];
+          if (
+            /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking|to|from)\b/i.test(prevLine) ||
+            prevLine.includes('@')
+          ) {
+            continue;
+          }
+          const prevCandidates = extractAmountCandidatesFromSlice(prevLine);
+          if (prevCandidates.length > 0) {
+            const chosen = prevCandidates.find(c => c.hasDecimals) || prevCandidates[0];
+            amountPaise = chosen.paise;
+            amountConfidence = 0.99;
+            break;
+          }
+        }
+        if (amountPaise) break;
+
+        // 2B. Check SAME line (e.g. "Paid ₹1,500 to Cafe Coffee Day" or "Payment to Rahul ₹60")
+        const sameCandidates = extractAmountCandidatesFromSlice(line);
+        if (sameCandidates.length > 0) {
+          const chosen = sameCandidates.find(c => c.hasDecimals) || sameCandidates[0];
+          amountPaise = chosen.paise;
+          amountConfidence = 0.97;
+          break;
+        }
+
+        // 2C. Check lines IMMEDIATELY BELOW (Standard PhonePe / Super.money / Paytm Layout!)
+        // Line i:   Payment Successful
+        // Line i+1: ₹25
+        for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
+          const nextLine = lines[j];
+          if (/^(?:upi|utr|txn|ref|from|to|google\s*transaction)\b/i.test(nextLine)) {
+            continue;
+          }
+          const nextCandidates = extractAmountCandidatesFromSlice(nextLine);
+          if (nextCandidates.length > 0) {
+            const chosen = nextCandidates.find(c => c.hasDecimals) || nextCandidates[0];
+            amountPaise = chosen.paise;
+            amountConfidence = 0.96;
+            break;
+          }
+        }
+        if (amountPaise) break;
+      }
+    }
+  }
+
+  // Strategy 3: Dedicated Amount Line with Currency Symbol or Rupee OCR Glyph
+  // (₹, Rs, INR, or common OCR substitutes ?, *, T, F, z, r, > followed by numbers)
+  if (!amountPaise) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/(?:upi|utr|txn|ref|order|inv|tax|fssai|phone|tel)\b/i.test(line)) {
+        continue;
+      }
+      if (/(?:[₹\u20B9]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+(?:\.[0-9]{1,2})?/i.test(line)) {
+        const candidates = extractAmountCandidatesFromSlice(line);
+        if (candidates.length > 0) {
+          const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
+          amountPaise = chosen.paise;
+          amountConfidence = 0.92;
+          break;
+        }
+      }
+    }
+  }
+
+  // Strategy 4: Prominent Standalone Amount in Digital Payment Screenshots
+  // (When the currency symbol is omitted by OCR, e.g. "1,810.50" or "650")
+  if (
+    !amountPaise &&
+    (app !== 'unknown' ||
+      lower.includes('upi') ||
+      lower.includes('transaction') ||
+      lower.includes('completed') ||
+      lower.includes('paid'))
+  ) {
+    for (let i = 0; i < Math.min(lines.length, 8); i++) {
+      const line = lines[i];
+      if (/(?:upi|utr|txn|ref|phone|tel|id|no|date|time)\b/i.test(line) || line.includes('@')) {
+        continue;
+      }
+      const candidates = extractAmountCandidatesFromSlice(line);
+      if (candidates.length > 0) {
+        const chosen = candidates.find(c => c.hasDecimals) || candidates[0];
+        amountPaise = chosen.paise;
+        amountConfidence = 0.88;
+        break;
+      }
+    }
+  }
+
+  // Strategy 5: Standalone or Explicit "Total" (Excluding Subtotal / Total Items / Total Qty)
   if (!amountPaise) {
     const genericTotalRegex = /\b(?:total|tot|payable|to\s*pay|amount\s*due|bill\s*due)\b/i;
-    // Walk from the bottom upwards since the overall total is printed near the bottom of receipts
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
-      // Skip subtotal, items, quantities, savings or discount lines
       if (/\b(?:sub\s*total|subtotal|items?|qty|quantity|count|discount|saving|savings)\b/i.test(line)) {
         continue;
       }
@@ -458,7 +611,6 @@ export function parseUpiReceipt(text: string): ParsedPayment {
           amountConfidence = 0.95;
           break;
         }
-        // Check next line
         if (i + 1 < lines.length) {
           const nextLine = lines[i + 1].trim();
           if (!/^[=\-_*#~.]+$/.test(nextLine) && !/\b(?:cash|tendered|change|items?|qty)\b/i.test(nextLine)) {
@@ -475,29 +627,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     }
   }
 
-  // Strategy 3: Digital Payment & UPI Confirmation Screens (GPay, PhonePe, Paytm, Super.money, etc.)
-  if (!amountPaise) {
-    // 3A. Line following "Payment Successful" / "Paid Successfully" / "Paid to"
-    for (let i = 0; i < lines.length; i++) {
-      if (
-        /payment\s+successful|paid\s+successfully|transaction\s+successful|transfer\s+successful|paid\s+to|payment\s+done/i.test(
-          lines[i]
-        )
-      ) {
-        for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
-          const candidates = extractAmountCandidatesFromSlice(lines[j]);
-          if (candidates.length > 0) {
-            amountPaise = candidates[0].paise;
-            amountConfidence = 0.93;
-            break;
-          }
-        }
-        if (amountPaise) break;
-      }
-    }
-  }
-
-  // 3B. Action verbs with amount: "Paid 450", "Debited by Rs. 1,200", "Amount 350.50"
+  // Strategy 6: Action verbs with amount: "Paid 450", "Debited by Rs. 1,200", "Amount 350.50"
   if (!amountPaise) {
     const actionMatch = normalized.match(
       /(?:paid|transfer(?:red)?|amount|sent|debited\s*(?:by|of)?)\s*(?:of)?\s*(?:[₹\u20B9?*>\$]|Rs\.?|INR)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/i
@@ -511,7 +641,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     }
   }
 
-  // Strategy 4: Sub Total (ONLY as fallback if no Grand Total was found)
+  // Strategy 7: Sub Total (ONLY as fallback if no Grand Total was found)
   if (!amountPaise) {
     const subTotalRegex = /\b(?:sub\s*total|subtotal|sub-total)\b/i;
     for (let i = 0; i < lines.length; i++) {
@@ -536,41 +666,19 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     }
   }
 
-  // Strategy 5: Prominent Currency Symbols (₹, Rs, INR)
-  if (!amountPaise) {
-    const currencyMatches = [
-      ...normalized.matchAll(/(?:[₹\u20B9]|Rs\.?|INR)\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)/gi),
-    ];
-    if (currencyMatches.length > 0) {
-      // Find candidate amounts, prioritizing decimals
-      for (const m of currencyMatches) {
-        const candidates = extractAmountCandidatesFromSlice(m[1]);
-        if (candidates.length > 0) {
-          amountPaise = candidates[0].paise;
-          amountConfidence = 0.80;
-          break;
-        }
-      }
-    }
-  }
-
-  // Strategy 6: Bottom Decimal Number in Paper Bill (Universal Fallback for Physical Bills)
+  // Strategy 8: Bottom Decimal Number in Paper Bill (Universal Fallback for Physical Bills)
   if (!amountPaise && lines.length > 0) {
-    // Look in the lower half of the receipt where totals are printed
     const startIdx = Math.floor(lines.length * 0.35);
     let bestCandidatePaise: number | undefined;
 
     for (let i = lines.length - 1; i >= startIdx; i--) {
       const line = lines[i];
-      // Skip cash tendered, change, or metadata lines
       if (/\b(?:cash|tendered|change|phone|tel|fssai|gstin|balance|card|return|refund|order|table)\b/i.test(line)) {
         continue;
       }
-      // Require decimal numbers (e.g. 450.00, 1250.50) to avoid item counts
       if (/[0-9]+\.[0-9]{2}\b/.test(line)) {
         const candidates = extractAmountCandidatesFromSlice(line, { requireDecimals: true });
         if (candidates.length > 0) {
-          // In physical receipts without a recognized total word, the total is usually the largest valid amount
           const candidatePaise = candidates[0].paise;
           if (!bestCandidatePaise || candidatePaise > bestCandidatePaise) {
             bestCandidatePaise = candidatePaise;
