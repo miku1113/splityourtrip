@@ -54,6 +54,20 @@ import { useNotificationStore } from '../features/notifications/useNotificationS
 
 const PAGE_SIZE = 30;
 
+interface FriendSharedDataCacheEntry {
+  friendNetPaise: number;
+  sharedTripLabels: string[];
+  sharedExpenseMessages: TripMessage[];
+  timestamp: number;
+}
+const friendSharedDataCache = new Map<string, FriendSharedDataCacheEntry>();
+
+const getFriendCacheKey = (fId?: string, phone?: string, name?: string) => {
+  const normPhone = phone ? normalizePhone(phone) : '';
+  const cleanName = name ? name.trim().toLowerCase() : '';
+  return fId || normPhone || cleanName || 'unknown_friend';
+};
+
 interface ChatViewProps {
   tripId: string;
   title: string;
@@ -174,10 +188,31 @@ export default function ChatView({
   const inputRef = useRef<TextInput>(null);
   const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<string | null>(null);
-  const [friendNetPaise, setFriendNetPaise] = useState<number>(0);
-  const [sharedTripLabels, setSharedTripLabels] = useState<string[]>([]);
-  const [sharedExpenseMessages, setSharedExpenseMessages] = useState<TripMessage[]>([]);
-  const [isFriendDataLoaded, setIsFriendDataLoaded] = useState<boolean>(isGroup);
+  const initialCacheKey = getFriendCacheKey(friendId, friendPhone, title);
+  const initialCached = !isGroup ? friendSharedDataCache.get(initialCacheKey) : null;
+  const initialMatchedContact = !isGroup
+    ? useContactsStore
+        .getState()
+        .contacts.find(
+          c =>
+            (friendId && c.id === friendId) ||
+            (friendPhone && c.cleanPhone === normalizePhone(friendPhone)) ||
+            c.name.trim().toLowerCase() === title.trim().toLowerCase()
+        )
+    : null;
+
+  const [friendNetPaise, setFriendNetPaise] = useState<number>(
+    initialCached?.friendNetPaise ?? initialMatchedContact?.netBalancePaise ?? 0
+  );
+  const [sharedTripLabels, setSharedTripLabels] = useState<string[]>(
+    initialCached?.sharedTripLabels ?? []
+  );
+  const [sharedExpenseMessages, setSharedExpenseMessages] = useState<TripMessage[]>(
+    initialCached?.sharedExpenseMessages ?? []
+  );
+  const [isFriendDataLoaded, setIsFriendDataLoaded] = useState<boolean>(
+    isGroup || Boolean(initialCached)
+  );
   const [isTripDataLoaded, setIsTripDataLoaded] = useState<boolean>(!isGroup);
   const bannerPulseAnim = useRef(new Animated.Value(0.35)).current;
 
@@ -617,27 +652,35 @@ export default function ChatView({
     const synthesizedExpMsgs: TripMessage[] = [];
 
     const allTrips = useTripStore.getState().trips;
+    const storeMembers = useTripStore.getState().members;
+    const storeExpenses = useTripStore.getState().expenses;
 
-    for (const t of allTrips) {
-      let tMembers: TripMember[] = [];
-      let tExpenses: any[] = [];
+    const tripsData = await Promise.all(
+      allTrips.map(async t => {
+        let tMembers: TripMember[] = [];
+        let tExpenses: any[] = [];
 
-      try {
-        const raw = await AppStorage.getItem(`@splityourtrip_local_details_${t.id}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          tMembers = Array.isArray(parsed.members) ? parsed.members : [];
-          tExpenses = Array.isArray(parsed.expenses) ? parsed.expenses : [];
+        try {
+          const raw = await AppStorage.getItem(`@splityourtrip_local_details_${t.id}`);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            tMembers = Array.isArray(parsed.members) ? parsed.members : [];
+            tExpenses = Array.isArray(parsed.expenses) ? parsed.expenses : [];
+          }
+        } catch {}
+
+        if (tMembers.length === 0) {
+          tMembers = storeMembers.filter(m => m.trip_id === t.id);
         }
-      } catch {}
+        if (tExpenses.length === 0) {
+          tExpenses = storeExpenses.filter(e => e.trip_id === t.id);
+        }
 
-      if (tMembers.length === 0 && t.id === tripId) {
-        tMembers = useTripStore.getState().members.filter(m => m.trip_id === t.id);
-      }
-      if (tExpenses.length === 0 && t.id === tripId) {
-        tExpenses = useTripStore.getState().expenses.filter(e => e.trip_id === t.id);
-      }
+        return { trip: t, members: tMembers, expenses: tExpenses };
+      })
+    );
 
+    for (const { trip: t, members: tMembers, expenses: tExpenses } of tripsData) {
       if (tMembers.length === 0) continue;
 
       const myMember = findMyMember(tMembers, user?.id, currentUserPhone);
@@ -770,6 +813,14 @@ export default function ChatView({
     setFriendNetPaise(totalNet);
     setSharedTripLabels(Array.from(new Set(tripBreakdownLabels)));
     setSharedExpenseMessages(synthesizedExpMsgs);
+
+    const cacheKey = getFriendCacheKey(friendId, displayPhone, displayTitle);
+    friendSharedDataCache.set(cacheKey, {
+      friendNetPaise: totalNet,
+      sharedTripLabels: Array.from(new Set(tripBreakdownLabels)),
+      sharedExpenseMessages: synthesizedExpMsgs,
+      timestamp: Date.now(),
+    });
   } finally {
     setIsFriendDataLoaded(true);
   }
@@ -818,8 +869,9 @@ export default function ChatView({
         if (isMounted) {
           setIsChatLoading(false);
           setIsTripDataLoaded(true);
+          setIsFriendDataLoaded(true);
         }
-      }, 1000);
+      }, 1200);
 
       loadTripDetails(tripId)
         .catch(err => console.log('loadTripDetails error in ChatView:', err))
@@ -869,7 +921,16 @@ export default function ChatView({
 
   useEffect(() => {
     if (!isGroup) {
-      setIsFriendDataLoaded(false);
+      const cacheKey = getFriendCacheKey(friendId, displayPhone, displayTitle);
+      const cached = friendSharedDataCache.get(cacheKey);
+      if (cached) {
+        setFriendNetPaise(cached.friendNetPaise);
+        setSharedTripLabels(cached.sharedTripLabels);
+        setSharedExpenseMessages(cached.sharedExpenseMessages);
+        setIsFriendDataLoaded(true);
+      } else {
+        setIsFriendDataLoaded(false);
+      }
       computeSharedFriendData();
     } else {
       setIsFriendDataLoaded(true);
@@ -993,6 +1054,58 @@ export default function ChatView({
             },
           };
         }
+
+        // Direct trip expense enrichment fallback: compute impactPaise & trip_name immediately
+        const localExp = tripExpenses.find(e => e.id === m.expense_id);
+        if (localExp && m.expense_data) {
+          const isDirectSplit =
+            currentTrip?.trip_type === 'friend_split' ||
+            currentTrip?.name.toLowerCase().startsWith('split with ');
+          const myMem = findMyMember(tripMembers, user?.id, currentUserPhone);
+          const friendMem = tripMembers.find(mem => mem.id !== myMem?.id);
+          const expSplits = localExp.splits || [];
+          const isPayerMe =
+            localExp.paid_by === myMem?.id ||
+            (user?.id && (localExp.paid_by === user.id || localExp.created_by === user.id));
+          const isPayerFriend = friendMem && localExp.paid_by === friendMem.id;
+          const mySplit = expSplits.find(
+            (s: any) =>
+              s.member_id === myMem?.id ||
+              (user?.id && (s.profile_id === user.id || s.member_id === user.id))
+          );
+          const friendSplit = friendMem
+            ? expSplits.find(
+                (s: any) =>
+                  s.member_id === friendMem.id ||
+                  (friendMem.profile_id &&
+                    (s.profile_id === friendMem.profile_id || s.member_id === friendMem.profile_id))
+              )
+            : null;
+
+          let impactPaise = 0;
+          if (isPayerMe && friendSplit) {
+            impactPaise = Number(friendSplit.amount) || 0;
+          } else if (isPayerFriend && mySplit) {
+            impactPaise = -(Number(mySplit.amount) || 0);
+          } else if (isPayerFriend && !mySplit) {
+            impactPaise = -Math.round((Number(localExp.amount) || 0) / 2);
+          } else if (isPayerMe && !friendSplit) {
+            impactPaise = Math.round((Number(localExp.amount) || 0) / 2);
+          }
+
+          return {
+            ...m,
+            expense_data: {
+              ...m.expense_data,
+              trip_name: isDirectSplit ? 'Direct Split' : (currentTrip?.name || 'Direct Split'),
+              is_group_expense: !isDirectSplit,
+              impact_paise: impactPaise,
+              paid_by_name:
+                localExp.payerName ||
+                (isPayerMe ? 'You' : (friendMem?.display_name || displayTitle)),
+            },
+          };
+        }
       }
       return m;
     });
@@ -1099,11 +1212,12 @@ export default function ChatView({
   }, [isGroup, tripMembers, balances, tripId, user?.id, displayTitle]);
 
   const activeBannerNetPaise = isGroup ? groupMyNetPaise : friendNetPaise;
-  const isBannerLoading = !isGroup ? !isFriendDataLoaded : (!isTripDataLoaded || (isChatLoading && !currentTrip));
-  const isFeedLoading =
-    (isChatLoading && paginatedMessages.length === 0) ||
-    (!isGroup && !isFriendDataLoaded && paginatedMessages.length === 0) ||
-    (isGroup && !isTripDataLoaded && paginatedMessages.length === 0);
+  const isChatContentReady = isGroup
+    ? isTripDataLoaded && !isChatLoading
+    : isFriendDataLoaded && isTripDataLoaded && !isChatLoading;
+
+  const isBannerLoading = !isChatContentReady;
+  const isFeedLoading = !isChatContentReady;
 
   // Format time (e.g. 10:45 AM)
   const formatTime = (isoString?: string) => {
