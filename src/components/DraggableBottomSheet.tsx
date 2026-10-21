@@ -89,7 +89,7 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
   handleColor,
   keyboardAvoiding = true,
   dragThreshold = 80,
-  enableExpandUp = true,
+  enableExpandUp = false,
   dragEntireSheet = false,
   initialExpanded = false,
   onSnapChange,

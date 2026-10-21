@@ -48,7 +48,7 @@ import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
 import TripCoverBadge from './TripCoverBadge';
 import ChatFeedSkeleton from './ChatFeedSkeleton';
-import { DraggableBottomSheet } from './DraggableBottomSheet';
+import { StandardBottomSheet } from './StandardBottomSheet';
 import { getFriendSettings } from '../services/friendSettings';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
@@ -3326,7 +3326,10 @@ export default function ChatView({
               {/* Attachment Paperclip 📎 */}
               <TouchableOpacity
                 style={styles.composerIconBtn}
-                onPress={() => setAttachmentModalVisible(true)}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setAttachmentModalVisible(true);
+                }}
               >
                 <Ionicons name="attach" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -3382,7 +3385,7 @@ export default function ChatView({
 
       {/* Link Guest Friend with Phone Contact Modal (Paginated by 10) */}
       {linkContactModalVisible && (
-        <DraggableBottomSheet
+        <StandardBottomSheet
           visible={linkContactModalVisible}
           onClose={() => setLinkContactModalVisible(false)}
           maxHeight="88%"
@@ -3535,15 +3538,14 @@ export default function ChatView({
                 )}
               />
             )}
-        </DraggableBottomSheet>
+        </StandardBottomSheet>
       )}
 
       {/* WhatsApp Attachment Menu Sheet */}
       {attachmentModalVisible && (
-        <DraggableBottomSheet
+        <StandardBottomSheet
           visible={attachmentModalVisible}
           onClose={() => setAttachmentModalVisible(false)}
-          dragEntireSheet={true}
           sheetStyle={{ padding: 20 }}
         >
             <Text style={[styles.attachmentHeader, { color: colors.textSecondary }]}>
@@ -3608,11 +3610,11 @@ export default function ChatView({
                 <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Request Money</Text>
               </TouchableOpacity>
             </View>
-        </DraggableBottomSheet>
+        </StandardBottomSheet>
       )}
 
       {/* 1. Pay with Screenshot Modal */}
-      <DraggableBottomSheet
+      <StandardBottomSheet
         visible={payModalVisible}
         onClose={() => setPayModalVisible(false)}
         maxHeight="88%"
@@ -3775,10 +3777,10 @@ export default function ChatView({
                 </>
               )}
             </TouchableOpacity>
-      </DraggableBottomSheet>
+      </StandardBottomSheet>
 
       {/* 2. Request Money / Select Amount to Receive Modal */}
-      <DraggableBottomSheet
+      <StandardBottomSheet
         visible={requestMoneyModalVisible}
         onClose={() => setRequestMoneyModalVisible(false)}
         maxHeight="88%"
@@ -3897,7 +3899,7 @@ export default function ChatView({
                 </>
               )}
             </TouchableOpacity>
-      </DraggableBottomSheet>
+      </StandardBottomSheet>
 
       {/* Photo Full-Screen Modal Preview */}
       {Boolean(selectedPhotoPreview) && (
