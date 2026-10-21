@@ -176,3 +176,15 @@ export async function uploadTripCoverImage(tripId: string, imageUri: string | nu
 
   return uploadImageToSupabase('avatars', storagePath, imageUri, mimeType);
 }
+
+/**
+ * Uploads voice audio recording to Supabase Storage and returns its permanent URL.
+ */
+export async function uploadAudioToSupabase(tripId: string, audioUri: string | null): Promise<string | null> {
+  if (!audioUri) return null;
+  if (audioUri.startsWith('http://') || audioUri.startsWith('https://')) return audioUri;
+
+  const fileName = `voice_${tripId}_${Date.now()}.m4a`;
+  const storagePath = `chat_voice/${fileName}`;
+  return uploadImageToSupabase('attachments', storagePath, audioUri, 'audio/m4a');
+}

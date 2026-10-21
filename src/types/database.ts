@@ -128,7 +128,7 @@ export interface TripMessage {
   sender_name?: string;
   message?: string;
   content?: string;
-  type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'document' | 'payment_settlement' | 'payment_claim' | 'payment_request';
+  type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'document' | 'audio' | 'payment_settlement' | 'payment_claim' | 'payment_request';
   chat_type?: 'group' | 'individual' | 'trip' | 'user';
   media_url?: string;
   media_name?: string;
@@ -152,11 +152,17 @@ export interface TripMessage {
     is_disputed?: boolean;
     dispute_reason?: string;
     disputed_by?: string;
+    attachment_url?: string | null;
+    screenshot_path?: string | null;
+    attachment_name?: string | null;
+    attachment_type?: string | null;
+    location?: string | null;
   };
   is_sent?: boolean;
   is_seen?: boolean;
   is_edited?: boolean;
   seen_at?: string;
+  duration?: number;
   created_at: string;
 }
 

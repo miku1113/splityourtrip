@@ -61,6 +61,12 @@
           "icon": "./assets/images/icon.png",
           "color": "#6366F1"
         }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Split Your Trip to access your microphone to record and send voice notes in chat."
+        }
       ]
     ],
     "experiments": {

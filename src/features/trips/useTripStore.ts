@@ -243,7 +243,7 @@ interface TripStoreState {
     senderId: string,
     senderName: string,
     text: string,
-    mediaData?: { type: 'image' | 'document'; url: string; name?: string; size?: string },
+    mediaData?: { type: 'image' | 'document' | 'audio'; url: string; name?: string; size?: string; duration?: number },
     chatType?: 'group' | 'individual'
   ) => Promise<boolean>;
   markTripMessagesAsSeen: (tripId: string, currentUserId: string) => Promise<void>;
@@ -312,6 +312,7 @@ export function parseMessagePayload(rawContent: string) {
     | 'system'
     | 'image'
     | 'document'
+    | 'audio'
     | 'payment_settlement'
     | 'payment_claim'
     | 'payment_request' = 'text';
@@ -321,6 +322,7 @@ export function parseMessagePayload(rawContent: string) {
   let mediaUrl: string | undefined = undefined;
   let mediaName: string | undefined = undefined;
   let mediaSize: string | undefined = undefined;
+  let duration: number | undefined = undefined;
   let chatType: 'group' | 'individual' | undefined = undefined;
   let is_sent: boolean | undefined = undefined;
   let is_seen: boolean | undefined = undefined;
@@ -342,6 +344,7 @@ export function parseMessagePayload(rawContent: string) {
       else if (parsed.screenshotUrl) mediaUrl = parsed.screenshotUrl;
       if (parsed.media_name) mediaName = parsed.media_name;
       if (parsed.media_size) mediaSize = parsed.media_size;
+      if (parsed.duration !== undefined) duration = Number(parsed.duration);
       if (parsed.amountPaise !== undefined) amountPaise = Number(parsed.amountPaise);
       else if (parsed.amount_paise !== undefined) amountPaise = Number(parsed.amount_paise);
       if (parsed.is_sent !== undefined) is_sent = !!parsed.is_sent;
@@ -365,6 +368,7 @@ export function parseMessagePayload(rawContent: string) {
     mediaUrl,
     mediaName,
     mediaSize,
+    duration,
     chatType,
     amountPaise,
     rawPayload,
@@ -1741,6 +1745,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           media_url: parsed.mediaUrl,
           media_name: parsed.mediaName,
           media_size: parsed.mediaSize,
+          duration: parsed.duration,
           expense_id: parsed.expId,
           expense_data: parsed.expData,
           payload: parsed.rawPayload,
@@ -1775,6 +1780,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           media_url: parsed.mediaUrl,
           media_name: parsed.mediaName,
           media_size: parsed.mediaSize,
+          duration: parsed.duration,
           expense_id: parsed.expId,
           expense_data: parsed.expData,
           is_sent: m.is_sent !== undefined ? !!m.is_sent : (parsed.is_sent !== undefined ? parsed.is_sent : true),
@@ -1797,6 +1803,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             message: parsed.displayText,
             type: m.type || parsed.msgType,
             chat_type: resolvedChatType,
+            duration: m.duration || parsed.duration,
             expense_id: m.expense_id || parsed.expId,
             expense_data: m.expense_data || parsed.expData,
             is_sent: m.is_sent !== undefined ? !!m.is_sent : (parsed.is_sent !== undefined ? parsed.is_sent : true),
@@ -3401,7 +3408,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     senderId: string,
     senderName: string,
     text: string,
-    mediaData?: { type: 'image' | 'document'; url: string; name?: string; size?: string },
+    mediaData?: { type: 'image' | 'document' | 'audio'; url: string; name?: string; size?: string; duration?: number },
     chatTypeOverride?: 'group' | 'individual'
   ) => {
     if (!text.trim() && !mediaData) return false;
@@ -3413,6 +3420,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       | 'system'
       | 'image'
       | 'document'
+      | 'audio'
       | 'payment_claim'
       | 'payment_settlement'
       | 'payment_request' =
@@ -3469,11 +3477,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     if (mediaData && !isPaymentType) {
       fullPayload = JSON.stringify({
         type: mediaData.type,
-        text: displayText || (mediaData.type === 'image' ? '📷 Photo' : '📄 Document'),
+        text: displayText || (mediaData.type === 'image' ? '📷 Photo' : mediaData.type === 'audio' ? '🎤 Voice message' : '📄 Document'),
         chat_type: chatType,
         media_url: mediaData.url,
         media_name: mediaData.name,
         media_size: mediaData.size,
+        duration: mediaData.duration,
         is_sent: true,
         is_seen: false,
       });
@@ -3512,6 +3521,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       media_url: rawPayloadObj?.mediaUrl || rawPayloadObj?.screenshotUrl || mediaData?.url,
       media_name: mediaData?.name,
       media_size: mediaData?.size,
+      duration: mediaData?.duration || rawPayloadObj?.duration,
       expense_id: expId,
       expense_data: expData,
       payload: rawPayloadObj,

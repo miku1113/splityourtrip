@@ -631,7 +631,7 @@ export default function AddExpenseScreen() {
         >
           <View style={styles.ocrBannerLeft}>
             <Image
-              source={{ uri: attachmentUri }}
+              source={{ uri: attachmentUri || undefined }}
               style={styles.ocrThumb}
               resizeMode="cover"
             />

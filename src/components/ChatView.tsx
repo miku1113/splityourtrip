@@ -23,6 +23,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { Audio } from 'expo-av';
+import { uploadAudioToSupabase } from '../services/imageUpload';
 import { useTheme } from '../theme/useThemeStore';
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
@@ -290,6 +292,62 @@ export default function ChatView({
   const [requestTargetMemberId, setRequestTargetMemberId] = useState<string>('');
   const [requestNote, setRequestNote] = useState('');
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+
+  // Voice note recording & playback state
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isSendingVoice, setIsSendingVoice] = useState(false);
+  const recordingBlinkAnim = useRef(new Animated.Value(1)).current;
+
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [audioPlaybackPosition, setAudioPlaybackPosition] = useState(0);
+  const [audioPlaybackDuration, setAudioPlaybackDuration] = useState(0);
+
+  // Blinking animation for recording red dot
+  useEffect(() => {
+    let anim: Animated.CompositeAnimation | null = null;
+    if (isRecording) {
+      anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(recordingBlinkAnim, {
+            toValue: 0.25,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(recordingBlinkAnim, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      anim.start();
+    } else {
+      recordingBlinkAnim.setValue(1);
+    }
+    return () => {
+      if (anim) anim.stop();
+    };
+  }, [isRecording, recordingBlinkAnim]);
+
+  // Cleanup active audio/recording on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+      if (recordingRef.current) {
+        recordingRef.current.stopAndUnloadAsync().catch(() => {});
+      }
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(() => {});
+      }
+    };
+  }, []);
 
   const flatListRef = useRef<FlatList>(null);
   const prevMsgCountRef = useRef(0);
@@ -1278,6 +1336,204 @@ export default function ChatView({
     setTimeout(() => {
       scrollToBottom(true);
     }, 100);
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatPlaybackMillis = (millis: number) => {
+    const totalSeconds = Math.max(0, Math.floor(millis / 1000));
+    return formatDuration(totalSeconds);
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Microphone Permission',
+          'Please enable microphone access in your device settings to record and send voice notes.'
+        );
+        return;
+      }
+
+      // Stop any active audio playback first
+      if (soundRef.current) {
+        try {
+          await soundRef.current.stopAsync();
+          await soundRef.current.unloadAsync();
+        } catch {}
+        soundRef.current = null;
+        setPlayingAudioId(null);
+        setIsPlayingAudio(false);
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = recording;
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.warn('Failed to start voice recording:', err);
+      Alert.alert(
+        'Microphone Notice',
+        err?.message || 'Could not start audio recording. Please verify microphone permissions.'
+      );
+    }
+  };
+
+  const cancelVoiceRecording = async () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
+    try {
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        recordingRef.current = null;
+      }
+    } catch (e) {
+      console.warn('Error cancelling recording:', e);
+      recordingRef.current = null;
+    }
+  };
+
+  const stopAndSendVoiceRecording = async () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const currentRecording = recordingRef.current;
+    const durationSecs = Math.max(1, recordingDuration);
+    setIsRecording(false);
+    setRecordingDuration(0);
+
+    if (!currentRecording) return;
+    setIsSendingVoice(true);
+
+    try {
+      await currentRecording.stopAndUnloadAsync();
+      const uri = currentRecording.getURI();
+      recordingRef.current = null;
+
+      if (!uri) {
+        setIsSendingVoice(false);
+        return;
+      }
+
+      let remoteUrl = uri;
+      try {
+        const uploaded = await uploadAudioToSupabase(tripId, uri);
+        if (uploaded) remoteUrl = uploaded;
+      } catch (upErr) {
+        console.warn('Voice upload error, falling back to local URI:', upErr);
+      }
+
+      const durationLabel = formatDuration(durationSecs);
+      await sendMessage(
+        tripId,
+        currentUserId,
+        resolvedSenderName,
+        `🎙️ Voice note (${durationLabel})`,
+        {
+          type: 'audio',
+          url: remoteUrl,
+          duration: durationSecs,
+        },
+        isGroup ? 'group' : 'individual'
+      );
+
+      setTimeout(() => {
+        scrollToBottom(true);
+      }, 100);
+    } catch (e: any) {
+      console.warn('Failed to send voice note:', e);
+      Alert.alert('Voice Note', 'Could not send audio note. Please try again.');
+    } finally {
+      setIsSendingVoice(false);
+    }
+  };
+
+  const handleTogglePlayAudio = async (messageId: string, audioUrl?: string, originalDuration?: number) => {
+    if (!audioUrl) return;
+
+    try {
+      if (playingAudioId === messageId && soundRef.current) {
+        if (isPlayingAudio) {
+          await soundRef.current.pauseAsync();
+          setIsPlayingAudio(false);
+        } else {
+          await soundRef.current.playAsync();
+          setIsPlayingAudio(true);
+        }
+        return;
+      }
+
+      if (soundRef.current) {
+        try {
+          await soundRef.current.stopAsync();
+          await soundRef.current.unloadAsync();
+        } catch {}
+        soundRef.current = null;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: audioUrl },
+        { shouldPlay: true },
+        (status) => {
+          if (status.isLoaded) {
+            setAudioPlaybackPosition(status.positionMillis || 0);
+            setAudioPlaybackDuration(status.durationMillis || (originalDuration ? originalDuration * 1000 : 0));
+            setIsPlayingAudio(status.isPlaying);
+            if (status.didJustFinish) {
+              setIsPlayingAudio(false);
+              setPlayingAudioId(null);
+              setAudioPlaybackPosition(0);
+            }
+          } else if (status.error) {
+            console.warn('Sound playback error:', status.error);
+            setIsPlayingAudio(false);
+            setPlayingAudioId(null);
+          }
+        }
+      );
+
+      soundRef.current = sound;
+      setPlayingAudioId(messageId);
+      setIsPlayingAudio(true);
+    } catch (err: any) {
+      console.warn('Error playing audio note:', err);
+      Alert.alert('Audio Playback', 'Could not play voice note.');
+      setPlayingAudioId(null);
+      setIsPlayingAudio(false);
+    }
   };
 
   const handlePickImage = async () => {
@@ -2319,6 +2575,128 @@ export default function ChatView({
             );
           }
 
+          // 2.5 Audio Voice Note Message
+          if (item.type === 'audio') {
+            const isThisPlaying = playingAudioId === item.id && isPlayingAudio;
+            const isThisLoaded = playingAudioId === item.id;
+            const displayDur = isThisLoaded && audioPlaybackPosition > 0
+              ? formatPlaybackMillis(audioPlaybackPosition)
+              : (item.duration ? formatDuration(item.duration) : '0:05');
+
+            const progressRatio = isThisLoaded && audioPlaybackDuration > 0
+              ? Math.min(1, Math.max(0, audioPlaybackPosition / audioPlaybackDuration))
+              : 0;
+
+            return (
+              <View
+                style={[
+                  styles.bubbleContainer,
+                  isMine ? styles.bubbleRight : styles.bubbleLeft,
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.audioBubble,
+                    {
+                      backgroundColor: isMine ? colors.primary : colors.card,
+                      borderColor: isMine ? 'transparent' : colors.border,
+                      borderWidth: isMine ? 0 : 1,
+                    },
+                  ]}
+                  activeOpacity={0.88}
+                  onLongPress={() => handleMessageLongPress(item, isMine)}
+                  delayLongPress={280}
+                >
+                  {isGroup && !isMine && (
+                    <Text style={[styles.senderNameHeader, { color: colors.primary, marginBottom: 6 }]}>
+                      {resolveSenderName(item)}
+                    </Text>
+                  )}
+
+                  <View style={styles.audioMainRow}>
+                    {/* Play / Pause Circular Button */}
+                    <TouchableOpacity
+                      style={[
+                        styles.audioPlayBtn,
+                        {
+                          backgroundColor: isMine ? 'rgba(255,255,255,0.25)' : (isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF'),
+                        },
+                      ]}
+                      onPress={() => handleTogglePlayAudio(item.id, item.media_url, item.duration)}
+                    >
+                      <Ionicons
+                        name={isThisPlaying ? 'pause' : 'play'}
+                        size={22}
+                        color={isMine ? '#FFFFFF' : colors.primary}
+                        style={{ marginLeft: isThisPlaying ? 0 : 2 }}
+                      />
+                    </TouchableOpacity>
+
+                    {/* Waveform track & scrub bar */}
+                    <View style={styles.audioTrackContainer}>
+                      <View style={styles.audioTrackBg}>
+                        <View
+                          style={[
+                            styles.audioTrackProgress,
+                            {
+                              width: `${Math.round(progressRatio * 100)}%`,
+                              backgroundColor: isMine ? '#FFFFFF' : colors.primary,
+                            },
+                          ]}
+                        />
+                      </View>
+
+                      {/* Waveform decorative bars */}
+                      <View style={styles.audioWaveformVisual}>
+                        {[6, 12, 18, 10, 16, 20, 14, 8, 16, 22, 17, 11, 14, 19, 10, 16, 12, 8].map((h, idx) => {
+                          const barActive = progressRatio >= (idx / 18);
+                          return (
+                            <View
+                              key={idx}
+                              style={[
+                                styles.audioWaveBar,
+                                {
+                                  height: h,
+                                  backgroundColor: isMine
+                                    ? (barActive ? '#FFFFFF' : 'rgba(255,255,255,0.45)')
+                                    : (barActive ? colors.primary : (isDark ? 'rgba(255,255,255,0.18)' : '#CBD5E1')),
+                                },
+                              ]}
+                            />
+                          );
+                        })}
+                      </View>
+
+                      {/* Duration & status */}
+                      <View style={styles.audioTimeRow}>
+                        <Text
+                          style={[
+                            styles.audioDurationText,
+                            { color: isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
+                          ]}
+                        >
+                          {displayDur}
+                        </Text>
+                        <Ionicons
+                          name="mic"
+                          size={12}
+                          color={isMine ? 'rgba(255,255,255,0.7)' : colors.textMuted}
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.audioMetaRow}>
+                    <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                      {formatTime(item.created_at)}
+                    </Text>
+                    {isMine && renderMessageTicks(item, isMine)}
+                  </View>
+                </TouchableOpacity>
+              </View>
+            );
+          }
+
           // 3. Expense Notification Card
           if (item.type === 'expense' && item.expense_data) {
             const exp = item.expense_data;
@@ -2893,64 +3271,112 @@ export default function ChatView({
             },
           ]}
         >
-        <View
-          style={[
-            styles.inputBox,
-            {
-              backgroundColor: colors.inputBackground,
-              borderColor: colors.border,
-              borderWidth: 1,
-            },
-          ]}
-        >
-          {/* Attachment Paperclip 📎 */}
-          <TouchableOpacity
-            style={styles.composerIconBtn}
-            onPress={() => setAttachmentModalVisible(true)}
-          >
-            <Ionicons name="attach" size={24} color={colors.textSecondary} />
-          </TouchableOpacity>
+        {isRecording ? (
+          <View style={styles.recordingComposerRow}>
+            {/* Blinking red dot & live timer */}
+            <View style={styles.recordingStatusBadge}>
+              <Animated.View style={[styles.recordingBlinkDot, { opacity: recordingBlinkAnim }]} />
+              <Text style={styles.recordingDurationText}>
+                {formatDuration(recordingDuration)}
+              </Text>
+            </View>
 
-          <TextInput
-            ref={inputRef}
-            style={[styles.textInputField, { color: colors.text }]}
-            placeholder={editingMessage ? 'Edit your message...' : 'Type a message...'}
-            placeholderTextColor={colors.textMuted}
-            value={inputText}
-            onChangeText={setInputText}
-            onFocus={() => {
-              setIsInputFocused(true);
-              setTimeout(() => {
-                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-              }, 120);
-            }}
-            onBlur={() => {
-              setIsInputFocused(false);
-            }}
-            multiline
-          />
+            {/* Hint & waveform text */}
+            <View style={styles.recordingWaveformRow}>
+              <Ionicons name="mic" size={18} color="#EF4444" />
+              <Text style={[styles.recordingHintText, { color: colors.textSecondary }]}>
+                Recording voice note...
+              </Text>
+            </View>
 
-          {/* Camera Button 📷 */}
-          <TouchableOpacity style={styles.composerIconBtn} onPress={handleTakePhoto}>
-            <Ionicons name="camera" size={22} color={colors.textSecondary} />
-          </TouchableOpacity>
-        </View>
+            {/* Cancel (Trash) */}
+            <TouchableOpacity
+              style={styles.cancelRecordBtn}
+              onPress={cancelVoiceRecording}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            </TouchableOpacity>
 
-        {/* Send / Action Button */}
-        <TouchableOpacity
-          style={[
-            styles.sendCircleBtn,
-            { backgroundColor: colors.primary },
-          ]}
-          onPress={inputText.trim() ? handleSendText : handleTakePhoto}
-        >
-          <Ionicons
-            name={editingMessage ? 'checkmark' : (inputText.trim() ? 'send' : 'mic')}
-            size={20}
-            color="#FFFFFF"
-            style={{ marginLeft: (!editingMessage && inputText.trim()) ? 2 : 0 }}
-          />
-        </TouchableOpacity>
+            {/* Send voice note */}
+            <TouchableOpacity
+              style={[styles.sendCircleBtn, { backgroundColor: colors.primary, marginLeft: 4 }]}
+              onPress={stopAndSendVoiceRecording}
+              disabled={isSendingVoice}
+            >
+              {isSendingVoice ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="send" size={18} color="#FFFFFF" style={{ marginLeft: 2 }} />
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <View
+              style={[
+                styles.inputBox,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              {/* Attachment Paperclip 📎 */}
+              <TouchableOpacity
+                style={styles.composerIconBtn}
+                onPress={() => setAttachmentModalVisible(true)}
+              >
+                <Ionicons name="attach" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              <TextInput
+                ref={inputRef}
+                style={[styles.textInputField, { color: colors.text }]}
+                placeholder={editingMessage ? 'Edit your message...' : 'Type a message...'}
+                placeholderTextColor={colors.textMuted}
+                value={inputText}
+                onChangeText={setInputText}
+                onFocus={() => {
+                  setIsInputFocused(true);
+                  setTimeout(() => {
+                    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                  }, 120);
+                }}
+                onBlur={() => {
+                  setIsInputFocused(false);
+                }}
+                multiline
+              />
+
+              {/* Camera Button 📷 */}
+              <TouchableOpacity style={styles.composerIconBtn} onPress={handleTakePhoto}>
+                <Ionicons name="camera" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Send / Mic Action Button */}
+            <TouchableOpacity
+              style={[
+                styles.sendCircleBtn,
+                { backgroundColor: colors.primary },
+              ]}
+              onPress={
+                inputText.trim()
+                  ? handleSendText
+                  : (editingMessage ? handleSendText : startVoiceRecording)
+              }
+            >
+              <Ionicons
+                name={editingMessage ? 'checkmark' : (inputText.trim() ? 'send' : 'mic')}
+                size={20}
+                color="#FFFFFF"
+                style={{ marginLeft: (!editingMessage && inputText.trim()) ? 2 : 0 }}
+              />
+            </TouchableOpacity>
+          </>
+        )}
       </View>
       )}
 
@@ -3125,31 +3551,31 @@ export default function ChatView({
             </Text>
 
             <View style={styles.attachmentGrid}>
-              {/* Document */}
+              {/* 1. Document */}
               <TouchableOpacity style={styles.attachmentItem} onPress={handlePickDocument}>
-                <View style={[styles.attachCircle, { backgroundColor: colors.primaryLight }]}>
-                  <Ionicons name="document-text" size={24} color={colors.primary} />
+                <View style={[styles.attachCircle, { backgroundColor: '#6366F1' }]}>
+                  <Ionicons name="document-text" size={26} color="#FFFFFF" />
                 </View>
-                <Text style={[styles.attachLabel, { color: colors.text }]}>Document</Text>
+                <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Document</Text>
               </TouchableOpacity>
 
-              {/* Camera */}
+              {/* 2. Camera */}
               <TouchableOpacity style={styles.attachmentItem} onPress={handleTakePhoto}>
-                <View style={[styles.attachCircle, { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.18)' : '#E0F2FE' }]}>
-                  <Ionicons name="camera" size={24} color={colors.secondary} />
+                <View style={[styles.attachCircle, { backgroundColor: '#EC4899' }]}>
+                  <Ionicons name="camera" size={26} color="#FFFFFF" />
                 </View>
-                <Text style={[styles.attachLabel, { color: colors.text }]}>Camera</Text>
+                <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Camera</Text>
               </TouchableOpacity>
 
-              {/* Gallery */}
+              {/* 3. Gallery */}
               <TouchableOpacity style={styles.attachmentItem} onPress={handlePickImage}>
-                <View style={[styles.attachCircle, { backgroundColor: colors.primaryLight }]}>
-                  <Ionicons name="images" size={24} color={colors.primary} />
+                <View style={[styles.attachCircle, { backgroundColor: '#8B5CF6' }]}>
+                  <Ionicons name="images" size={26} color="#FFFFFF" />
                 </View>
-                <Text style={[styles.attachLabel, { color: colors.text }]}>Gallery</Text>
+                <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Gallery</Text>
               </TouchableOpacity>
 
-              {/* Add Expense */}
+              {/* 4. Split Bill */}
               <TouchableOpacity
                 style={styles.attachmentItem}
                 onPress={() => {
@@ -3160,26 +3586,26 @@ export default function ChatView({
                   }, 120);
                 }}
               >
-                <View style={[styles.attachCircle, { backgroundColor: colors.successBg }]}>
-                  <Ionicons name="receipt" size={24} color={colors.success} />
+                <View style={[styles.attachCircle, { backgroundColor: '#10B981' }]}>
+                  <Ionicons name="receipt" size={26} color="#FFFFFF" />
                 </View>
-                <Text style={[styles.attachLabel, { color: colors.text }]}>Split Bill</Text>
+                <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Split Bill</Text>
               </TouchableOpacity>
 
-              {/* Pay & Share Screenshot */}
+              {/* 5. Pay & Share Screenshot */}
               <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenPayModal()}>
-                <View style={[styles.attachCircle, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.18)' : '#D1FAE5' }]}>
-                  <Ionicons name="card" size={24} color={colors.success} />
+                <View style={[styles.attachCircle, { backgroundColor: '#F59E0B' }]}>
+                  <Ionicons name="card" size={26} color="#FFFFFF" />
                 </View>
-                <Text style={[styles.attachLabel, { color: colors.text }]}>Pay / Proof</Text>
+                <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Pay / Settle</Text>
               </TouchableOpacity>
 
-              {/* Request Money */}
+              {/* 6. Request Money */}
               <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenRequestMoneyModal()}>
-                <View style={[styles.attachCircle, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF' }]}>
-                  <Ionicons name="cash" size={24} color={colors.primary} />
+                <View style={[styles.attachCircle, { backgroundColor: '#06B6D4' }]}>
+                  <Ionicons name="cash" size={26} color="#FFFFFF" />
                 </View>
-                <Text style={[styles.attachLabel, { color: colors.text }]}>Request Money</Text>
+                <Text style={[styles.attachLabel, { color: colors.text }]} numberOfLines={1}>Request Money</Text>
               </TouchableOpacity>
             </View>
         </DraggableBottomSheet>
@@ -4602,24 +5028,34 @@ const styles = StyleSheet.create({
   },
   attachmentGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
   },
   attachmentItem: {
+    width: '33.33%',
     alignItems: 'center',
+    marginBottom: 18,
   },
   attachCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
     elevation: 4,
   },
   attachLabel: {
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
   },
   photoPreviewOverlay: {
     flex: 1,
@@ -5059,5 +5495,107 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: scaleFont(15),
     fontWeight: '700',
+  },
+  recordingComposerRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+  },
+  recordingStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  recordingBlinkDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+    marginRight: 6,
+  },
+  recordingDurationText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
+  recordingWaveformRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  recordingHintText: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  cancelRecordBtn: {
+    padding: 8,
+    marginRight: 4,
+  },
+  audioBubble: {
+    maxWidth: '82%',
+    borderRadius: 16,
+    padding: 12,
+    minWidth: 220,
+  },
+  audioMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  audioPlayBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  audioTrackContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  audioTrackBg: {
+    height: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  audioTrackProgress: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  audioWaveformVisual: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 22,
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  audioWaveBar: {
+    width: 3,
+    borderRadius: 2,
+  },
+  audioTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  audioDurationText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  audioMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 4,
   },
 });
