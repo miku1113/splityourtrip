@@ -188,3 +188,30 @@ export async function uploadAudioToSupabase(tripId: string, audioUri: string | n
   const storagePath = `chat_voice/${fileName}`;
   return uploadImageToSupabase('attachments', storagePath, audioUri, 'audio/m4a');
 }
+
+/**
+ * Uploads a document (PDF, TXT, doc) to Supabase Storage and returns its permanent URL.
+ */
+export async function uploadDocumentToSupabase(
+  tripId: string,
+  docUri: string | null,
+  docName?: string
+): Promise<string | null> {
+  if (!docUri) return null;
+  if (docUri.startsWith('http://') || docUri.startsWith('https://')) return docUri;
+
+  const ext = (docName || docUri).split('.').pop()?.split('?')[0] || 'pdf';
+  const cleanExt = ext.length <= 5 ? ext.toLowerCase() : 'pdf';
+  const mimeType =
+    cleanExt === 'pdf'
+      ? 'application/pdf'
+      : cleanExt === 'png'
+      ? 'image/png'
+      : cleanExt === 'jpg' || cleanExt === 'jpeg'
+      ? 'image/jpeg'
+      : 'application/octet-stream';
+  const fileName = `doc_${tripId}_${Date.now()}.${cleanExt}`;
+  const storagePath = `chat_docs/${fileName}`;
+
+  return uploadImageToSupabase('attachments', storagePath, docUri, mimeType);
+}

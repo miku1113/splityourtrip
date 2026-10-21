@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
-import { uploadAudioToSupabase } from '../services/imageUpload';
+import { uploadAudioToSupabase, uploadDocumentToSupabase } from '../services/imageUpload';
 import { useTheme } from '../theme/useThemeStore';
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
@@ -307,6 +307,69 @@ export default function ChatView({
   const [audioPlaybackPosition, setAudioPlaybackPosition] = useState(0);
   const [audioPlaybackDuration, setAudioPlaybackDuration] = useState(0);
 
+  // Media upload status for live progress animation banner
+  const [uploadingAttachment, setUploadingAttachment] = useState<{
+    type: 'image' | 'document' | 'audio';
+    name?: string;
+  } | null>(null);
+
+  // Animation for uploading banner pulse & progress bar
+  const uploadPulseAnim = useRef(new Animated.Value(0.35)).current;
+  const uploadBarAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    let pulseAnim: Animated.CompositeAnimation | null = null;
+    let barAnim: Animated.CompositeAnimation | null = null;
+
+    if (uploadingAttachment) {
+      pulseAnim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(uploadPulseAnim, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(uploadPulseAnim, {
+            toValue: 0.35,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnim.start();
+
+      uploadBarAnim.setValue(0);
+      barAnim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(uploadBarAnim, {
+            toValue: 0.85,
+            duration: 1800,
+            useNativeDriver: false,
+          }),
+          Animated.timing(uploadBarAnim, {
+            toValue: 0.98,
+            duration: 900,
+            useNativeDriver: false,
+          }),
+          Animated.timing(uploadBarAnim, {
+            toValue: 0.05,
+            duration: 350,
+            useNativeDriver: false,
+          }),
+        ])
+      );
+      barAnim.start();
+    } else {
+      uploadPulseAnim.setValue(0.35);
+      uploadBarAnim.setValue(0);
+    }
+
+    return () => {
+      if (pulseAnim) pulseAnim.stop();
+      if (barAnim) barAnim.stop();
+    };
+  }, [uploadingAttachment, uploadPulseAnim, uploadBarAnim]);
+
   // Blinking animation for recording red dot
   useEffect(() => {
     let anim: Animated.CompositeAnimation | null = null;
@@ -556,9 +619,9 @@ export default function ChatView({
     }
     return (
       <Ionicons
-        name="checkmark"
-        size={15}
-        color={isMineBubble ? 'rgba(255,255,255,0.6)' : colors.textMuted}
+        name="time-outline"
+        size={14}
+        color={isMineBubble ? 'rgba(255,255,255,0.7)' : colors.textMuted}
         style={{ marginLeft: 3 }}
       />
     );
@@ -1440,6 +1503,12 @@ export default function ChatView({
         return;
       }
 
+      const durationLabel = formatDuration(durationSecs);
+      setUploadingAttachment({
+        type: 'audio',
+        name: `Voice note (${durationLabel})`,
+      });
+
       let remoteUrl = uri;
       try {
         const uploaded = await uploadAudioToSupabase(tripId, uri);
@@ -1448,7 +1517,6 @@ export default function ChatView({
         console.warn('Voice upload error, falling back to local URI:', upErr);
       }
 
-      const durationLabel = formatDuration(durationSecs);
       await sendMessage(
         tripId,
         currentUserId,
@@ -1470,6 +1538,7 @@ export default function ChatView({
       Alert.alert('Voice Note', 'Could not send audio note. Please try again.');
     } finally {
       setIsSendingVoice(false);
+      setUploadingAttachment(null);
     }
   };
 
@@ -1551,6 +1620,14 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        setUploadingAttachment({
+          type: 'image',
+          name: asset.fileName || 'Photo.jpg',
+        });
+        setTimeout(() => {
+          scrollToBottom(true);
+        }, 60);
+
         let remoteUrl = asset.uri;
 
         if (asset.base64) {
@@ -1592,6 +1669,8 @@ export default function ChatView({
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not pick photo');
+    } finally {
+      setUploadingAttachment(null);
     }
   };
 
@@ -1614,6 +1693,14 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        setUploadingAttachment({
+          type: 'image',
+          name: 'Camera Photo',
+        });
+        setTimeout(() => {
+          scrollToBottom(true);
+        }, 60);
+
         let remoteUrl = asset.uri;
 
         if (asset.base64) {
@@ -1655,6 +1742,8 @@ export default function ChatView({
       }
     } catch (e: any) {
       Alert.alert('Camera Error', e?.message || 'Could not open camera');
+    } finally {
+      setUploadingAttachment(null);
     }
   };
 
@@ -1668,6 +1757,22 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
+        setUploadingAttachment({
+          type: 'document',
+          name: file.name || 'Document.pdf',
+        });
+        setTimeout(() => {
+          scrollToBottom(true);
+        }, 60);
+
+        let remoteUrl = file.uri;
+        try {
+          const uploaded = await uploadDocumentToSupabase(tripId, file.uri, file.name);
+          if (uploaded) remoteUrl = uploaded;
+        } catch (upErr) {
+          console.warn('Document upload fallback to local URI:', upErr);
+        }
+
         await sendMessage(
           tripId,
           currentUserId,
@@ -1675,7 +1780,7 @@ export default function ChatView({
           file.name || 'Document',
           {
             type: 'document',
-            url: file.uri,
+            url: remoteUrl,
             name: file.name || 'Document.pdf',
             size: file.size ? `${Math.round(file.size / 1024)} KB` : 'PDF',
           },
@@ -1687,6 +1792,8 @@ export default function ChatView({
       }
     } catch (e: any) {
       Alert.alert('Document Error', e?.message || 'Could not pick document');
+    } finally {
+      setUploadingAttachment(null);
     }
   };
 
@@ -2501,6 +2608,12 @@ export default function ChatView({
                     delayLongPress={280}
                   >
                     <Image source={{ uri: item.media_url }} style={styles.messageImage} />
+                    {item.is_sent === false && (
+                      <View style={styles.mediaUploadingOverlay}>
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                        <Text style={styles.mediaUploadingText}>Sending...</Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
 
                   {item.message && item.message !== '📷 Photo' ? (
@@ -2559,10 +2672,16 @@ export default function ChatView({
                       {item.media_name || item.message || 'Document.pdf'}
                     </Text>
                     <Text style={[styles.docSize, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
-                      {item.media_size || 'PDF Document'}
+                      {item.is_sent === false ? 'Sending...' : (item.media_size || 'PDF Document')}
                     </Text>
                   </View>
-                  <Ionicons name="download-outline" size={20} color={isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary} />
+                  {item.is_sent === false ? (
+                    <View style={styles.docUploadingBox}>
+                      <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.primary} />
+                    </View>
+                  ) : (
+                    <Ionicons name="download-outline" size={20} color={isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary} />
+                  )}
 
                   <View style={styles.docMetaRow}>
                     <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
@@ -2622,14 +2741,19 @@ export default function ChatView({
                           backgroundColor: isMine ? 'rgba(255,255,255,0.25)' : (isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF'),
                         },
                       ]}
+                      disabled={item.is_sent === false}
                       onPress={() => handleTogglePlayAudio(item.id, item.media_url, item.duration)}
                     >
-                      <Ionicons
-                        name={isThisPlaying ? 'pause' : 'play'}
-                        size={22}
-                        color={isMine ? '#FFFFFF' : colors.primary}
-                        style={{ marginLeft: isThisPlaying ? 0 : 2 }}
-                      />
+                      {item.is_sent === false ? (
+                        <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.primary} />
+                      ) : (
+                        <Ionicons
+                          name={isThisPlaying ? 'pause' : 'play'}
+                          size={22}
+                          color={isMine ? '#FFFFFF' : colors.primary}
+                          style={{ marginLeft: isThisPlaying ? 0 : 2 }}
+                        />
+                      )}
                     </TouchableOpacity>
 
                     {/* Waveform track & scrub bar */}
@@ -2675,7 +2799,7 @@ export default function ChatView({
                             { color: isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
                           ]}
                         >
-                          {displayDur}
+                          {item.is_sent === false ? 'Sending...' : displayDur}
                         </Text>
                         <Ionicons
                           name="mic"
@@ -3237,6 +3361,122 @@ export default function ChatView({
           >
             <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Live Uploading Media / Document Banner */}
+      {uploadingAttachment && (
+        <View
+          style={[
+            styles.uploadingBannerContainer,
+            {
+              backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+              borderTopColor: colors.border,
+              borderBottomColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.uploadingBannerLeft}>
+            <View
+              style={[
+                styles.uploadingIconCircle,
+                {
+                  backgroundColor:
+                    uploadingAttachment.type === 'image'
+                      ? (isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF')
+                      : uploadingAttachment.type === 'document'
+                      ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2')
+                      : (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5'),
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  uploadingAttachment.type === 'image'
+                    ? 'images'
+                    : uploadingAttachment.type === 'document'
+                    ? 'document-text'
+                    : 'mic'
+                }
+                size={18}
+                color={
+                  uploadingAttachment.type === 'image'
+                    ? '#3B82F6'
+                    : uploadingAttachment.type === 'document'
+                    ? '#EF4444'
+                    : '#10B981'
+                }
+              />
+            </View>
+
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={[styles.uploadingBannerTitle, { color: colors.text }]} numberOfLines={1}>
+                  {uploadingAttachment.type === 'image'
+                    ? 'Uploading Image...'
+                    : uploadingAttachment.type === 'document'
+                    ? 'Uploading Document...'
+                    : 'Uploading Voice Note...'}
+                </Text>
+                <Animated.View
+                  style={[
+                    styles.uploadingDotPulse,
+                    {
+                      opacity: uploadPulseAnim,
+                      backgroundColor:
+                        uploadingAttachment.type === 'image'
+                          ? '#3B82F6'
+                          : uploadingAttachment.type === 'document'
+                          ? '#EF4444'
+                          : '#10B981',
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.uploadingBannerSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                {uploadingAttachment.name || 'Uploading to cloud & sending to chat...'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.uploadingBannerRight}>
+            <ActivityIndicator
+              size="small"
+              color={
+                uploadingAttachment.type === 'image'
+                  ? '#3B82F6'
+                  : uploadingAttachment.type === 'document'
+                  ? '#EF4444'
+                  : '#10B981'
+              }
+            />
+          </View>
+
+          {/* Animated uploading progress bar */}
+          <View
+            style={[
+              styles.uploadingProgressBarBg,
+              { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.uploadingProgressBarFill,
+                {
+                  backgroundColor:
+                    uploadingAttachment.type === 'image'
+                      ? '#3B82F6'
+                      : uploadingAttachment.type === 'document'
+                      ? '#EF4444'
+                      : '#10B981',
+                  width: uploadBarAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['12%', '98%'],
+                  }),
+                },
+              ]}
+            />
+          </View>
         </View>
       )}
 
@@ -5599,5 +5839,77 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
     marginTop: 4,
+  },
+  uploadingBannerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  uploadingBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
+  },
+  uploadingIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadingBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  uploadingDotPulse: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginLeft: 6,
+  },
+  uploadingBannerSubtitle: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  uploadingBannerRight: {
+    paddingLeft: 6,
+  },
+  uploadingProgressBarBg: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3,
+    overflow: 'hidden',
+  },
+  uploadingProgressBarFill: {
+    height: '100%',
+    borderRadius: 1.5,
+  },
+  mediaUploadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  mediaUploadingText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  docUploadingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
   },
 });
