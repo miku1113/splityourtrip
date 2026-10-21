@@ -313,6 +313,9 @@ export default function ChatView({
     name?: string;
   } | null>(null);
 
+  // Optimistic pending media messages (visible immediately on message card while uploading)
+  const [pendingUploads, setPendingUploads] = useState<TripMessage[]>([]);
+
   // Animation for uploading banner pulse & progress bar
   const uploadPulseAnim = useRef(new Animated.Value(0.35)).current;
   const uploadBarAnim = useRef(new Animated.Value(0)).current;
@@ -1259,7 +1262,13 @@ export default function ChatView({
       se => se.expense_id && !deletedExpenseIdsSet.has(se.expense_id) && !existingExpenseIds.has(se.expense_id)
     );
 
-    return [...enrichedExisting, ...additionalShared].sort(
+    const finalMessages = [...enrichedExisting, ...additionalShared];
+    if (pendingUploads.length > 0) {
+      const activePending = pendingUploads.filter(p => !p.trip_id || p.trip_id === tripId);
+      finalMessages.push(...activePending);
+    }
+
+    return finalMessages.sort(
       (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
     );
   }, [
@@ -1272,6 +1281,7 @@ export default function ChatView({
     displayTitle,
     currentTrip?.currency,
     tripMembers.length,
+    pendingUploads,
   ]);
 
   // Turn off loading once messages are populated (e.g. from local storage or cloud)
@@ -1504,10 +1514,30 @@ export default function ChatView({
       }
 
       const durationLabel = formatDuration(durationSecs);
+      const tempId = `pending_audio_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const pendingMsg: TripMessage = {
+        id: tempId,
+        trip_id: tripId,
+        sender_id: currentUserId,
+        sender_name: resolvedSenderName,
+        message: `🎙️ Voice note (${durationLabel})`,
+        type: 'audio',
+        chat_type: isGroup ? 'group' : 'individual',
+        media_url: uri,
+        duration: durationSecs,
+        is_sent: false,
+        created_at: new Date().toISOString(),
+      };
+
+      // 1. Instantly display audio message card in chat with uploading indicator
+      setPendingUploads(prev => [...prev, pendingMsg]);
       setUploadingAttachment({
         type: 'audio',
         name: `Voice note (${durationLabel})`,
       });
+      setTimeout(() => {
+        scrollToBottom(true);
+      }, 30);
 
       let remoteUrl = uri;
       try {
@@ -1530,6 +1560,7 @@ export default function ChatView({
         isGroup ? 'group' : 'individual'
       );
 
+      setPendingUploads(prev => prev.filter(p => p.id !== tempId));
       setTimeout(() => {
         scrollToBottom(true);
       }, 100);
@@ -1620,13 +1651,34 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        const tempId = `pending_img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const captionText = inputText.trim() || '📷 Photo';
+
+        const pendingMsg: TripMessage = {
+          id: tempId,
+          trip_id: tripId,
+          sender_id: currentUserId,
+          sender_name: resolvedSenderName,
+          message: captionText,
+          type: 'image',
+          chat_type: isGroup ? 'group' : 'individual',
+          media_url: asset.uri,
+          media_name: asset.fileName || 'Photo.jpg',
+          media_size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
+          is_sent: false,
+          created_at: new Date().toISOString(),
+        };
+
+        // 1. Instantly display image message card in chat with uploading animation
+        setPendingUploads(prev => [...prev, pendingMsg]);
         setUploadingAttachment({
           type: 'image',
           name: asset.fileName || 'Photo.jpg',
         });
+        setInputText('');
         setTimeout(() => {
           scrollToBottom(true);
-        }, 60);
+        }, 30);
 
         let remoteUrl = asset.uri;
 
@@ -1653,7 +1705,7 @@ export default function ChatView({
           tripId,
           currentUserId,
           resolvedSenderName,
-          inputText.trim() || '📷 Photo',
+          captionText,
           {
             type: 'image',
             url: remoteUrl,
@@ -1662,10 +1714,11 @@ export default function ChatView({
           },
           isGroup ? 'group' : 'individual'
         );
-        setInputText('');
+
+        setPendingUploads(prev => prev.filter(p => p.id !== tempId));
         setTimeout(() => {
           scrollToBottom(true);
-        }, 100);
+        }, 60);
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not pick photo');
@@ -1693,13 +1746,34 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        const tempId = `pending_cam_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const captionText = inputText.trim() || '📷 Photo';
+
+        const pendingMsg: TripMessage = {
+          id: tempId,
+          trip_id: tripId,
+          sender_id: currentUserId,
+          sender_name: resolvedSenderName,
+          message: captionText,
+          type: 'image',
+          chat_type: isGroup ? 'group' : 'individual',
+          media_url: asset.uri,
+          media_name: 'Camera Photo.jpg',
+          media_size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
+          is_sent: false,
+          created_at: new Date().toISOString(),
+        };
+
+        // 1. Instantly display camera photo message card in chat with uploading animation
+        setPendingUploads(prev => [...prev, pendingMsg]);
         setUploadingAttachment({
           type: 'image',
           name: 'Camera Photo',
         });
+        setInputText('');
         setTimeout(() => {
           scrollToBottom(true);
-        }, 60);
+        }, 30);
 
         let remoteUrl = asset.uri;
 
@@ -1726,7 +1800,7 @@ export default function ChatView({
           tripId,
           currentUserId,
           resolvedSenderName,
-          inputText.trim() || '📷 Photo',
+          captionText,
           {
             type: 'image',
             url: remoteUrl,
@@ -1735,10 +1809,11 @@ export default function ChatView({
           },
           isGroup ? 'group' : 'individual'
         );
-        setInputText('');
+
+        setPendingUploads(prev => prev.filter(p => p.id !== tempId));
         setTimeout(() => {
           scrollToBottom(true);
-        }, 100);
+        }, 60);
       }
     } catch (e: any) {
       Alert.alert('Camera Error', e?.message || 'Could not open camera');
@@ -1757,13 +1832,32 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
+        const tempId = `pending_doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+        const pendingMsg: TripMessage = {
+          id: tempId,
+          trip_id: tripId,
+          sender_id: currentUserId,
+          sender_name: resolvedSenderName,
+          message: file.name || 'Document',
+          type: 'document',
+          chat_type: isGroup ? 'group' : 'individual',
+          media_url: file.uri,
+          media_name: file.name || 'Document.pdf',
+          media_size: file.size ? `${Math.round(file.size / 1024)} KB` : 'PDF',
+          is_sent: false,
+          created_at: new Date().toISOString(),
+        };
+
+        // 1. Instantly display document message card in chat with uploading animation
+        setPendingUploads(prev => [...prev, pendingMsg]);
         setUploadingAttachment({
           type: 'document',
           name: file.name || 'Document.pdf',
         });
         setTimeout(() => {
           scrollToBottom(true);
-        }, 60);
+        }, 30);
 
         let remoteUrl = file.uri;
         try {
@@ -1786,9 +1880,11 @@ export default function ChatView({
           },
           isGroup ? 'group' : 'individual'
         );
+
+        setPendingUploads(prev => prev.filter(p => p.id !== tempId));
         setTimeout(() => {
           scrollToBottom(true);
-        }, 100);
+        }, 60);
       }
     } catch (e: any) {
       Alert.alert('Document Error', e?.message || 'Could not pick document');
@@ -2602,16 +2698,21 @@ export default function ChatView({
                     </Text>
                   )}
                   <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setSelectedPhotoPreview(item.media_url || null)}
-                    onLongPress={() => handleMessageLongPress(item, isMine)}
+                    activeOpacity={item.is_sent === false ? 1 : 0.9}
+                    onPress={() => item.is_sent !== false && setSelectedPhotoPreview(item.media_url || null)}
+                    onLongPress={() => item.is_sent !== false && handleMessageLongPress(item, isMine)}
                     delayLongPress={280}
                   >
                     <Image source={{ uri: item.media_url }} style={styles.messageImage} />
                     {item.is_sent === false && (
                       <View style={styles.mediaUploadingOverlay}>
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                        <Text style={styles.mediaUploadingText}>Sending...</Text>
+                        <View style={styles.mediaUploadingCenterPill}>
+                          <ActivityIndicator size="large" color="#FFFFFF" />
+                          <View style={styles.mediaUploadingBadge}>
+                            <Ionicons name="cloud-upload" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                            <Text style={styles.mediaUploadingText}>Uploading...</Text>
+                          </View>
+                        </View>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -2662,7 +2763,11 @@ export default function ChatView({
                     </Text>
                   )}
                   <View style={[styles.docIconBox, { backgroundColor: isMine ? 'rgba(255,255,255,0.2)' : colors.dangerBg }]}>
-                    <Ionicons name="document-text" size={24} color={isMine ? '#FFFFFF' : colors.danger} />
+                    {item.is_sent === false ? (
+                      <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.danger} />
+                    ) : (
+                      <Ionicons name="document-text" size={24} color={isMine ? '#FFFFFF' : colors.danger} />
+                    )}
                   </View>
                   <View style={{ flex: 1, marginHorizontal: 8 }}>
                     <Text
@@ -2671,9 +2776,18 @@ export default function ChatView({
                     >
                       {item.media_name || item.message || 'Document.pdf'}
                     </Text>
-                    <Text style={[styles.docSize, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
-                      {item.is_sent === false ? 'Sending...' : (item.media_size || 'PDF Document')}
-                    </Text>
+                    {item.is_sent === false ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                        <Ionicons name="cloud-upload-outline" size={12} color={isMine ? 'rgba(255,255,255,0.9)' : colors.primary} style={{ marginRight: 4 }} />
+                        <Text style={[styles.docSize, { color: isMine ? '#FFFFFF' : colors.primary, fontWeight: '700' }]}>
+                          Uploading document...
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.docSize, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                        {item.media_size || 'PDF Document'}
+                      </Text>
+                    )}
                   </View>
                   {item.is_sent === false ? (
                     <View style={styles.docUploadingBox}>
@@ -5896,16 +6010,36 @@ const styles = StyleSheet.create({
   },
   mediaUploadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: 'rgba(0, 0, 0, 0.48)',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
   },
+  mediaUploadingCenterPill: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  mediaUploadingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
   mediaUploadingText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
-    marginTop: 4,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   docUploadingBox: {
     flexDirection: 'row',
