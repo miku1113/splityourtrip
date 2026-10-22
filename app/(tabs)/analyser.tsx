@@ -23,6 +23,7 @@ import {
   computeBalances,
   normalizeExpensesForTrip,
   findMyMember,
+  normalizePhone,
 } from '../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { AppStorage } from '../../src/lib/storage';
@@ -81,6 +82,19 @@ interface AnalyzedExpenseItem {
   isMyExpense: boolean;
   currency: string;
   mySharePaise: number;
+  splits?: any[];
+  involvedMemberKeys?: string[];
+  involvedMemberNames?: string[];
+}
+
+export interface PersonFilterItem {
+  id: string;
+  name: string;
+  isCurrentUser: boolean;
+  phone?: string | null;
+  tripIds: string[];
+  tripNames: string[];
+  expenseCount: number;
 }
 
 interface DailySpendGroup {
@@ -102,6 +116,7 @@ export default function AnalyserScreen() {
 
   // Primary filters
   const [selectedTripFilter, setSelectedTripFilter] = useState<string>('all');
+  const [selectedPersonFilter, setSelectedPersonFilter] = useState<string>('all');
   const [userCurrency, setUserCurrency] = useState('INR');
   const [refreshing, setRefreshing] = useState(false);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
@@ -338,6 +353,33 @@ export default function AnalyserScreen() {
           mySharePaise = Math.round((Number(exp.amount) || 0) / data.members.length);
         }
 
+        // Collect member IDs, phones, and display names involved in this expense
+        const involvedMemberKeys = new Set<string>();
+        const involvedMemberNames = new Set<string>();
+
+        if (exp.paid_by) involvedMemberKeys.add(exp.paid_by);
+        if (pMember?.profile_id) involvedMemberKeys.add(pMember.profile_id);
+        if (pMember?.phone_number) involvedMemberKeys.add(normalizePhone(pMember.phone_number));
+        if (payerName) involvedMemberNames.add(payerName.toLowerCase());
+        if (isMyExpense) {
+          involvedMemberKeys.add('__current_user__');
+          involvedMemberNames.add('you');
+        }
+
+        if (Array.isArray(exp.splits)) {
+          for (const s of exp.splits) {
+            if (s.member_id) involvedMemberKeys.add(s.member_id);
+            if (s.profile_id) involvedMemberKeys.add(s.profile_id);
+            const sm = data.members.find(m => m.id === s.member_id || (m.profile_id && m.profile_id === s.profile_id));
+            if (sm?.display_name) involvedMemberNames.add(sm.display_name.toLowerCase());
+            if (sm?.phone_number) involvedMemberKeys.add(normalizePhone(sm.phone_number));
+            if (myMember && (s.member_id === myMember.id || (myMember.profile_id && s.profile_id === myMember.profile_id))) {
+              involvedMemberKeys.add('__current_user__');
+              involvedMemberNames.add('you');
+            }
+          }
+        }
+
         items.push({
           id: exp.id || `${t.id}-${Math.random()}`,
           trip_id: t.id,
@@ -353,6 +395,9 @@ export default function AnalyserScreen() {
           isMyExpense,
           currency: t.currency || userCurrency,
           mySharePaise,
+          splits: exp.splits || [],
+          involvedMemberKeys: Array.from(involvedMemberKeys),
+          involvedMemberNames: Array.from(involvedMemberNames),
         });
       }
     }
@@ -360,7 +405,226 @@ export default function AnalyserScreen() {
     return items;
   }, [uniqueAllTrips, allTripsData, selectedTripFilter, user?.id, currentUserPhone, userCurrency]);
 
-  // General spending analytics across the currently selected trip scope
+  // Extract all distinct people across the currently selected trip scope (or all trips)
+  const availablePeople = useMemo<PersonFilterItem[]>(() => {
+    const targetTrips =
+      selectedTripFilter === 'all'
+        ? uniqueAllTrips
+        : uniqueAllTrips.filter(t => t.id === selectedTripFilter);
+
+    const peopleMap = new Map<string, PersonFilterItem>();
+    const currentUserId = user?.id || profile?.id;
+
+    for (const t of targetTrips) {
+      const data = allTripsData[t.id];
+      if (!data) continue;
+
+      const myMember = findMyMember(data.members, user?.id, currentUserPhone);
+
+      for (const m of data.members) {
+        const isCurrent = Boolean(
+          (myMember && m.id === myMember.id) ||
+            (currentUserId && (m.profile_id === currentUserId || m.user_id === currentUserId)) ||
+            (currentUserPhone &&
+              m.phone_number &&
+              normalizePhone(currentUserPhone) === normalizePhone(m.phone_number))
+        );
+
+        const key = isCurrent
+          ? '__current_user__'
+          : m.profile_id
+          ? m.profile_id
+          : m.phone_number
+          ? normalizePhone(m.phone_number)
+          : m.display_name.trim().toLowerCase();
+
+        let existing = peopleMap.get(key);
+        if (!existing) {
+          existing = {
+            id: key,
+            name: isCurrent ? 'You' : m.display_name || 'Member',
+            isCurrentUser: isCurrent,
+            phone: m.phone_number || null,
+            tripIds: [t.id],
+            tripNames: [t.name],
+            expenseCount: 0,
+          };
+          peopleMap.set(key, existing);
+        } else {
+          if (!existing.tripIds.includes(t.id)) {
+            existing.tripIds.push(t.id);
+            existing.tripNames.push(t.name);
+          }
+        }
+      }
+    }
+
+    // Tally matching expenses for each person
+    for (const exp of allRawExpenseItems) {
+      for (const person of peopleMap.values()) {
+        const matchesKey =
+          exp.involvedMemberKeys &&
+          (exp.involvedMemberKeys.includes(person.id) ||
+            (person.phone && exp.involvedMemberKeys.includes(normalizePhone(person.phone))));
+        const matchesName =
+          exp.involvedMemberNames &&
+          exp.involvedMemberNames.includes(person.name.toLowerCase());
+        const isPayer =
+          exp.paid_by === person.id ||
+          exp.payerName.toLowerCase() === person.name.toLowerCase();
+
+        if (matchesKey || matchesName || isPayer) {
+          person.expenseCount += 1;
+        }
+      }
+    }
+
+    const list = Array.from(peopleMap.values());
+    list.sort((a, b) => {
+      if (a.isCurrentUser) return -1;
+      if (b.isCurrentUser) return 1;
+      if (b.expenseCount !== a.expenseCount) return b.expenseCount - a.expenseCount;
+      return a.name.localeCompare(b.name);
+    });
+
+    return list;
+  }, [
+    uniqueAllTrips,
+    allTripsData,
+    selectedTripFilter,
+    user?.id,
+    profile?.id,
+    currentUserPhone,
+    allRawExpenseItems,
+  ]);
+
+  // Filtered & Sorted Expenses List (Trip, Person, Search, Category, Timeframe, Payment, Payer, Sort)
+  const filteredAndSortedExpenses = useMemo(() => {
+    let result = [...allRawExpenseItems];
+
+    // 1. Person filter
+    if (selectedPersonFilter !== 'all') {
+      const targetPerson = availablePeople.find(
+        p =>
+          p.id === selectedPersonFilter ||
+          p.name.toLowerCase() === selectedPersonFilter.toLowerCase()
+      );
+      if (targetPerson) {
+        result = result.filter(exp => {
+          if (targetPerson.isCurrentUser) {
+            return (
+              exp.isMyExpense ||
+              (exp.involvedMemberKeys && exp.involvedMemberKeys.includes('__current_user__'))
+            );
+          }
+          const matchesKey =
+            exp.involvedMemberKeys &&
+            (exp.involvedMemberKeys.includes(targetPerson.id) ||
+              (targetPerson.phone &&
+                exp.involvedMemberKeys.includes(normalizePhone(targetPerson.phone))));
+          const matchesName =
+            exp.involvedMemberNames &&
+            exp.involvedMemberNames.includes(targetPerson.name.toLowerCase());
+          const isPayer =
+            exp.paid_by === targetPerson.id ||
+            exp.payerName.toLowerCase() === targetPerson.name.toLowerCase();
+          return matchesKey || matchesName || isPayer;
+        });
+      }
+    }
+
+    // 2. Search query (notes, trips, payers, categories, and involved members)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(exp => {
+        const descMatch = exp.description.toLowerCase().includes(q);
+        const tripMatch = exp.trip_name.toLowerCase().includes(q);
+        const payerMatch = exp.payerName.toLowerCase().includes(q);
+        const catMatch = exp.category.toLowerCase().includes(q);
+        const memberMatch =
+          exp.involvedMemberNames && exp.involvedMemberNames.some(n => n.includes(q));
+        const amtStr = (exp.amount / 100).toString();
+        const amtMatch = amtStr.includes(q);
+        return descMatch || tripMatch || payerMatch || catMatch || memberMatch || amtMatch;
+      });
+    }
+
+    // 3. Category filter
+    if (selectedCategoryFilter !== 'all') {
+      result = result.filter(
+        exp => exp.category.toLowerCase() === selectedCategoryFilter.toLowerCase()
+      );
+    }
+
+    // 4. Timeframe filter
+    if (selectedTimeframe !== 'all') {
+      const now = new Date();
+      result = result.filter(exp => {
+        const diffMs = now.getTime() - exp.dateObj.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        if (selectedTimeframe === 'today') {
+          return exp.dateObj.toDateString() === now.toDateString();
+        } else if (selectedTimeframe === 'week') {
+          return diffDays <= 7;
+        } else if (selectedTimeframe === 'month') {
+          return diffDays <= 30;
+        }
+        return true;
+      });
+    }
+
+    // 5. Payment mode filter
+    if (selectedPaymentMode !== 'all') {
+      result = result.filter(exp => {
+        if (selectedPaymentMode === 'other') {
+          return exp.payment_mode !== 'upi' && exp.payment_mode !== 'cash';
+        }
+        return exp.payment_mode === selectedPaymentMode;
+      });
+    }
+
+    // 6. Who paid filter
+    if (selectedPayerFilter !== 'all') {
+      result = result.filter(exp => {
+        if (selectedPayerFilter === 'me') {
+          return exp.isMyExpense;
+        }
+        return !exp.isMyExpense;
+      });
+    }
+
+    // 7. Sort
+    result.sort((a, b) => {
+      switch (selectedSort) {
+        case 'date_desc':
+          return b.dateObj.getTime() - a.dateObj.getTime();
+        case 'date_asc':
+          return a.dateObj.getTime() - b.dateObj.getTime();
+        case 'amount_desc':
+          return b.amount - a.amount;
+        case 'amount_asc':
+          return a.amount - b.amount;
+        case 'name_asc':
+          return a.description.localeCompare(b.description);
+        default:
+          return b.dateObj.getTime() - a.dateObj.getTime();
+      }
+    });
+
+    return result;
+  }, [
+    allRawExpenseItems,
+    selectedPersonFilter,
+    availablePeople,
+    searchQuery,
+    selectedCategoryFilter,
+    selectedTimeframe,
+    selectedPaymentMode,
+    selectedPayerFilter,
+    selectedSort,
+  ]);
+
+  // General spending analytics across the currently filtered dataset
   const analytics = useMemo(() => {
     let totalPaise = 0;
     let yourPaidPaise = 0;
@@ -385,24 +649,18 @@ export default function AnalyserScreen() {
       other: 0,
     };
 
-    const targetTrips =
-      selectedTripFilter === 'all'
-        ? uniqueAllTrips
-        : uniqueAllTrips.filter(t => t.id === selectedTripFilter);
+    const targetPerson =
+      selectedPersonFilter !== 'all'
+        ? availablePeople.find(
+            p =>
+              p.id === selectedPersonFilter ||
+              p.name.toLowerCase() === selectedPersonFilter.toLowerCase()
+          )
+        : null;
 
-    for (const t of targetTrips) {
-      const data = allTripsData[t.id];
-      if (!data) continue;
+    const isCustomPerson = Boolean(targetPerson && !targetPerson.isCurrentUser);
 
-      const myMember = findMyMember(data.members, user?.id, currentUserPhone) || data.members[0];
-      const myBalanceRow = data.balances.find(b => b.member_id === myMember?.id);
-      if (myBalanceRow) {
-        yourPaidPaise += Number(myBalanceRow.total_paid) || 0;
-        yourSharePaise += Number(myBalanceRow.total_share) || 0;
-      }
-    }
-
-    for (const exp of allRawExpenseItems) {
+    for (const exp of filteredAndSortedExpenses) {
       totalPaise += exp.amount;
       totalExpenseCount += 1;
 
@@ -410,11 +668,53 @@ export default function AnalyserScreen() {
         maxExpense = exp;
       }
 
+      // Calculate Paid & Share based on active person filter
+      if (isCustomPerson && targetPerson) {
+        const isPayer =
+          exp.paid_by === targetPerson.id ||
+          exp.payerName.toLowerCase() === targetPerson.name.toLowerCase();
+        if (isPayer) {
+          yourPaidPaise += exp.amount;
+        }
+
+        // Person's share in this expense
+        let personShareFound = false;
+        if (Array.isArray(exp.splits) && exp.splits.length > 0) {
+          const split = exp.splits.find(
+            (s: any) =>
+              s.member_id === targetPerson.id ||
+              s.profile_id === targetPerson.id ||
+              (targetPerson.phone &&
+                s.phone_number &&
+                normalizePhone(s.phone_number) === normalizePhone(targetPerson.phone))
+          );
+          if (split) {
+            yourSharePaise += Number(split.amount || split.share_amount || 0);
+            personShareFound = true;
+          }
+        }
+        if (
+          !personShareFound &&
+          exp.involvedMemberNames &&
+          exp.involvedMemberNames.includes(targetPerson.name.toLowerCase())
+        ) {
+          const splitCount = exp.splits && exp.splits.length > 0 ? exp.splits.length : 2;
+          yourSharePaise += Math.round(exp.amount / splitCount);
+        }
+      } else {
+        // Current user or overall view
+        if (exp.isMyExpense) {
+          yourPaidPaise += exp.amount;
+        }
+        yourSharePaise += exp.mySharePaise;
+      }
+
       const cat = categoryTotals[exp.category] ? exp.category : 'General';
       categoryTotals[cat].amount += exp.amount;
       categoryTotals[cat].count += 1;
 
-      const mode = exp.payment_mode === 'cash' || exp.payment_mode === 'upi' ? exp.payment_mode : 'other';
+      const mode =
+        exp.payment_mode === 'cash' || exp.payment_mode === 'upi' ? exp.payment_mode : 'other';
       paymentModeTotals[mode] = (paymentModeTotals[mode] || 0) + exp.amount;
     }
 
@@ -428,101 +728,39 @@ export default function AnalyserScreen() {
       }))
       .sort((a, b) => b.amount - a.amount);
 
+    const paidLabel =
+      isCustomPerson && targetPerson ? `${targetPerson.name} Paid` : 'You Paid';
+    const shareLabel =
+      isCustomPerson && targetPerson ? `${targetPerson.name}'s Share` : 'Your Share';
+
     return {
       totalPaise,
       yourPaidPaise,
       yourSharePaise,
+      paidLabel,
+      shareLabel,
       count: totalExpenseCount,
       maxExpense,
       sortedCategories,
       paymentModeTotals,
     };
-  }, [allRawExpenseItems, uniqueAllTrips, allTripsData, selectedTripFilter, user?.id, currentUserPhone]);
+  }, [filteredAndSortedExpenses, selectedPersonFilter, availablePeople]);
 
-  // Filtered & Sorted Expenses List (Search, Category, Timeframe, Payment, Payer, Sort)
-  const filteredAndSortedExpenses = useMemo(() => {
-    let result = [...allRawExpenseItems];
+  // Autocomplete Suggestions for Trips and People when searching
+  const searchSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return { trips: [], people: [] };
+    const q = searchQuery.toLowerCase().trim();
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(exp => {
-        const descMatch = exp.description.toLowerCase().includes(q);
-        const tripMatch = exp.trip_name.toLowerCase().includes(q);
-        const payerMatch = exp.payerName.toLowerCase().includes(q);
-        const catMatch = exp.category.toLowerCase().includes(q);
-        const amtStr = (exp.amount / 100).toString();
-        const amtMatch = amtStr.includes(q);
-        return descMatch || tripMatch || payerMatch || catMatch || amtMatch;
-      });
-    }
+    const matchedTrips = uniqueAllTrips
+      .filter(t => t.name.toLowerCase().includes(q))
+      .slice(0, 4);
 
-    if (selectedCategoryFilter !== 'all') {
-      result = result.filter(
-        exp => exp.category.toLowerCase() === selectedCategoryFilter.toLowerCase()
-      );
-    }
+    const matchedPeople = availablePeople
+      .filter(p => p.name.toLowerCase().includes(q))
+      .slice(0, 5);
 
-    if (selectedTimeframe !== 'all') {
-      const now = new Date();
-      result = result.filter(exp => {
-        const diffMs = now.getTime() - exp.dateObj.getTime();
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
-        if (selectedTimeframe === 'today') {
-          return exp.dateObj.toDateString() === now.toDateString();
-        } else if (selectedTimeframe === 'week') {
-          return diffDays <= 7;
-        } else if (selectedTimeframe === 'month') {
-          return diffDays <= 30;
-        }
-        return true;
-      });
-    }
-
-    if (selectedPaymentMode !== 'all') {
-      result = result.filter(exp => {
-        if (selectedPaymentMode === 'other') {
-          return exp.payment_mode !== 'upi' && exp.payment_mode !== 'cash';
-        }
-        return exp.payment_mode === selectedPaymentMode;
-      });
-    }
-
-    if (selectedPayerFilter !== 'all') {
-      result = result.filter(exp => {
-        if (selectedPayerFilter === 'me') {
-          return exp.isMyExpense;
-        }
-        return !exp.isMyExpense;
-      });
-    }
-
-    result.sort((a, b) => {
-      switch (selectedSort) {
-        case 'date_desc':
-          return b.dateObj.getTime() - a.dateObj.getTime();
-        case 'date_asc':
-          return a.dateObj.getTime() - b.dateObj.getTime();
-        case 'amount_desc':
-          return b.amount - a.amount;
-        case 'amount_asc':
-          return a.amount - b.amount;
-        case 'name_asc':
-          return a.description.localeCompare(b.description);
-        default:
-          return b.dateObj.getTime() - a.dateObj.getTime();
-      }
-    });
-
-    return result;
-  }, [
-    allRawExpenseItems,
-    searchQuery,
-    selectedCategoryFilter,
-    selectedTimeframe,
-    selectedPaymentMode,
-    selectedPayerFilter,
-    selectedSort,
-  ]);
+    return { trips: matchedTrips, people: matchedPeople };
+  }, [searchQuery, uniqueAllTrips, availablePeople]);
 
   // Daily Spending Analytics & Day-by-Day grouping ("daily expence")
   const dailySpendingData = useMemo(() => {
@@ -610,6 +848,8 @@ export default function AnalyserScreen() {
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
+    if (selectedTripFilter !== 'all') count += 1;
+    if (selectedPersonFilter !== 'all') count += 1;
     if (selectedCategoryFilter !== 'all') count += 1;
     if (selectedTimeframe !== 'all') count += 1;
     if (selectedPaymentMode !== 'all') count += 1;
@@ -617,6 +857,8 @@ export default function AnalyserScreen() {
     if (selectedSort !== 'date_desc') count += 1;
     return count;
   }, [
+    selectedTripFilter,
+    selectedPersonFilter,
     selectedCategoryFilter,
     selectedTimeframe,
     selectedPaymentMode,
@@ -625,6 +867,8 @@ export default function AnalyserScreen() {
   ]);
 
   const resetAllFilters = () => {
+    setSelectedTripFilter('all');
+    setSelectedPersonFilter('all');
     setSelectedCategoryFilter('all');
     setSelectedTimeframe('all');
     setSelectedPaymentMode('all');
@@ -641,10 +885,15 @@ export default function AnalyserScreen() {
           : uniqueGroupTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip';
 
       let message = `📊 Trip Spending Report: ${tripTitle}\n`;
+      if (selectedPersonFilter !== 'all') {
+        const pName =
+          availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Member';
+        message += `👤 Filtered Person: ${pName}\n`;
+      }
       message += `━━━━━━━━━━━━━━━━━━━━━\n`;
       message += `💰 Total Spending: ${formatCurrencyAmount(analytics.totalPaise, userCurrency)}\n`;
-      message += `👤 You Paid: ${formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}\n`;
-      message += `🤝 Your Share: ${formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}\n`;
+      message += `👤 ${analytics.paidLabel}: ${formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}\n`;
+      message += `🤝 ${analytics.shareLabel}: ${formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}\n`;
       message += `🧾 Total Expenses: ${analytics.count}\n`;
       if (dailySpendingData.activeDaysCount > 0) {
         message += `📅 Daily Average: ${formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}/day\n`;
@@ -773,6 +1022,36 @@ export default function AnalyserScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Active Filter Banner if Person or Trip is filtered */}
+        {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all') && (
+          <View
+            style={[
+              styles.heroActiveFilterBanner,
+              { backgroundColor: isDark ? 'rgba(74, 144, 226, 0.15)' : 'rgba(74, 144, 226, 0.12)' },
+            ]}
+          >
+            <Ionicons name="filter" size={12} color={colors.primary} />
+            <Text style={[styles.heroActiveFilterText, { color: colors.primary }]} numberOfLines={1}>
+              Filtered:{' '}
+              {selectedTripFilter !== 'all'
+                ? uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip'
+                : 'All Trips'}
+              {selectedPersonFilter !== 'all'
+                ? ` • ${availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Person'}`
+                : ''}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setSelectedPersonFilter('all');
+                setSelectedTripFilter('all');
+              }}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Ionicons name="close-circle" size={14} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         <Text style={[styles.heroAmount, { color: colors.primary }]}>
           {formatCurrencyAmount(analytics.totalPaise, userCurrency)}
         </Text>
@@ -780,7 +1059,9 @@ export default function AnalyserScreen() {
         {/* 4-Stat Hero Matrix */}
         <View style={styles.heroSubRow}>
           <View style={styles.heroStatCol}>
-            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]}>You Paid</Text>
+            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]} numberOfLines={1}>
+              {analytics.paidLabel}
+            </Text>
             <Text style={[styles.heroStatValue, { color: colors.success }]}>
               {formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}
             </Text>
@@ -789,7 +1070,9 @@ export default function AnalyserScreen() {
           <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
 
           <View style={styles.heroStatCol}>
-            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]}>Your Share</Text>
+            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]} numberOfLines={1}>
+              {analytics.shareLabel}
+            </Text>
             <Text style={[styles.heroStatValue, { color: colors.text }]}>
               {formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}
             </Text>
@@ -875,10 +1158,350 @@ export default function AnalyserScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Search Autocomplete Suggestions for Trips & People */}
+      {searchQuery.trim().length > 0 &&
+        (searchSuggestions.trips.length > 0 || searchSuggestions.people.length > 0) && (
+          <View
+            style={[
+              styles.searchSuggestionsCard,
+              {
+                backgroundColor: isDark ? '#1C2434' : '#FFFFFF',
+                borderColor: isDark ? 'rgba(120, 149, 183, 0.25)' : colors.border,
+              },
+            ]}
+          >
+            {/* Matching Trips */}
+            {searchSuggestions.trips.length > 0 && (
+              <View style={styles.suggestionSection}>
+                <View style={styles.suggestionSectionHeader}>
+                  <Ionicons name="airplane-outline" size={13} color={colors.primary} />
+                  <Text style={[styles.suggestionSectionTitle, { color: colors.primary }]}>
+                    TRIPS MATCHING "{searchQuery.trim()}"
+                  </Text>
+                </View>
+                {searchSuggestions.trips.map(t => (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[
+                      styles.suggestionRow,
+                      {
+                        backgroundColor:
+                          selectedTripFilter === t.id
+                            ? isDark
+                              ? 'rgba(74, 144, 226, 0.15)'
+                              : '#EEF4FF'
+                            : 'transparent',
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedTripFilter(t.id);
+                      setSearchQuery('');
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.suggestionAvatar,
+                        { backgroundColor: isDark ? '#283449' : '#E6EEFA' },
+                      ]}
+                    >
+                      <Ionicons name="airplane" size={14} color={colors.primary} />
+                    </View>
+                    <View style={styles.suggestionContent}>
+                      <Text
+                        style={[
+                          styles.suggestionName,
+                          {
+                            color: colors.text,
+                            fontWeight: selectedTripFilter === t.id ? '700' : '600',
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {t.name}
+                      </Text>
+                      <Text style={[styles.suggestionSub, { color: colors.textSecondary }]}>
+                        Tap to filter analysis for this trip
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.filterActionPill,
+                        {
+                          backgroundColor:
+                            selectedTripFilter === t.id ? colors.primary : colors.cardSecondary,
+                          borderColor:
+                            selectedTripFilter === t.id ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterActionText,
+                          {
+                            color: selectedTripFilter === t.id ? '#FFFFFF' : colors.primary,
+                          },
+                        ]}
+                      >
+                        {selectedTripFilter === t.id ? 'Selected' : 'Filter Trip'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Matching People */}
+            {searchSuggestions.people.length > 0 && (
+              <View
+                style={[
+                  styles.suggestionSection,
+                  searchSuggestions.trips.length > 0 && {
+                    borderTopWidth: 1,
+                    borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : colors.borderLight,
+                    marginTop: 6,
+                    paddingTop: 8,
+                  },
+                ]}
+              >
+                <View style={styles.suggestionSectionHeader}>
+                  <Ionicons name="people-outline" size={13} color="#10B981" />
+                  <Text style={[styles.suggestionSectionTitle, { color: '#10B981' }]}>
+                    PEOPLE MATCHING "{searchQuery.trim()}"
+                  </Text>
+                </View>
+                {searchSuggestions.people.map(p => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[
+                      styles.suggestionRow,
+                      {
+                        backgroundColor:
+                          selectedPersonFilter === p.id
+                            ? isDark
+                              ? 'rgba(16, 185, 129, 0.15)'
+                              : '#ECFDF5'
+                            : 'transparent',
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedPersonFilter(p.id);
+                      setSearchQuery('');
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.suggestionAvatar,
+                        { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.suggestionAvatarText,
+                          { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
+                        ]}
+                      >
+                        {p.name.slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.suggestionContent}>
+                      <Text
+                        style={[
+                          styles.suggestionName,
+                          {
+                            color: colors.text,
+                            fontWeight: selectedPersonFilter === p.id ? '700' : '600',
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {p.name} {p.isCurrentUser ? '(You)' : ''}
+                      </Text>
+                      <Text
+                        style={[styles.suggestionSub, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {p.tripNames.join(', ')} • {p.expenseCount} expenses
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.filterActionPill,
+                        {
+                          backgroundColor:
+                            selectedPersonFilter === p.id ? '#10B981' : colors.cardSecondary,
+                          borderColor:
+                            selectedPersonFilter === p.id ? '#10B981' : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterActionText,
+                          {
+                            color: selectedPersonFilter === p.id ? '#FFFFFF' : '#10B981',
+                          },
+                        ]}
+                      >
+                        {selectedPersonFilter === p.id ? 'Selected' : 'Filter Person'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+      {/* Quick People Filter Bar */}
+      {availablePeople.length > 0 && (
+        <View style={styles.peopleQuickBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.peopleQuickScroll}
+          >
+            <TouchableOpacity
+              style={[
+                styles.personQuickChip,
+                {
+                  backgroundColor:
+                    selectedPersonFilter === 'all'
+                      ? colors.primary
+                      : isDark
+                      ? '#182132'
+                      : colors.card,
+                  borderColor: selectedPersonFilter === 'all' ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setSelectedPersonFilter('all')}
+            >
+              <Ionicons
+                name="people"
+                size={13}
+                color={selectedPersonFilter === 'all' ? '#FFFFFF' : colors.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.personQuickText,
+                  { color: selectedPersonFilter === 'all' ? '#FFFFFF' : colors.textSecondary },
+                ]}
+              >
+                All People ({availablePeople.length})
+              </Text>
+            </TouchableOpacity>
+
+            {availablePeople.map(p => {
+              const isSelected = selectedPersonFilter === p.id;
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[
+                    styles.personQuickChip,
+                    {
+                      backgroundColor: isSelected
+                        ? colors.primary
+                        : isDark
+                        ? '#182132'
+                        : colors.card,
+                      borderColor: isSelected ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setSelectedPersonFilter(isSelected ? 'all' : p.id)}
+                >
+                  <View
+                    style={[
+                      styles.personMiniAvatar,
+                      {
+                        backgroundColor: isSelected
+                          ? 'rgba(255,255,255,0.25)'
+                          : p.isCurrentUser
+                          ? '#E0E7FF'
+                          : '#DCFCE7',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.personMiniAvatarText,
+                        {
+                          color: isSelected
+                            ? '#FFFFFF'
+                            : p.isCurrentUser
+                            ? '#4F46E5'
+                            : '#059669',
+                        },
+                      ]}
+                    >
+                      {p.name.slice(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.personQuickText,
+                      { color: isSelected ? '#FFFFFF' : colors.text },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {p.isCurrentUser ? 'You' : p.name}
+                  </Text>
+                  {p.expenseCount > 0 && (
+                    <View
+                      style={[
+                        styles.personCountBadge,
+                        {
+                          backgroundColor: isSelected
+                            ? 'rgba(255,255,255,0.22)'
+                            : isDark
+                            ? 'rgba(255,255,255,0.08)'
+                            : colors.inputBackground,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.personCountText,
+                          { color: isSelected ? '#FFFFFF' : colors.textMuted },
+                        ]}
+                      >
+                        {p.expenseCount}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Active Filter Pills Bar */}
       {(activeFiltersCount > 0 || searchQuery.length > 0) && (
         <View style={styles.activePillsContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activePillsScroll}>
+            {selectedTripFilter !== 'all' && (
+              <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
+                <Ionicons name="airplane-outline" size={12} color={colors.primary} style={{ marginRight: 3 }} />
+                <Text style={[styles.activePillText, { color: colors.primary }]} numberOfLines={1}>
+                  Trip: {uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip'}
+                </Text>
+                <TouchableOpacity onPress={() => setSelectedTripFilter('all')}>
+                  <Ionicons name="close" size={14} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {selectedPersonFilter !== 'all' && (
+              <View style={[styles.activePill, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7', borderColor: '#10B981' }]}>
+                <Ionicons name="person-outline" size={12} color="#10B981" style={{ marginRight: 3 }} />
+                <Text style={[styles.activePillText, { color: isDark ? '#34D399' : '#059669' }]} numberOfLines={1}>
+                  Person: {availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Person'}
+                </Text>
+                <TouchableOpacity onPress={() => setSelectedPersonFilter('all')}>
+                  <Ionicons name="close" size={14} color={isDark ? '#34D399' : '#059669'} />
+                </TouchableOpacity>
+              </View>
+            )}
+
             {selectedCategoryFilter !== 'all' && (
               <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
                 <Text style={[styles.activePillText, { color: colors.primary }]}>
@@ -1811,6 +2434,116 @@ export default function AnalyserScreen() {
             </View>
 
             <ScrollView style={{ paddingHorizontal: 18, paddingTop: 14 }}>
+              {/* Trip Filter */}
+              <Text style={[styles.filterGroupHeading, { color: colors.text }]}>Trip</Text>
+              <View style={styles.filterChipGroup}>
+                <TouchableOpacity
+                  style={[
+                    styles.modalOptionChip,
+                    {
+                      backgroundColor: selectedTripFilter === 'all' ? colors.primary : colors.inputBackground,
+                      borderColor: selectedTripFilter === 'all' ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setSelectedTripFilter('all')}
+                >
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      { color: selectedTripFilter === 'all' ? '#FFFFFF' : colors.text },
+                    ]}
+                  >
+                    All ({uniqueGroupTrips.length} Trips)
+                  </Text>
+                </TouchableOpacity>
+                {uniqueGroupTrips.map(t => (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[
+                      styles.modalOptionChip,
+                      {
+                        backgroundColor: selectedTripFilter === t.id ? colors.primary : colors.inputBackground,
+                        borderColor: selectedTripFilter === t.id ? colors.primary : colors.border,
+                      },
+                    ]}
+                    onPress={() => setSelectedTripFilter(t.id)}
+                  >
+                    <Ionicons
+                      name="airplane-outline"
+                      size={12}
+                      color={selectedTripFilter === t.id ? '#FFFFFF' : colors.textSecondary}
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={[
+                        styles.modalOptionText,
+                        { color: selectedTripFilter === t.id ? '#FFFFFF' : colors.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {t.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Person / Member Filter */}
+              {availablePeople.length > 0 && (
+                <>
+                  <Text style={[styles.filterGroupHeading, { color: colors.text }]}>Person / Member</Text>
+                  <View style={styles.filterChipGroup}>
+                    <TouchableOpacity
+                      style={[
+                        styles.modalOptionChip,
+                        {
+                          backgroundColor: selectedPersonFilter === 'all' ? colors.primary : colors.inputBackground,
+                          borderColor: selectedPersonFilter === 'all' ? colors.primary : colors.border,
+                        },
+                      ]}
+                      onPress={() => setSelectedPersonFilter('all')}
+                    >
+                      <Text
+                        style={[
+                          styles.modalOptionText,
+                          { color: selectedPersonFilter === 'all' ? '#FFFFFF' : colors.text },
+                        ]}
+                      >
+                        All People ({availablePeople.length})
+                      </Text>
+                    </TouchableOpacity>
+                    {availablePeople.map(p => (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={[
+                          styles.modalOptionChip,
+                          {
+                            backgroundColor: selectedPersonFilter === p.id ? '#10B981' : colors.inputBackground,
+                            borderColor: selectedPersonFilter === p.id ? '#10B981' : colors.border,
+                          },
+                        ]}
+                        onPress={() => setSelectedPersonFilter(p.id)}
+                      >
+                        <Ionicons
+                          name="person-outline"
+                          size={12}
+                          color={selectedPersonFilter === p.id ? '#FFFFFF' : colors.textSecondary}
+                          style={{ marginRight: 4 }}
+                        />
+                        <Text
+                          style={[
+                            styles.modalOptionText,
+                            { color: selectedPersonFilter === p.id ? '#FFFFFF' : colors.text },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {p.name} {p.isCurrentUser ? '(You)' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
               <Text style={[styles.filterGroupHeading, { color: colors.text }]}>Category</Text>
               <View style={styles.filterChipGroup}>
                 {['all', 'Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General', 'Shopping'].map(cat => (
@@ -2900,4 +3633,125 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 12,
   },
+  heroActiveFilterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    marginBottom: 8,
+  },
+  heroActiveFilterText: {
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  searchSuggestionsCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  suggestionSection: {
+    paddingVertical: 2,
+  },
+  suggestionSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  suggestionSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    gap: 10,
+  },
+  suggestionAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionAvatarText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  suggestionContent: {
+    flex: 1,
+  },
+  suggestionName: {
+    fontSize: 13,
+  },
+  suggestionSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  filterActionPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  filterActionText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  peopleQuickBar: {
+    marginBottom: 10,
+  },
+  peopleQuickScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  personQuickChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 6,
+  },
+  personMiniAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personMiniAvatarText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  personQuickText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  personCountBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  personCountText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
 });
+
