@@ -17,6 +17,7 @@ import { splitEqual } from '../../services/split';
 import { formatCurrencyAmount } from '../../services/currency';
 import { getContactNameByPhone, getEffectiveContactName, normalizeNameForMatch } from '../contacts/useContactsStore';
 import { uploadTripCoverImage, persistLocalAttachment, uploadExpenseAttachment } from '../../services/imageUpload';
+import { chatOutbox } from '../../services/chatOutboxService';
 
 // Universal helper to reliably find the active user's TripMember row without assuming admin
 export function findMyMember(
@@ -243,9 +244,22 @@ interface TripStoreState {
     senderId: string,
     senderName: string,
     text: string,
-    mediaData?: { type: 'image' | 'document' | 'audio'; url: string; name?: string; size?: string; duration?: number },
+    mediaData?: {
+      type: 'image' | 'video' | 'document' | 'audio';
+      url: string;
+      localUri?: string;
+      name?: string;
+      size?: string;
+      duration?: number;
+    },
     chatType?: 'group' | 'individual'
   ) => Promise<boolean>;
+  handleOutboxMessageDelivered: (
+    messageId: string,
+    tripId: string,
+    remoteUrl?: string,
+    duration?: number
+  ) => void;
   markTripMessagesAsSeen: (tripId: string, currentUserId: string) => Promise<void>;
   editTripMessage: (tripId: string, messageId: string, newText: string) => Promise<boolean>;
   deleteTripMessage: (tripId: string, messageId: string) => Promise<boolean>;
@@ -3408,7 +3422,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     senderId: string,
     senderName: string,
     text: string,
-    mediaData?: { type: 'image' | 'document' | 'audio'; url: string; name?: string; size?: string; duration?: number },
+    mediaData?: {
+      type: 'image' | 'video' | 'document' | 'audio';
+      url: string;
+      localUri?: string;
+      name?: string;
+      size?: string;
+      duration?: number;
+    },
     chatTypeOverride?: 'group' | 'individual'
   ) => {
     if (!text.trim() && !mediaData) return false;
@@ -3419,6 +3440,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       | 'dispute'
       | 'system'
       | 'image'
+      | 'video'
       | 'document'
       | 'audio'
       | 'payment_claim'
@@ -3477,13 +3499,21 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     if (mediaData && !isPaymentType) {
       fullPayload = JSON.stringify({
         type: mediaData.type,
-        text: displayText || (mediaData.type === 'image' ? '📷 Photo' : mediaData.type === 'audio' ? '🎤 Voice message' : '📄 Document'),
+        text:
+          displayText ||
+          (mediaData.type === 'image'
+            ? '📷 Photo'
+            : mediaData.type === 'video'
+            ? '🎥 Video'
+            : mediaData.type === 'audio'
+            ? '🎤 Voice message'
+            : '📄 Document'),
         chat_type: chatType,
         media_url: mediaData.url,
         media_name: mediaData.name,
         media_size: mediaData.size,
         duration: mediaData.duration,
-        is_sent: true,
+        is_sent: false,
         is_seen: false,
       });
     } else if (fullPayload.startsWith('{') && fullPayload.includes('"type":')) {
@@ -3531,6 +3561,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       created_at: createdAt,
     };
 
+    // 1. Immediately insert optimistic message into state & local details (instant <10ms display)
     set(state => ({ messages: [...state.messages, localMsg] }));
 
     try {
@@ -3540,93 +3571,82 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
     } catch {}
 
-    if (isSupabaseConfigured && isValidUUID(tripId)) {
-      try {
-        const authUser = useAuthStore.getState().user;
-        const currentAuthUserId = authUser?.id && isValidUUID(authUser.id) ? authUser.id : null;
-
-        // sender_id in trip_messages references auth.users(id).
-        // It CAN be null, but if supplied it MUST be an existing auth user id.
-        let validSenderId: string | null = null;
-        if (currentAuthUserId && (senderId === currentAuthUserId || !isValidUUID(senderId) || senderId === 'local_user' || senderId === 'admin')) {
-          validSenderId = currentAuthUserId;
-        } else if (currentAuthUserId) {
-          validSenderId = currentAuthUserId;
-        }
-
-        const client = supabaseAdmin || supabase;
-
-        // 1. Insert into trip_messages table (service role bypasses RLS)
-        const { error: msgErr } = await client.from('trip_messages').insert({
-          id: localMsgId,
-          trip_id: tripId,
-          sender_id: validSenderId,
-          sender_name: effectiveSenderName,
-          message: fullPayload,
-          created_at: createdAt,
-        });
-
-        if (msgErr) {
-          console.warn('trip_messages insert notice, retrying with sender_id null:', msgErr.message);
-          await client.from('trip_messages').insert({
-            id: localMsgId,
-            trip_id: tripId,
-            sender_id: null,
-            sender_name: effectiveSenderName,
-            message: fullPayload,
-            created_at: createdAt,
-          });
-        }
-
-        // 2. Also insert into messages table with chat_type in metadata and valid message_type
-        if (validSenderId) {
-          try {
-            const dbMsgType = msgType === 'expense' ? 'expense' : (msgType === 'image' ? 'image' : 'text');
-            await client.from('messages').insert({
-              id: localMsgId,
-              trip_id: tripId,
-              sender_id: validSenderId,
-              content: fullPayload,
-              message_type: dbMsgType,
-              metadata: {
-                chat_type: chatType,
-                message_type: chatType === 'group' ? 'group_message' : 'individual_message',
-                friend_id: tripObj?.friend_id || null,
-                is_group: chatType === 'group',
-              },
-            });
-          } catch {}
-        }
-
-        // Dispatch push notification to all OTHER members of this trip
-        try {
-          const { sendPushNotificationToMembers } = require('../../services/pushNotificationService');
-          sendPushNotificationToMembers(tripId, validSenderId || senderId, effectiveSenderName, displayText, {
-            type: msgType,
-            messageId: localMsgId,
-          }).catch(() => {});
-        } catch {}
-      } catch (err: any) {
-        console.log('sendMessage cloud insert fallback locally:', err?.message);
+    // 2. Enqueue into persistent Outbox queue (handles background upload, cloud insert, and auto-retry if offline)
+    try {
+      const authUser = useAuthStore.getState().user;
+      const currentAuthUserId = authUser?.id && isValidUUID(authUser.id) ? authUser.id : null;
+      let validSenderId: string | null = null;
+      if (currentAuthUserId && (senderId === currentAuthUserId || !isValidUUID(senderId) || senderId === 'local_user' || senderId === 'admin')) {
+        validSenderId = currentAuthUserId;
+      } else if (currentAuthUserId) {
+        validSenderId = currentAuthUserId;
       }
+
+      await chatOutbox.enqueue({
+        id: localMsgId,
+        tripId,
+        senderId: validSenderId || senderId,
+        senderName: effectiveSenderName,
+        text: displayText,
+        type: msgType,
+        chatType,
+        mediaData: mediaData
+          ? {
+              type: mediaData.type,
+              localUri: (mediaData as any).localUri || mediaData.url,
+              remoteUrl: mediaData.url?.startsWith('http') ? mediaData.url : undefined,
+              name: mediaData.name,
+              size: mediaData.size,
+              duration: mediaData.duration,
+            }
+          : undefined,
+        payload: rawPayloadObj,
+        status: 'queued',
+        createdAt,
+        retryCount: 0,
+      });
+    } catch (enqueueErr) {
+      console.warn('Failed to enqueue outbox message:', enqueueErr);
     }
 
-    // Update in-memory and storage to sent status (2 ticks)
+    return true;
+  },
+
+  handleOutboxMessageDelivered: (
+    messageId: string,
+    tripId: string,
+    remoteUrl?: string,
+    duration?: number
+  ) => {
     set(state => ({
-      messages: state.messages.map(m => (m.id === localMsgId ? { ...m, is_sent: true } : m)),
+      messages: state.messages.map(m =>
+        m.id === messageId
+          ? {
+              ...m,
+              is_sent: true,
+              media_url: remoteUrl || m.media_url,
+              duration: duration || m.duration,
+            }
+          : m
+      ),
     }));
-    try {
-      const raw = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
+
+    AppStorage.getItem(`@splityourtrip_local_details_${tripId}`).then(raw => {
       if (raw) {
         const details = JSON.parse(raw);
         details.messages = (details.messages || []).map((m: any) =>
-          m.id === localMsgId ? { ...m, is_sent: true } : m
+          m.id === messageId
+            ? {
+                ...m,
+                is_sent: true,
+                media_url: remoteUrl || m.media_url,
+                duration: duration || m.duration,
+              }
+            : m
         );
-        await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+        AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details)).catch(() => {});
       }
-    } catch {}
-
-    return true;
+    }).catch(() => {});
   },
 
   markTripMessagesAsSeen: async (tripId: string, currentUserId: string) => {
@@ -4675,3 +4695,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     };
   },
 }));
+
+// Connect Outbox delivered callback to auto-update in-memory messages & local storage
+chatOutbox.onMessageSent((msgId, tripId, remoteUrl, duration) => {
+  useTripStore.getState().handleOutboxMessageDelivered(msgId, tripId, remoteUrl, duration);
+});

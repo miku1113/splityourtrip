@@ -215,3 +215,31 @@ export async function uploadDocumentToSupabase(
 
   return uploadImageToSupabase('attachments', storagePath, docUri, mimeType);
 }
+
+/**
+ * Uploads a video (MP4, MOV, etc.) to Supabase Storage and returns its permanent URL.
+ */
+export async function uploadVideoToSupabase(
+  tripId: string,
+  videoUri: string | null,
+  videoName?: string
+): Promise<string | null> {
+  if (!videoUri) return null;
+  if (videoUri.startsWith('http://') || videoUri.startsWith('https://')) return videoUri;
+
+  const ext = (videoName || videoUri).split('.').pop()?.split('?')[0] || 'mp4';
+  const cleanExt = ext.length <= 5 ? ext.toLowerCase() : 'mp4';
+  const mimeType =
+    cleanExt === 'mov'
+      ? 'video/quicktime'
+      : cleanExt === 'webm'
+      ? 'video/webm'
+      : cleanExt === '3gp'
+      ? 'video/3gpp'
+      : 'video/mp4';
+  const fileName = `video_${tripId}_${Date.now()}.${cleanExt}`;
+  const storagePath = `chat_videos/${fileName}`;
+
+  return uploadImageToSupabase('attachments', storagePath, videoUri, mimeType);
+}
+

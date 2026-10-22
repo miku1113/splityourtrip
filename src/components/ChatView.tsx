@@ -23,8 +23,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { Audio } from 'expo-av';
-import { uploadAudioToSupabase, uploadDocumentToSupabase } from '../services/imageUpload';
+import { Audio, Video, ResizeMode } from 'expo-av';
+import { uploadAudioToSupabase, uploadDocumentToSupabase, uploadVideoToSupabase } from '../services/imageUpload';
+import { chatOutbox, OutboxMessageItem } from '../services/chatOutboxService';
 import { useTheme } from '../theme/useThemeStore';
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
@@ -190,6 +191,27 @@ export default function ChatView({
   const inputRef = useRef<TextInput>(null);
   const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<string | null>(null);
+  const [selectedVideoPreview, setSelectedVideoPreview] = useState<string | null>(null);
+  const [outboxQueue, setOutboxQueue] = useState<OutboxMessageItem[]>([]);
+  const [isNetOnline, setIsNetOnline] = useState(true);
+
+  // Subscribe to persistent Outbox queue & network status (WhatsApp-style resilient queue)
+  useEffect(() => {
+    const unsub = chatOutbox.subscribe(q => {
+      setOutboxQueue(q.filter(item => !item.tripId || item.tripId === tripId));
+    });
+
+    chatOutbox.isOnline().then(online => setIsNetOnline(online));
+    const netTimer = setInterval(async () => {
+      const online = await chatOutbox.isOnline();
+      setIsNetOnline(online);
+    }, 4000);
+
+    return () => {
+      unsub();
+      clearInterval(netTimer);
+    };
+  }, [tripId]);
   const initialCacheKey = getFriendCacheKey(friendId, friendPhone, title);
   const initialCached = !isGroup ? friendSharedDataCache.get(initialCacheKey) : null;
   const initialMatchedContact = !isGroup
@@ -309,12 +331,9 @@ export default function ChatView({
 
   // Media upload status for live progress animation banner
   const [uploadingAttachment, setUploadingAttachment] = useState<{
-    type: 'image' | 'document' | 'audio';
+    type: 'image' | 'video' | 'document' | 'audio';
     name?: string;
   } | null>(null);
-
-  // Optimistic pending media messages (visible immediately on message card while uploading)
-  const [pendingUploads, setPendingUploads] = useState<TripMessage[]>([]);
 
   // Animation for uploading banner pulse & progress bar
   const uploadPulseAnim = useRef(new Animated.Value(0.35)).current;
@@ -324,7 +343,7 @@ export default function ChatView({
     let pulseAnim: Animated.CompositeAnimation | null = null;
     let barAnim: Animated.CompositeAnimation | null = null;
 
-    if (uploadingAttachment) {
+    if (uploadingAttachment || outboxQueue.length > 0) {
       pulseAnim = Animated.loop(
         Animated.sequence([
           Animated.timing(uploadPulseAnim, {
@@ -371,7 +390,7 @@ export default function ChatView({
       if (pulseAnim) pulseAnim.stop();
       if (barAnim) barAnim.stop();
     };
-  }, [uploadingAttachment, uploadPulseAnim, uploadBarAnim]);
+  }, [uploadingAttachment, outboxQueue.length, uploadPulseAnim, uploadBarAnim]);
 
   // Blinking animation for recording red dot
   useEffect(() => {
@@ -1263,11 +1282,6 @@ export default function ChatView({
     );
 
     const finalMessages = [...enrichedExisting, ...additionalShared];
-    if (pendingUploads.length > 0) {
-      const activePending = pendingUploads.filter(p => !p.trip_id || p.trip_id === tripId);
-      finalMessages.push(...activePending);
-    }
-
     return finalMessages.sort(
       (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
     );
@@ -1281,7 +1295,6 @@ export default function ChatView({
     displayTitle,
     currentTrip?.currency,
     tripMembers.length,
-    pendingUploads,
   ]);
 
   // Turn off loading once messages are populated (e.g. from local storage or cloud)
@@ -1514,38 +1527,6 @@ export default function ChatView({
       }
 
       const durationLabel = formatDuration(durationSecs);
-      const tempId = `pending_audio_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const pendingMsg: TripMessage = {
-        id: tempId,
-        trip_id: tripId,
-        sender_id: currentUserId,
-        sender_name: resolvedSenderName,
-        message: `🎙️ Voice note (${durationLabel})`,
-        type: 'audio',
-        chat_type: isGroup ? 'group' : 'individual',
-        media_url: uri,
-        duration: durationSecs,
-        is_sent: false,
-        created_at: new Date().toISOString(),
-      };
-
-      // 1. Instantly display audio message card in chat with uploading indicator
-      setPendingUploads(prev => [...prev, pendingMsg]);
-      setUploadingAttachment({
-        type: 'audio',
-        name: `Voice note (${durationLabel})`,
-      });
-      setTimeout(() => {
-        scrollToBottom(true);
-      }, 30);
-
-      let remoteUrl = uri;
-      try {
-        const uploaded = await uploadAudioToSupabase(tripId, uri);
-        if (uploaded) remoteUrl = uploaded;
-      } catch (upErr) {
-        console.warn('Voice upload error, falling back to local URI:', upErr);
-      }
 
       await sendMessage(
         tripId,
@@ -1554,22 +1535,21 @@ export default function ChatView({
         `🎙️ Voice note (${durationLabel})`,
         {
           type: 'audio',
-          url: remoteUrl,
+          url: uri,
+          localUri: uri,
           duration: durationSecs,
         },
         isGroup ? 'group' : 'individual'
       );
 
-      setPendingUploads(prev => prev.filter(p => p.id !== tempId));
       setTimeout(() => {
         scrollToBottom(true);
-      }, 100);
+      }, 60);
     } catch (e: any) {
       console.warn('Failed to send voice note:', e);
       Alert.alert('Voice Note', 'Could not send audio note. Please try again.');
     } finally {
       setIsSendingVoice(false);
-      setUploadingAttachment(null);
     }
   };
 
@@ -1643,7 +1623,7 @@ export default function ChatView({
     }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
         allowsEditing: true,
         quality: 0.8,
         base64: true,
@@ -1651,55 +1631,11 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        const tempId = `pending_img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const captionText = inputText.trim() || '📷 Photo';
-
-        const pendingMsg: TripMessage = {
-          id: tempId,
-          trip_id: tripId,
-          sender_id: currentUserId,
-          sender_name: resolvedSenderName,
-          message: captionText,
-          type: 'image',
-          chat_type: isGroup ? 'group' : 'individual',
-          media_url: asset.uri,
-          media_name: asset.fileName || 'Photo.jpg',
-          media_size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
-          is_sent: false,
-          created_at: new Date().toISOString(),
-        };
-
-        // 1. Instantly display image message card in chat with uploading animation
-        setPendingUploads(prev => [...prev, pendingMsg]);
-        setUploadingAttachment({
-          type: 'image',
-          name: asset.fileName || 'Photo.jpg',
-        });
-        setInputText('');
-        setTimeout(() => {
-          scrollToBottom(true);
-        }, 30);
-
-        let remoteUrl = asset.uri;
-
-        if (asset.base64) {
-          try {
-            const client = supabaseAdmin || supabase;
-            const storagePath = `chat/${tripId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-            const arrayBuffer = decodeBase64ToArrayBuffer(asset.base64);
-            const { data: uploadData } = await client.storage
-              .from('attachments')
-              .upload(storagePath, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
-            if (uploadData?.path) {
-              const { data: pubData } = client.storage.from('attachments').getPublicUrl(uploadData.path);
-              if (pubData?.publicUrl) {
-                remoteUrl = pubData.publicUrl;
-              }
-            }
-          } catch (uploadErr) {
-            console.warn('Image upload fallback to local URI:', uploadErr);
-          }
-        }
+        const isVideo =
+          asset.type === 'video' ||
+          Boolean(asset.fileName?.match(/\.(mp4|mov|m4v|3gp|webm)$/i)) ||
+          Boolean(asset.uri?.match(/\.(mp4|mov|m4v|3gp|webm)$/i));
+        const captionText = inputText.trim() || (isVideo ? '🎥 Video' : '📷 Photo');
 
         await sendMessage(
           tripId,
@@ -1707,23 +1643,22 @@ export default function ChatView({
           resolvedSenderName,
           captionText,
           {
-            type: 'image',
-            url: remoteUrl,
-            name: asset.fileName || 'Photo.jpg',
+            type: isVideo ? 'video' : 'image',
+            url: asset.uri,
+            localUri: asset.uri,
+            name: asset.fileName || (isVideo ? 'Video.mp4' : 'Photo.jpg'),
             size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
+            duration: asset.duration ? Math.round(asset.duration / 1000) : undefined,
           },
           isGroup ? 'group' : 'individual'
         );
-
-        setPendingUploads(prev => prev.filter(p => p.id !== tempId));
+        setInputText('');
         setTimeout(() => {
           scrollToBottom(true);
         }, 60);
       }
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Could not pick photo');
-    } finally {
-      setUploadingAttachment(null);
+      Alert.alert('Error', e?.message || 'Could not pick media');
     }
   };
 
@@ -1746,55 +1681,7 @@ export default function ChatView({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        const tempId = `pending_cam_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const captionText = inputText.trim() || '📷 Photo';
-
-        const pendingMsg: TripMessage = {
-          id: tempId,
-          trip_id: tripId,
-          sender_id: currentUserId,
-          sender_name: resolvedSenderName,
-          message: captionText,
-          type: 'image',
-          chat_type: isGroup ? 'group' : 'individual',
-          media_url: asset.uri,
-          media_name: 'Camera Photo.jpg',
-          media_size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
-          is_sent: false,
-          created_at: new Date().toISOString(),
-        };
-
-        // 1. Instantly display camera photo message card in chat with uploading animation
-        setPendingUploads(prev => [...prev, pendingMsg]);
-        setUploadingAttachment({
-          type: 'image',
-          name: 'Camera Photo',
-        });
-        setInputText('');
-        setTimeout(() => {
-          scrollToBottom(true);
-        }, 30);
-
-        let remoteUrl = asset.uri;
-
-        if (asset.base64) {
-          try {
-            const client = supabaseAdmin || supabase;
-            const storagePath = `chat/${tripId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-            const arrayBuffer = decodeBase64ToArrayBuffer(asset.base64);
-            const { data: uploadData } = await client.storage
-              .from('attachments')
-              .upload(storagePath, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
-            if (uploadData?.path) {
-              const { data: pubData } = client.storage.from('attachments').getPublicUrl(uploadData.path);
-              if (pubData?.publicUrl) {
-                remoteUrl = pubData.publicUrl;
-              }
-            }
-          } catch (uploadErr) {
-            console.warn('Camera upload fallback to local URI:', uploadErr);
-          }
-        }
 
         await sendMessage(
           tripId,
@@ -1803,22 +1690,20 @@ export default function ChatView({
           captionText,
           {
             type: 'image',
-            url: remoteUrl,
+            url: asset.uri,
+            localUri: asset.uri,
             name: asset.fileName || 'Photo.jpg',
             size: asset.fileSize ? `${Math.round(asset.fileSize / 1024)} KB` : undefined,
           },
           isGroup ? 'group' : 'individual'
         );
-
-        setPendingUploads(prev => prev.filter(p => p.id !== tempId));
+        setInputText('');
         setTimeout(() => {
           scrollToBottom(true);
         }, 60);
       }
     } catch (e: any) {
       Alert.alert('Camera Error', e?.message || 'Could not open camera');
-    } finally {
-      setUploadingAttachment(null);
     }
   };
 
@@ -1826,46 +1711,12 @@ export default function ChatView({
     setAttachmentModalVisible(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*', 'text/*'],
+        type: ['application/pdf', 'image/*', 'video/*', 'text/*', 'application/*'],
         copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
-        const tempId = `pending_doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-
-        const pendingMsg: TripMessage = {
-          id: tempId,
-          trip_id: tripId,
-          sender_id: currentUserId,
-          sender_name: resolvedSenderName,
-          message: file.name || 'Document',
-          type: 'document',
-          chat_type: isGroup ? 'group' : 'individual',
-          media_url: file.uri,
-          media_name: file.name || 'Document.pdf',
-          media_size: file.size ? `${Math.round(file.size / 1024)} KB` : 'PDF',
-          is_sent: false,
-          created_at: new Date().toISOString(),
-        };
-
-        // 1. Instantly display document message card in chat with uploading animation
-        setPendingUploads(prev => [...prev, pendingMsg]);
-        setUploadingAttachment({
-          type: 'document',
-          name: file.name || 'Document.pdf',
-        });
-        setTimeout(() => {
-          scrollToBottom(true);
-        }, 30);
-
-        let remoteUrl = file.uri;
-        try {
-          const uploaded = await uploadDocumentToSupabase(tripId, file.uri, file.name);
-          if (uploaded) remoteUrl = uploaded;
-        } catch (upErr) {
-          console.warn('Document upload fallback to local URI:', upErr);
-        }
 
         await sendMessage(
           tripId,
@@ -1874,22 +1725,19 @@ export default function ChatView({
           file.name || 'Document',
           {
             type: 'document',
-            url: remoteUrl,
+            url: file.uri,
+            localUri: file.uri,
             name: file.name || 'Document.pdf',
             size: file.size ? `${Math.round(file.size / 1024)} KB` : 'PDF',
           },
           isGroup ? 'group' : 'individual'
         );
-
-        setPendingUploads(prev => prev.filter(p => p.id !== tempId));
         setTimeout(() => {
           scrollToBottom(true);
         }, 60);
       }
     } catch (e: any) {
       Alert.alert('Document Error', e?.message || 'Could not pick document');
-    } finally {
-      setUploadingAttachment(null);
     }
   };
 
@@ -2709,8 +2557,15 @@ export default function ChatView({
                         <View style={styles.mediaUploadingCenterPill}>
                           <ActivityIndicator size="large" color="#FFFFFF" />
                           <View style={styles.mediaUploadingBadge}>
-                            <Ionicons name="cloud-upload" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
-                            <Text style={styles.mediaUploadingText}>Uploading...</Text>
+                            <Ionicons
+                              name={!isNetOnline ? 'cloud-offline' : 'cloud-upload'}
+                              size={13}
+                              color="#FFFFFF"
+                              style={{ marginRight: 4 }}
+                            />
+                            <Text style={styles.mediaUploadingText}>
+                              {!isNetOnline ? 'Waiting for network...' : 'Uploading...'}
+                            </Text>
                           </View>
                         </View>
                       </View>
@@ -2718,6 +2573,101 @@ export default function ChatView({
                   </TouchableOpacity>
 
                   {item.message && item.message !== '📷 Photo' ? (
+                    <Text style={[styles.imageCaption, { color: isMine ? '#FFFFFF' : colors.text }]}>
+                      {item.message}
+                    </Text>
+                  ) : null}
+
+                  <View style={styles.bubbleMetaRow}>
+                    <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                      {formatTime(item.created_at)}
+                    </Text>
+                    {isMine && renderMessageTicks(item, isMine)}
+                  </View>
+                </View>
+              </View>
+            );
+          }
+
+          // 1.5 Video Message
+          if (item.type === 'video' && item.media_url) {
+            const isPendingUpload = item.is_sent === false;
+            return (
+              <View
+                style={[
+                  styles.bubbleContainer,
+                  isMine ? styles.bubbleRight : styles.bubbleLeft,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.imageBubble,
+                    {
+                      backgroundColor: isMine ? colors.primary : colors.card,
+                      borderColor: isMine ? 'transparent' : colors.border,
+                      borderWidth: isMine ? 0 : 1,
+                    },
+                  ]}
+                >
+                  {isGroup && !isMine && (
+                    <Text style={[styles.senderNameHeader, { color: colors.primary, paddingHorizontal: 8, paddingTop: 6 }]}>
+                      {resolveSenderName(item)}
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    activeOpacity={isPendingUpload ? 1 : 0.88}
+                    onPress={() => !isPendingUpload && setSelectedVideoPreview(item.media_url || null)}
+                    onLongPress={() => !isPendingUpload && handleMessageLongPress(item, isMine)}
+                    delayLongPress={280}
+                    style={{ position: 'relative' }}
+                  >
+                    <Video
+                      source={{ uri: item.media_url }}
+                      style={styles.messageImage}
+                      resizeMode={ResizeMode.COVER}
+                      useNativeControls={false}
+                      isMuted
+                      shouldPlay={false}
+                    />
+
+                    {/* Play Button Overlay */}
+                    {!isPendingUpload && (
+                      <View style={styles.videoPlayOverlay}>
+                        <View style={styles.videoPlayBtnCircle}>
+                          <Ionicons name="play" size={26} color="#FFFFFF" style={{ marginLeft: 3 }} />
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Video Duration / Tag */}
+                    <View style={styles.videoDurationBadge}>
+                      <Ionicons name="videocam" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+                      <Text style={styles.videoDurationText}>
+                        {item.duration ? formatDuration(item.duration) : 'Video'}
+                      </Text>
+                    </View>
+
+                    {isPendingUpload && (
+                      <View style={styles.mediaUploadingOverlay}>
+                        <View style={styles.mediaUploadingCenterPill}>
+                          <ActivityIndicator size="large" color="#FFFFFF" />
+                          <View style={styles.mediaUploadingBadge}>
+                            <Ionicons
+                              name={!isNetOnline ? 'cloud-offline' : 'cloud-upload'}
+                              size={13}
+                              color="#FFFFFF"
+                              style={{ marginRight: 4 }}
+                            />
+                            <Text style={styles.mediaUploadingText}>
+                              {!isNetOnline ? 'Waiting for network...' : 'Uploading video...'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  {item.message && item.message !== '🎥 Video' ? (
                     <Text style={[styles.imageCaption, { color: isMine ? '#FFFFFF' : colors.text }]}>
                       {item.message}
                     </Text>
@@ -2778,9 +2728,14 @@ export default function ChatView({
                     </Text>
                     {item.is_sent === false ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                        <Ionicons name="cloud-upload-outline" size={12} color={isMine ? 'rgba(255,255,255,0.9)' : colors.primary} style={{ marginRight: 4 }} />
+                        <Ionicons
+                          name={!isNetOnline ? 'cloud-offline-outline' : 'cloud-upload-outline'}
+                          size={12}
+                          color={isMine ? 'rgba(255,255,255,0.9)' : colors.primary}
+                          style={{ marginRight: 4 }}
+                        />
                         <Text style={[styles.docSize, { color: isMine ? '#FFFFFF' : colors.primary, fontWeight: '700' }]}>
-                          Uploading document...
+                          {!isNetOnline ? 'Waiting for network...' : 'Uploading document...'}
                         </Text>
                       </View>
                     ) : (
@@ -2913,7 +2868,9 @@ export default function ChatView({
                             { color: isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
                           ]}
                         >
-                          {item.is_sent === false ? 'Sending...' : displayDur}
+                          {item.is_sent === false
+                            ? (!isNetOnline ? 'Waiting for network...' : 'Uploading...')
+                            : displayDur}
                         </Text>
                         <Ionicons
                           name="mic"
@@ -3478,8 +3435,8 @@ export default function ChatView({
         </View>
       )}
 
-      {/* Live Uploading Media / Document Banner */}
-      {uploadingAttachment && (
+      {/* Live Outbox Queue & Uploading Banner */}
+      {(outboxQueue.length > 0 || uploadingAttachment) && (
         <View
           style={[
             styles.uploadingBannerContainer,
@@ -3495,60 +3452,44 @@ export default function ChatView({
               style={[
                 styles.uploadingIconCircle,
                 {
-                  backgroundColor:
-                    uploadingAttachment.type === 'image'
-                      ? (isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF')
-                      : uploadingAttachment.type === 'document'
-                      ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2')
-                      : (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5'),
+                  backgroundColor: !isNetOnline
+                    ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2')
+                    : (isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF'),
                 },
               ]}
             >
               <Ionicons
-                name={
-                  uploadingAttachment.type === 'image'
-                    ? 'images'
-                    : uploadingAttachment.type === 'document'
-                    ? 'document-text'
-                    : 'mic'
-                }
+                name={!isNetOnline ? 'cloud-offline' : 'cloud-upload'}
                 size={18}
-                color={
-                  uploadingAttachment.type === 'image'
-                    ? '#3B82F6'
-                    : uploadingAttachment.type === 'document'
-                    ? '#EF4444'
-                    : '#10B981'
-                }
+                color={!isNetOnline ? '#EF4444' : '#3B82F6'}
               />
             </View>
 
             <View style={{ flex: 1, marginLeft: 10 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Text style={[styles.uploadingBannerTitle, { color: colors.text }]} numberOfLines={1}>
-                  {uploadingAttachment.type === 'image'
-                    ? 'Uploading Image...'
-                    : uploadingAttachment.type === 'document'
-                    ? 'Uploading Document...'
-                    : 'Uploading Voice Note...'}
+                  {!isNetOnline
+                    ? 'Waiting for connection...'
+                    : outboxQueue.length > 0
+                    ? outboxQueue.length === 1
+                      ? 'Sending 1 message in queue...'
+                      : `Sending ${outboxQueue.length} messages in queue...`
+                    : uploadingAttachment?.name || 'Uploading attachment...'}
                 </Text>
                 <Animated.View
                   style={[
                     styles.uploadingDotPulse,
                     {
                       opacity: uploadPulseAnim,
-                      backgroundColor:
-                        uploadingAttachment.type === 'image'
-                          ? '#3B82F6'
-                          : uploadingAttachment.type === 'document'
-                          ? '#EF4444'
-                          : '#10B981',
+                      backgroundColor: !isNetOnline ? '#EF4444' : '#3B82F6',
                     },
                   ]}
                 />
               </View>
               <Text style={[styles.uploadingBannerSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                {uploadingAttachment.name || 'Uploading to cloud & sending to chat...'}
+                {!isNetOnline
+                  ? `${outboxQueue.length || 1} queued • Will send automatically when online`
+                  : 'Uploading media & syncing to cloud...'}
               </Text>
             </View>
           </View>
@@ -3556,13 +3497,7 @@ export default function ChatView({
           <View style={styles.uploadingBannerRight}>
             <ActivityIndicator
               size="small"
-              color={
-                uploadingAttachment.type === 'image'
-                  ? '#3B82F6'
-                  : uploadingAttachment.type === 'document'
-                  ? '#EF4444'
-                  : '#10B981'
-              }
+              color={!isNetOnline ? '#EF4444' : '#3B82F6'}
             />
           </View>
 
@@ -3577,12 +3512,7 @@ export default function ChatView({
               style={[
                 styles.uploadingProgressBarFill,
                 {
-                  backgroundColor:
-                    uploadingAttachment.type === 'image'
-                      ? '#3B82F6'
-                      : uploadingAttachment.type === 'document'
-                      ? '#EF4444'
-                      : '#10B981',
+                  backgroundColor: !isNetOnline ? '#EF4444' : '#3B82F6',
                   width: uploadBarAnim.interpolate({
                     inputRange: [0, 1],
                     outputRange: ['12%', '98%'],
@@ -4279,6 +4209,35 @@ export default function ChatView({
           )}
         </View>
       </Modal>
+      )}
+
+      {/* Video Full-Screen Modal Preview */}
+      {Boolean(selectedVideoPreview) && (
+        <Modal
+          visible={Boolean(selectedVideoPreview)}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSelectedVideoPreview(null)}
+        >
+          <View style={styles.photoPreviewOverlay}>
+            <TouchableOpacity
+              style={[styles.photoCloseBtn, { top: Math.max(insets.top, 24) + 16 }]}
+              onPress={() => setSelectedVideoPreview(null)}
+            >
+              <Ionicons name="close-circle" size={32} color="#FFFFFF" />
+            </TouchableOpacity>
+            {selectedVideoPreview && (
+              <Video
+                source={{ uri: selectedVideoPreview }}
+                style={styles.fullScreenPhoto}
+                resizeMode={ResizeMode.CONTAIN}
+                useNativeControls
+                shouldPlay
+                isLooping={false}
+              />
+            )}
+          </View>
+        </Modal>
       )}
 
       {/* Three-Dots Options Sidebar Drawer (for both Trip Chat and Normal Friend Chat) */}
@@ -6045,5 +6004,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 4,
+  },
+  videoPlayOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoPlayBtnCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+  },
+  videoDurationBadge: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  videoDurationText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(11),
+    fontWeight: '600',
   },
 });

@@ -128,7 +128,7 @@ export interface TripMessage {
   sender_name?: string;
   message?: string;
   content?: string;
-  type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'document' | 'audio' | 'payment_settlement' | 'payment_claim' | 'payment_request';
+  type?: 'text' | 'expense' | 'dispute' | 'system' | 'image' | 'video' | 'document' | 'audio' | 'payment_settlement' | 'payment_claim' | 'payment_request';
   chat_type?: 'group' | 'individual' | 'trip' | 'user';
   media_url?: string;
   media_name?: string;
