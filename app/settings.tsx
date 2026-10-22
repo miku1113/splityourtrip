@@ -502,7 +502,7 @@ export default function SettingsScreen() {
               </Text>
             </View>
           </View>
-          <Text style={[styles.versionTag, { color: colors.textMuted }]}>v1.0.36 (37)</Text>
+          <Text style={[styles.versionTag, { color: colors.textMuted }]}>v1.0.40 (41)</Text>
         </View>
 
         <View style={styles.settingRow}>
