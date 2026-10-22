@@ -130,6 +130,9 @@ export default function AnalyserScreen() {
 
   // Search & Filter & Sort state ("filter search short")
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchModalVisible, setSearchModalVisible] = useState(false);
+  const [searchModalQuery, setSearchModalQuery] = useState('');
+  const [searchModalTab, setSearchModalTab] = useState<'all' | 'friends' | 'trips'>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeFilter>('all');
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentFilter>('all');
@@ -951,6 +954,27 @@ export default function AnalyserScreen() {
     }));
   };
 
+  const modalMatchedPeople = useMemo(() => {
+    if (!searchModalQuery.trim()) {
+      return availablePeople;
+    }
+    const q = searchModalQuery.toLowerCase().trim();
+    return availablePeople.filter(p => {
+      if (p.isCurrentUser && 'you'.includes(q)) return true;
+      const nameMatch = p.name.toLowerCase().includes(q);
+      const phoneMatch = p.phone ? normalizePhone(p.phone).includes(q) : false;
+      return nameMatch || phoneMatch;
+    });
+  }, [availablePeople, searchModalQuery]);
+
+  const modalMatchedTrips = useMemo(() => {
+    if (!searchModalQuery.trim()) {
+      return uniqueGroupTrips;
+    }
+    const q = searchModalQuery.toLowerCase().trim();
+    return uniqueGroupTrips.filter(t => t.name.toLowerCase().includes(q));
+  }, [uniqueGroupTrips, searchModalQuery]);
+
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (selectedTripFilter !== 'all') count += 1;
@@ -1205,29 +1229,83 @@ export default function AnalyserScreen() {
 
       {/* 3. Search, Filter & Sort Controls Row ("filter search short") */}
       <View style={styles.controlsRow}>
-        <View
+        <TouchableOpacity
           style={[
             styles.searchBar,
             {
               backgroundColor: colors.card,
-              borderColor: colors.border,
+              borderColor:
+                selectedPersonFilter !== 'all'
+                  ? '#10B981'
+                  : selectedTripFilter !== 'all'
+                  ? colors.primary
+                  : searchQuery.length > 0
+                  ? colors.primary
+                  : colors.border,
             },
           ]}
+          onPress={() => {
+            setSearchModalQuery(searchQuery);
+            setSearchModalVisible(true);
+          }}
+          activeOpacity={0.75}
         >
-          <Ionicons name="search" size={17} color={colors.textSecondary} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Search expenses, notes, payers..."
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
+          <Ionicons
+            name={
+              selectedPersonFilter !== 'all'
+                ? 'person'
+                : selectedTripFilter !== 'all'
+                ? 'airplane'
+                : 'search'
+            }
+            size={17}
+            color={
+              selectedPersonFilter !== 'all'
+                ? '#10B981'
+                : selectedTripFilter !== 'all'
+                ? colors.primary
+                : colors.textSecondary
+            }
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <View style={{ flex: 1 }}>
+            {selectedPersonFilter !== 'all' ? (
+              <Text style={[styles.searchBarSelectedText, { color: colors.text }]} numberOfLines={1}>
+                Person:{' '}
+                <Text style={{ color: '#10B981', fontWeight: '700' }}>
+                  {availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Selected'}
+                </Text>
+              </Text>
+            ) : selectedTripFilter !== 'all' ? (
+              <Text style={[styles.searchBarSelectedText, { color: colors.text }]} numberOfLines={1}>
+                Trip:{' '}
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>
+                  {uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Selected'}
+                </Text>
+              </Text>
+            ) : searchQuery.length > 0 ? (
+              <Text style={[styles.searchBarSelectedText, { color: colors.text }]} numberOfLines={1}>
+                "{searchQuery}"
+              </Text>
+            ) : (
+              <Text style={[styles.searchBarPlaceholder, { color: colors.textMuted }]} numberOfLines={1}>
+                Search friends, trips, expenses...
+              </Text>
+            )}
+          </View>
+
+          {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all' || searchQuery.length > 0) && (
+            <TouchableOpacity
+              onPress={() => {
+                setSelectedPersonFilter('all');
+                setSelectedTripFilter('all');
+                setSearchQuery('');
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
-        </View>
+        </TouchableOpacity>
 
         {/* Filter Trigger Button */}
         <TouchableOpacity
@@ -2548,6 +2626,415 @@ export default function AnalyserScreen() {
           </>
         )}
       </View>
+
+      {/* SEARCH & SELECT FRIENDS / TRIPS MODAL */}
+      <DraggableBottomSheet
+        visible={searchModalVisible}
+        onClose={() => setSearchModalVisible(false)}
+        maxHeight="92%"
+        sheetStyle={{ paddingBottom: 20 }}
+      >
+        <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Search & Select</Text>
+            <Text style={[styles.modalSub, { color: colors.textSecondary }]}>
+              Select a friend or trip to analyse
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.modalCloseBtn, { backgroundColor: colors.inputBackground }]}
+            onPress={() => setSearchModalVisible(false)}
+          >
+            <Ionicons name="close" size={20} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Search Input Box in Modal */}
+        <View style={styles.modalSearchBoxWrap}>
+          <View
+            style={[
+              styles.modalSearchBox,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Ionicons name="search" size={17} color={colors.textSecondary} />
+            <TextInput
+              style={[styles.modalSearchInput, { color: colors.text }]}
+              placeholder="Search friends, trips, notes..."
+              placeholderTextColor={colors.textMuted}
+              value={searchModalQuery}
+              onChangeText={setSearchModalQuery}
+              autoFocus={true}
+              clearButtonMode="while-editing"
+            />
+            {searchModalQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchModalQuery('')}>
+                <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Tab Pills: All Results | Friends | Trips */}
+        <View style={styles.modalTabPillsRow}>
+          <TouchableOpacity
+            style={[
+              styles.modalTabPill,
+              {
+                backgroundColor: searchModalTab === 'all' ? colors.primary : colors.inputBackground,
+                borderColor: searchModalTab === 'all' ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={() => setSearchModalTab('all')}
+          >
+            <Text
+              style={[
+                styles.modalTabPillText,
+                { color: searchModalTab === 'all' ? '#FFFFFF' : colors.text },
+              ]}
+            >
+              All ({modalMatchedPeople.length + modalMatchedTrips.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.modalTabPill,
+              {
+                backgroundColor: searchModalTab === 'friends' ? '#10B981' : colors.inputBackground,
+                borderColor: searchModalTab === 'friends' ? '#10B981' : colors.border,
+              },
+            ]}
+            onPress={() => setSearchModalTab('friends')}
+          >
+            <Ionicons
+              name="people"
+              size={13}
+              color={searchModalTab === 'friends' ? '#FFFFFF' : '#10B981'}
+              style={{ marginRight: 4 }}
+            />
+            <Text
+              style={[
+                styles.modalTabPillText,
+                { color: searchModalTab === 'friends' ? '#FFFFFF' : colors.text },
+              ]}
+            >
+              Friends ({modalMatchedPeople.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.modalTabPill,
+              {
+                backgroundColor: searchModalTab === 'trips' ? colors.primary : colors.inputBackground,
+                borderColor: searchModalTab === 'trips' ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={() => setSearchModalTab('trips')}
+          >
+            <Ionicons
+              name="airplane"
+              size={13}
+              color={searchModalTab === 'trips' ? '#FFFFFF' : colors.primary}
+              style={{ marginRight: 4 }}
+            />
+            <Text
+              style={[
+                styles.modalTabPillText,
+                { color: searchModalTab === 'trips' ? '#FFFFFF' : colors.text },
+              ]}
+            >
+              Trips ({modalMatchedTrips.length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Reset Active Filter Banner */}
+        {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all' || searchQuery.length > 0) && (
+          <View style={{ paddingHorizontal: 18, marginBottom: 10 }}>
+            <TouchableOpacity
+              style={[
+                styles.modalResetBanner,
+                {
+                  backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2',
+                  borderColor: '#EF4444',
+                },
+              ]}
+              onPress={() => {
+                setSelectedPersonFilter('all');
+                setSelectedTripFilter('all');
+                setSearchQuery('');
+                setSearchModalVisible(false);
+              }}
+            >
+              <Ionicons name="trash-outline" size={14} color="#EF4444" />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#EF4444' }}>
+                Reset filter (View all spending)
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <ScrollView
+          style={{ paddingHorizontal: 18 }}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Friends Section */}
+          {(searchModalTab === 'all' || searchModalTab === 'friends') && (
+            <View style={{ marginBottom: 16 }}>
+              <View style={styles.modalSectionHeadingRow}>
+                <Ionicons name="people" size={14} color="#10B981" />
+                <Text style={[styles.modalSectionHeading, { color: '#10B981' }]}>
+                  {searchModalQuery.trim().length >= 3
+                    ? `FRIENDS MATCHING "${searchModalQuery.trim()}"`
+                    : 'SELECT A FRIEND'}
+                </Text>
+              </View>
+
+              {modalMatchedPeople.length === 0 ? (
+                <View style={styles.modalEmptyBox}>
+                  <Text style={[styles.modalEmptyText, { color: colors.textSecondary }]}>
+                    No friends found matching "{searchModalQuery.trim()}".
+                  </Text>
+                </View>
+              ) : (
+                modalMatchedPeople.map(p => {
+                  const isSelected =
+                    selectedPersonFilter === p.id ||
+                    selectedPersonFilter.toLowerCase() === p.name.toLowerCase();
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[
+                        styles.modalListItem,
+                        {
+                          backgroundColor: isSelected
+                            ? isDark
+                              ? 'rgba(16, 185, 129, 0.18)'
+                              : '#ECFDF5'
+                            : colors.card,
+                          borderColor: isSelected ? '#10B981' : colors.borderLight,
+                        },
+                      ]}
+                      onPress={() => {
+                        setSelectedPersonFilter(p.id);
+                        setSearchQuery('');
+                        setSearchModalVisible(false);
+                      }}
+                    >
+                      {p.avatarUrl ? (
+                        <Image source={{ uri: p.avatarUrl }} style={styles.modalAvatarImg} />
+                      ) : (
+                        <View
+                          style={[
+                            styles.modalAvatarInitials,
+                            { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.modalAvatarText,
+                              { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
+                            ]}
+                          >
+                            {p.name.slice(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={{ flex: 1, marginHorizontal: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text
+                            style={[
+                              styles.modalItemTitle,
+                              {
+                                color: colors.text,
+                                fontWeight: isSelected ? '700' : '600',
+                              },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {p.name} {p.isCurrentUser ? '(You)' : ''}
+                          </Text>
+                          {p.isFriend && (
+                            <View
+                              style={[
+                                styles.friendBadge,
+                                {
+                                  backgroundColor: isDark
+                                    ? 'rgba(16, 185, 129, 0.2)'
+                                    : '#DCFCE7',
+                                },
+                              ]}
+                            >
+                              <Text style={styles.friendBadgeText}>Friend</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text
+                          style={[styles.modalItemSub, { color: colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {p.expenseCount > 0
+                            ? `${p.expenseCount} expenses${
+                                p.tripNames.length > 0 ? ` • ${p.tripNames.slice(0, 2).join(', ')}` : ''
+                              }`
+                            : p.isFriend
+                            ? 'Tap to filter analysis for this friend'
+                            : 'Tap to filter analysis'}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.filterActionPill,
+                          {
+                            backgroundColor: isSelected ? '#10B981' : colors.inputBackground,
+                            borderColor: isSelected ? '#10B981' : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.filterActionText,
+                            { color: isSelected ? '#FFFFFF' : '#10B981' },
+                          ]}
+                        >
+                          {isSelected ? 'Selected' : 'Select'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          )}
+
+          {/* Trips Section */}
+          {(searchModalTab === 'all' || searchModalTab === 'trips') && (
+            <View style={{ marginBottom: 16 }}>
+              <View style={styles.modalSectionHeadingRow}>
+                <Ionicons name="airplane" size={14} color={colors.primary} />
+                <Text style={[styles.modalSectionHeading, { color: colors.primary }]}>
+                  {searchModalQuery.trim().length >= 3
+                    ? `TRIPS MATCHING "${searchModalQuery.trim()}"`
+                    : 'SELECT A TRIP'}
+                </Text>
+              </View>
+
+              {modalMatchedTrips.length === 0 ? (
+                <View style={styles.modalEmptyBox}>
+                  <Text style={[styles.modalEmptyText, { color: colors.textSecondary }]}>
+                    No trips found matching "{searchModalQuery.trim()}".
+                  </Text>
+                </View>
+              ) : (
+                modalMatchedTrips.map(t => {
+                  const isSelected = selectedTripFilter === t.id;
+                  const tripExps = allTripsData[t.id]?.expenses || [];
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[
+                        styles.modalListItem,
+                        {
+                          backgroundColor: isSelected
+                            ? isDark
+                              ? 'rgba(74, 144, 226, 0.18)'
+                              : '#EEF4FF'
+                            : colors.card,
+                          borderColor: isSelected ? colors.primary : colors.borderLight,
+                        },
+                      ]}
+                      onPress={() => {
+                        setSelectedTripFilter(t.id);
+                        setSearchQuery('');
+                        setSearchModalVisible(false);
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.modalAvatarInitials,
+                          { backgroundColor: colors.primaryLight },
+                        ]}
+                      >
+                        <Ionicons name="airplane" size={16} color={colors.primary} />
+                      </View>
+
+                      <View style={{ flex: 1, marginHorizontal: 12 }}>
+                        <Text
+                          style={[
+                            styles.modalItemTitle,
+                            {
+                              color: colors.text,
+                              fontWeight: isSelected ? '700' : '600',
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {t.name}
+                        </Text>
+                        <Text
+                          style={[styles.modalItemSub, { color: colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {tripExps.length} {tripExps.length === 1 ? 'expense' : 'expenses'}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.filterActionPill,
+                          {
+                            backgroundColor: isSelected ? colors.primary : colors.inputBackground,
+                            borderColor: isSelected ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.filterActionText,
+                            { color: isSelected ? '#FFFFFF' : colors.primary },
+                          ]}
+                        >
+                          {isSelected ? 'Selected' : 'Select'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          )}
+
+          {/* Option to search keywords across notes */}
+          {searchModalQuery.trim().length > 0 && (
+            <TouchableOpacity
+              style={[
+                styles.modalKeywordSearchBtn,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.inputBackground,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={() => {
+                setSearchQuery(searchModalQuery.trim());
+                setSearchModalVisible(false);
+              }}
+            >
+              <Ionicons name="search" size={15} color={colors.primary} />
+              <Text style={[styles.modalKeywordSearchText, { color: colors.text }]}>
+                Search notes & descriptions for "{searchModalQuery.trim()}"
+              </Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+      </DraggableBottomSheet>
 
       {/* FILTER MODAL */}
       <DraggableBottomSheet
@@ -3917,6 +4404,110 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
     lineHeight: 16,
+  },
+  searchBarSelectedText: {
+    fontSize: 13,
+  },
+  searchBarPlaceholder: {
+    fontSize: 13,
+  },
+  modalTabPillsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  modalTabPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  modalTabPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modalResetBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  modalSectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  modalSectionHeading: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  modalListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  modalAvatarImg: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
+  modalAvatarInitials: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalAvatarText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  modalItemTitle: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  modalItemSub: {
+    fontSize: 12,
+  },
+  modalKeywordSearchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  modalKeywordSearchText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  modalEmptyBox: {
+    paddingVertical: 18,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyText: {
+    fontSize: 13,
+    textAlign: 'center',
   },
 });
 
