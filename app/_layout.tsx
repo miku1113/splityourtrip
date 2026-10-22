@@ -208,6 +208,7 @@ export default function RootLayout() {
           <Stack.Screen name="trip/[id]/settings" options={{ headerShown: false }} />
           <Stack.Screen name="chat/[id]/settings" options={{ headerShown: false }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+          <Stack.Screen name="google-drive-backup" options={{ title: 'Google Drive Backup' }} />
           <Stack.Screen name="about" options={{ title: 'About Us' }} />
           <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
           <Stack.Screen name="add-expense" options={{ headerShown: false }} />

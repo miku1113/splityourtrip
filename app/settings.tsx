@@ -360,6 +360,38 @@ export default function SettingsScreen() {
           <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
         </View>
 
+        {/* WhatsApp-Style Google Drive Backup */}
+        <TouchableOpacity
+          style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
+          onPress={() => router.push('/google-drive-backup')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingLabelRow}>
+            <View
+              style={[
+                styles.iconBox,
+                { backgroundColor: isDark ? 'rgba(37, 211, 102, 0.2)' : '#DCFCE7' },
+              ]}
+            >
+              <Ionicons name="logo-google" size={18} color="#25D366" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.settingTitle, { color: colors.text }]}>
+                  Google Drive Backup
+                </Text>
+                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: 'rgba(37, 211, 102, 0.15)' }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#16A34A' }}>WHATSAPP STYLE</Text>
+                </View>
+              </View>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+                Back up your trips, expenses & chats to your personal Google Drive account
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {/* Manual Sync Now Button */}
         <TouchableOpacity
           style={styles.settingRow}
