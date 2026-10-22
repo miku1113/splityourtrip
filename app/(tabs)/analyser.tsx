@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   InteractionManager,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Share,
   Image,
@@ -130,6 +131,8 @@ export default function AnalyserScreen() {
 
   // Search & Filter & Sort state ("filter search short")
   const [searchQuery, setSearchQuery] = useState('');
+  const [appliedExpenseSearch, setAppliedExpenseSearch] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [searchModalQuery, setSearchModalQuery] = useState('');
   const [searchModalTab, setSearchModalTab] = useState<'all' | 'friends' | 'trips'>('all');
@@ -635,9 +638,9 @@ export default function AnalyserScreen() {
       }
     }
 
-    // 2. Search query (notes, trips, payers, categories, and involved members)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    // 2. Search query (notes, trips, payers, categories, and involved members - applied when submitted or selected)
+    if (appliedExpenseSearch.trim()) {
+      const q = appliedExpenseSearch.toLowerCase().trim();
       result = result.filter(exp => {
         const descMatch = exp.description.toLowerCase().includes(q);
         const tripMatch = exp.trip_name.toLowerCase().includes(q);
@@ -718,7 +721,7 @@ export default function AnalyserScreen() {
     allRawExpenseItems,
     selectedPersonFilter,
     availablePeople,
-    searchQuery,
+    appliedExpenseSearch,
     selectedCategoryFilter,
     selectedTimeframe,
     selectedPaymentMode,
@@ -975,10 +978,25 @@ export default function AnalyserScreen() {
     return uniqueGroupTrips.filter(t => t.name.toLowerCase().includes(q));
   }, [uniqueGroupTrips, searchModalQuery]);
 
+  const selectedPersonName = useMemo(() => {
+    if (selectedPersonFilter === 'all') return null;
+    return (
+      availablePeople.find(
+        p => p.id === selectedPersonFilter || p.name.toLowerCase() === selectedPersonFilter.toLowerCase()
+      )?.name || 'Friend'
+    );
+  }, [selectedPersonFilter, availablePeople]);
+
+  const selectedTripName = useMemo(() => {
+    if (selectedTripFilter === 'all') return null;
+    return uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip';
+  }, [selectedTripFilter, uniqueAllTrips]);
+
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (selectedTripFilter !== 'all') count += 1;
     if (selectedPersonFilter !== 'all') count += 1;
+    if (appliedExpenseSearch.trim().length > 0) count += 1;
     if (selectedCategoryFilter !== 'all') count += 1;
     if (selectedTimeframe !== 'all') count += 1;
     if (selectedPaymentMode !== 'all') count += 1;
@@ -988,6 +1006,7 @@ export default function AnalyserScreen() {
   }, [
     selectedTripFilter,
     selectedPersonFilter,
+    appliedExpenseSearch,
     selectedCategoryFilter,
     selectedTimeframe,
     selectedPaymentMode,
@@ -998,6 +1017,7 @@ export default function AnalyserScreen() {
   const resetAllFilters = () => {
     setSelectedTripFilter('all');
     setSelectedPersonFilter('all');
+    setAppliedExpenseSearch('');
     setSelectedCategoryFilter('all');
     setSelectedTimeframe('all');
     setSelectedPaymentMode('all');
@@ -1056,6 +1076,7 @@ export default function AnalyserScreen() {
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -1064,7 +1085,470 @@ export default function AnalyserScreen() {
         />
       }
     >
-      {/* 1. Trip Selector Chips */}
+      {/* 1. TOP SEARCH, FILTER & SORT BAR */}
+      <View style={styles.controlsRow}>
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: colors.card,
+              borderColor: isSearchFocused
+                ? colors.primary
+                : selectedPersonFilter !== 'all'
+                ? '#10B981'
+                : selectedTripFilter !== 'all'
+                ? colors.primary
+                : appliedExpenseSearch.length > 0
+                ? '#F59E0B'
+                : colors.border,
+            },
+          ]}
+        >
+          <Ionicons
+            name={
+              selectedPersonFilter !== 'all'
+                ? 'person'
+                : selectedTripFilter !== 'all'
+                ? 'airplane'
+                : 'search'
+            }
+            size={17}
+            color={
+              selectedPersonFilter !== 'all'
+                ? '#10B981'
+                : selectedTripFilter !== 'all'
+                ? colors.primary
+                : colors.textSecondary
+            }
+          />
+          <TextInput
+            style={[styles.searchInput, { color: colors.text }]}
+            placeholder={
+              selectedPersonFilter !== 'all'
+                ? `Filter: ${selectedPersonName}`
+                : selectedTripFilter !== 'all'
+                ? `Filter: ${selectedTripName}`
+                : 'Search friends, trips, expenses...'
+            }
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+            onSubmitEditing={() => {
+              if (searchQuery.trim().length > 0) {
+                setAppliedExpenseSearch(searchQuery.trim());
+                setSearchQuery('');
+                Keyboard.dismiss();
+              }
+            }}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Filter Trigger Button */}
+        <TouchableOpacity
+          style={[
+            styles.iconActionBtn,
+            {
+              backgroundColor: activeFiltersCount > 0 ? colors.primary : colors.card,
+              borderColor: activeFiltersCount > 0 ? colors.primary : colors.border,
+            },
+          ]}
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Ionicons
+            name="filter"
+            size={18}
+            color={activeFiltersCount > 0 ? '#FFFFFF' : colors.text}
+          />
+          {activeFiltersCount > 0 && <View style={styles.activeFilterDot} />}
+        </TouchableOpacity>
+
+        {/* Sort Trigger Button */}
+        <TouchableOpacity
+          style={[
+            styles.iconActionBtn,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+          onPress={() => setSortModalVisible(true)}
+        >
+          <Ionicons name="swap-vertical" size={18} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      {/* 3-letter threshold hint when typing 1 or 2 characters */}
+      {searchQuery.trim().length > 0 && searchQuery.trim().length < 3 && (
+        <View style={styles.searchHintRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textMuted} />
+          <Text style={[styles.searchHintText, { color: colors.textMuted }]}>
+            Type {3 - searchQuery.trim().length} more {3 - searchQuery.trim().length === 1 ? 'letter' : 'letters'} to see matching friends & trips
+          </Text>
+        </View>
+      )}
+
+      {/* Search Autocomplete Suggestions for Friends & Trips (shows after typing 3 letters) */}
+      {searchQuery.trim().length >= 3 && (
+        <View
+          style={[
+            styles.searchSuggestionsCard,
+            {
+              backgroundColor: isDark ? '#1C2434' : '#FFFFFF',
+              borderColor: isDark ? 'rgba(120, 149, 183, 0.25)' : colors.border,
+            },
+          ]}
+        >
+          {/* Matching Friends & Members */}
+          {searchSuggestions.people.length > 0 && (
+            <View style={styles.suggestionSection}>
+              <View style={styles.suggestionSectionHeader}>
+                <Ionicons name="people" size={14} color="#10B981" />
+                <Text style={[styles.suggestionSectionTitle, { color: '#10B981' }]}>
+                  SELECT A FRIEND / PERSON ({searchSuggestions.people.length})
+                </Text>
+              </View>
+              {searchSuggestions.people.map(p => {
+                const isSelected =
+                  selectedPersonFilter === p.id ||
+                  selectedPersonFilter.toLowerCase() === p.name.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[
+                      styles.suggestionRow,
+                      {
+                        backgroundColor: isSelected
+                          ? isDark
+                            ? 'rgba(16, 185, 129, 0.18)'
+                            : '#ECFDF5'
+                          : 'transparent',
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedPersonFilter(p.id);
+                      setSearchQuery('');
+                      Keyboard.dismiss();
+                    }}
+                  >
+                    {p.avatarUrl ? (
+                      <Image source={{ uri: p.avatarUrl }} style={styles.suggestionAvatarImg} />
+                    ) : (
+                      <View
+                        style={[
+                          styles.suggestionAvatar,
+                          { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.suggestionAvatarText,
+                            { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
+                          ]}
+                        >
+                          {p.name.slice(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.suggestionContent}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text
+                          style={[
+                            styles.suggestionName,
+                            {
+                              color: colors.text,
+                              fontWeight: isSelected ? '700' : '600',
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {p.name} {p.isCurrentUser ? '(You)' : ''}
+                        </Text>
+                        {p.isFriend && (
+                          <View
+                            style={[
+                              styles.friendBadge,
+                              { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7' },
+                            ]}
+                          >
+                            <Text style={styles.friendBadgeText}>Friend</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[styles.suggestionSub, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {p.expenseCount > 0
+                          ? `${p.expenseCount} ${p.expenseCount === 1 ? 'expense' : 'expenses'}${
+                              p.tripNames.length > 0 ? ` • ${p.tripNames.slice(0, 2).join(', ')}` : ''
+                            }`
+                          : p.isFriend
+                          ? 'Friend in contacts • Tap to filter'
+                          : 'Tap to filter analysis'}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.filterActionPill,
+                        {
+                          backgroundColor: isSelected ? '#10B981' : colors.cardSecondary,
+                          borderColor: isSelected ? '#10B981' : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterActionText,
+                          {
+                            color: isSelected ? '#FFFFFF' : '#10B981',
+                          },
+                        ]}
+                      >
+                        {isSelected ? 'Selected' : 'Select'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Matching Trips */}
+          {searchSuggestions.trips.length > 0 && (
+            <View
+              style={[
+                styles.suggestionSection,
+                searchSuggestions.people.length > 0 && {
+                  borderTopWidth: 1,
+                  borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : colors.borderLight,
+                  marginTop: 6,
+                  paddingTop: 8,
+                },
+              ]}
+            >
+              <View style={styles.suggestionSectionHeader}>
+                <Ionicons name="airplane-outline" size={13} color={colors.primary} />
+                <Text style={[styles.suggestionSectionTitle, { color: colors.primary }]}>
+                  SELECT A TRIP ({searchSuggestions.trips.length})
+                </Text>
+              </View>
+              {searchSuggestions.trips.map(t => {
+                const isSelected = selectedTripFilter === t.id;
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[
+                      styles.suggestionRow,
+                      {
+                        backgroundColor: isSelected
+                          ? isDark
+                            ? 'rgba(74, 144, 226, 0.15)'
+                            : '#EEF4FF'
+                          : 'transparent',
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedTripFilter(t.id);
+                      setSearchQuery('');
+                      Keyboard.dismiss();
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.suggestionAvatar,
+                        { backgroundColor: isDark ? '#283449' : '#E6EEFA' },
+                      ]}
+                    >
+                      <Ionicons name="airplane" size={14} color={colors.primary} />
+                    </View>
+                    <View style={styles.suggestionContent}>
+                      <Text
+                        style={[
+                          styles.suggestionName,
+                          {
+                            color: colors.text,
+                            fontWeight: isSelected ? '700' : '600',
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {t.name}
+                      </Text>
+                      <Text style={[styles.suggestionSub, { color: colors.textSecondary }]}>
+                        Tap to filter analysis for this trip
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.filterActionPill,
+                        {
+                          backgroundColor: isSelected ? colors.primary : colors.cardSecondary,
+                          borderColor: isSelected ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterActionText,
+                          {
+                            color: isSelected ? '#FFFFFF' : colors.primary,
+                          },
+                        ]}
+                      >
+                        {isSelected ? 'Selected' : 'Select'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Option to search notes & expenses for typed query */}
+          <TouchableOpacity
+            style={[
+              styles.suggestionSearchExpenseRow,
+              (searchSuggestions.people.length > 0 || searchSuggestions.trips.length > 0) && {
+                borderTopWidth: 1,
+                borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : colors.borderLight,
+                marginTop: 6,
+                paddingTop: 8,
+              },
+            ]}
+            onPress={() => {
+              setAppliedExpenseSearch(searchQuery.trim());
+              setSearchQuery('');
+              Keyboard.dismiss();
+            }}
+          >
+            <Ionicons name="search-outline" size={15} color={colors.primary} />
+            <Text style={[styles.suggestionSearchExpenseText, { color: colors.text }]} numberOfLines={1}>
+              Search all expenses & notes for "{searchQuery.trim()}"
+            </Text>
+            <View style={[styles.filterActionPill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
+              <Text style={[styles.filterActionText, { color: colors.primary }]}>Search</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* 2. ACTIVE SELECTED FILTER (Shows chosen friend, trip, or keyword) */}
+      {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all' || appliedExpenseSearch.length > 0) && (
+        <View style={styles.topSelectedFilterSection}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.topSelectedFilterScroll}
+          >
+            {selectedPersonFilter !== 'all' && (
+              <View
+                style={[
+                  styles.topSelectedFilterChip,
+                  {
+                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.16)' : '#ECFDF5',
+                    borderColor: '#10B981',
+                  },
+                ]}
+              >
+                <Ionicons name="person" size={13} color="#10B981" />
+                <Text style={[styles.topSelectedFilterChipText, { color: colors.text }]} numberOfLines={1}>
+                  Friend:{' '}
+                  <Text style={{ fontWeight: '700', color: '#10B981' }}>{selectedPersonName}</Text>
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setSelectedPersonFilter('all')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={16} color="#10B981" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {selectedTripFilter !== 'all' && (
+              <View
+                style={[
+                  styles.topSelectedFilterChip,
+                  {
+                    backgroundColor: isDark ? 'rgba(74, 144, 226, 0.16)' : '#EEF4FF',
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <Ionicons name="airplane" size={13} color={colors.primary} />
+                <Text style={[styles.topSelectedFilterChipText, { color: colors.text }]} numberOfLines={1}>
+                  Trip:{' '}
+                  <Text style={{ fontWeight: '700', color: colors.primary }}>{selectedTripName}</Text>
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setSelectedTripFilter('all')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={16} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {appliedExpenseSearch.length > 0 && (
+              <View
+                style={[
+                  styles.topSelectedFilterChip,
+                  {
+                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.16)' : '#FEF3C7',
+                    borderColor: '#F59E0B',
+                  },
+                ]}
+              >
+                <Ionicons name="search" size={13} color="#F59E0B" />
+                <Text style={[styles.topSelectedFilterChipText, { color: colors.text }]} numberOfLines={1}>
+                  Search:{' '}
+                  <Text style={{ fontWeight: '700', color: '#F59E0B' }}>"{appliedExpenseSearch}"</Text>
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setAppliedExpenseSearch('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={16} color="#F59E0B" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.topClearAllBtn,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.cardSecondary,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={() => {
+                setSelectedPersonFilter('all');
+                setSelectedTripFilter('all');
+                setAppliedExpenseSearch('');
+              }}
+            >
+              <Ionicons name="refresh-outline" size={12} color={colors.textSecondary} />
+              <Text style={[styles.topClearAllText, { color: colors.textSecondary }]}>
+                Clear Filter
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      )}
+
+      {/* 3. Trip Selector Chips */}
       <View style={styles.filterSection}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
           <TouchableOpacity
@@ -1227,346 +1711,6 @@ export default function AnalyserScreen() {
         </View>
       </View>
 
-      {/* 3. Search, Filter & Sort Controls Row ("filter search short") */}
-      <View style={styles.controlsRow}>
-        <TouchableOpacity
-          style={[
-            styles.searchBar,
-            {
-              backgroundColor: colors.card,
-              borderColor:
-                selectedPersonFilter !== 'all'
-                  ? '#10B981'
-                  : selectedTripFilter !== 'all'
-                  ? colors.primary
-                  : searchQuery.length > 0
-                  ? colors.primary
-                  : colors.border,
-            },
-          ]}
-          onPress={() => {
-            setSearchModalQuery(searchQuery);
-            setSearchModalVisible(true);
-          }}
-          activeOpacity={0.75}
-        >
-          <Ionicons
-            name={
-              selectedPersonFilter !== 'all'
-                ? 'person'
-                : selectedTripFilter !== 'all'
-                ? 'airplane'
-                : 'search'
-            }
-            size={17}
-            color={
-              selectedPersonFilter !== 'all'
-                ? '#10B981'
-                : selectedTripFilter !== 'all'
-                ? colors.primary
-                : colors.textSecondary
-            }
-          />
-          <View style={{ flex: 1 }}>
-            {selectedPersonFilter !== 'all' ? (
-              <Text style={[styles.searchBarSelectedText, { color: colors.text }]} numberOfLines={1}>
-                Person:{' '}
-                <Text style={{ color: '#10B981', fontWeight: '700' }}>
-                  {availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Selected'}
-                </Text>
-              </Text>
-            ) : selectedTripFilter !== 'all' ? (
-              <Text style={[styles.searchBarSelectedText, { color: colors.text }]} numberOfLines={1}>
-                Trip:{' '}
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>
-                  {uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Selected'}
-                </Text>
-              </Text>
-            ) : searchQuery.length > 0 ? (
-              <Text style={[styles.searchBarSelectedText, { color: colors.text }]} numberOfLines={1}>
-                "{searchQuery}"
-              </Text>
-            ) : (
-              <Text style={[styles.searchBarPlaceholder, { color: colors.textMuted }]} numberOfLines={1}>
-                Search friends, trips, expenses...
-              </Text>
-            )}
-          </View>
-
-          {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all' || searchQuery.length > 0) && (
-            <TouchableOpacity
-              onPress={() => {
-                setSelectedPersonFilter('all');
-                setSelectedTripFilter('all');
-                setSearchQuery('');
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
-        </TouchableOpacity>
-
-        {/* Filter Trigger Button */}
-        <TouchableOpacity
-          style={[
-            styles.iconActionBtn,
-            {
-              backgroundColor: activeFiltersCount > 0 ? colors.primary : colors.card,
-              borderColor: activeFiltersCount > 0 ? colors.primary : colors.border,
-            },
-          ]}
-          onPress={() => setFilterModalVisible(true)}
-        >
-          <Ionicons
-            name="filter"
-            size={18}
-            color={activeFiltersCount > 0 ? '#FFFFFF' : colors.text}
-          />
-          {activeFiltersCount > 0 && <View style={styles.activeFilterDot} />}
-        </TouchableOpacity>
-
-        {/* Sort Trigger Button ("short") */}
-        <TouchableOpacity
-          style={[
-            styles.iconActionBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-          ]}
-          onPress={() => setSortModalVisible(true)}
-        >
-          <Ionicons name="swap-vertical" size={18} color={colors.text} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Search Autocomplete Suggestions for Friends & Trips (shows after typing 3 letters) */}
-      {searchQuery.trim().length >= 3 && (
-        <View
-          style={[
-            styles.searchSuggestionsCard,
-            {
-              backgroundColor: isDark ? '#1C2434' : '#FFFFFF',
-              borderColor: isDark ? 'rgba(120, 149, 183, 0.25)' : colors.border,
-            },
-          ]}
-        >
-          {/* Matching Friends & Members */}
-          {searchSuggestions.people.length > 0 && (
-            <View style={styles.suggestionSection}>
-              <View style={styles.suggestionSectionHeader}>
-                <Ionicons name="people" size={14} color="#10B981" />
-                <Text style={[styles.suggestionSectionTitle, { color: '#10B981' }]}>
-                  SELECT A FRIEND / PERSON ({searchSuggestions.people.length})
-                </Text>
-              </View>
-              {searchSuggestions.people.map(p => {
-                const isSelected =
-                  selectedPersonFilter === p.id ||
-                  selectedPersonFilter.toLowerCase() === p.name.toLowerCase();
-                return (
-                  <TouchableOpacity
-                    key={p.id}
-                    style={[
-                      styles.suggestionRow,
-                      {
-                        backgroundColor: isSelected
-                          ? isDark
-                            ? 'rgba(16, 185, 129, 0.18)'
-                            : '#ECFDF5'
-                          : 'transparent',
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedPersonFilter(p.id);
-                      setSearchQuery('');
-                    }}
-                  >
-                    {p.avatarUrl ? (
-                      <Image source={{ uri: p.avatarUrl }} style={styles.suggestionAvatarImg} />
-                    ) : (
-                      <View
-                        style={[
-                          styles.suggestionAvatar,
-                          { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.suggestionAvatarText,
-                            { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
-                          ]}
-                        >
-                          {p.name.slice(0, 2).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={styles.suggestionContent}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text
-                          style={[
-                            styles.suggestionName,
-                            {
-                              color: colors.text,
-                              fontWeight: isSelected ? '700' : '600',
-                            },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {p.name} {p.isCurrentUser ? '(You)' : ''}
-                        </Text>
-                        {p.isFriend && (
-                          <View
-                            style={[
-                              styles.friendBadge,
-                              { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7' },
-                            ]}
-                          >
-                            <Text style={styles.friendBadgeText}>Friend</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text
-                        style={[styles.suggestionSub, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        {p.expenseCount > 0
-                          ? `${p.expenseCount} ${p.expenseCount === 1 ? 'expense' : 'expenses'}${
-                              p.tripNames.length > 0 ? ` • ${p.tripNames.slice(0, 2).join(', ')}` : ''
-                            }`
-                          : p.isFriend
-                          ? 'Friend in contacts • Tap to filter analysis'
-                          : 'Tap to filter analysis'}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.filterActionPill,
-                        {
-                          backgroundColor: isSelected ? '#10B981' : colors.cardSecondary,
-                          borderColor: isSelected ? '#10B981' : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.filterActionText,
-                          {
-                            color: isSelected ? '#FFFFFF' : '#10B981',
-                          },
-                        ]}
-                      >
-                        {isSelected ? 'Selected' : 'Select'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-
-          {/* Matching Trips */}
-          {searchSuggestions.trips.length > 0 && (
-            <View
-              style={[
-                styles.suggestionSection,
-                searchSuggestions.people.length > 0 && {
-                  borderTopWidth: 1,
-                  borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : colors.borderLight,
-                  marginTop: 6,
-                  paddingTop: 8,
-                },
-              ]}
-            >
-              <View style={styles.suggestionSectionHeader}>
-                <Ionicons name="airplane-outline" size={13} color={colors.primary} />
-                <Text style={[styles.suggestionSectionTitle, { color: colors.primary }]}>
-                  SELECT A TRIP ({searchSuggestions.trips.length})
-                </Text>
-              </View>
-              {searchSuggestions.trips.map(t => {
-                const isSelected = selectedTripFilter === t.id;
-                return (
-                  <TouchableOpacity
-                    key={t.id}
-                    style={[
-                      styles.suggestionRow,
-                      {
-                        backgroundColor: isSelected
-                          ? isDark
-                            ? 'rgba(74, 144, 226, 0.15)'
-                            : '#EEF4FF'
-                          : 'transparent',
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedTripFilter(t.id);
-                      setSearchQuery('');
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.suggestionAvatar,
-                        { backgroundColor: isDark ? '#283449' : '#E6EEFA' },
-                      ]}
-                    >
-                      <Ionicons name="airplane" size={14} color={colors.primary} />
-                    </View>
-                    <View style={styles.suggestionContent}>
-                      <Text
-                        style={[
-                          styles.suggestionName,
-                          {
-                            color: colors.text,
-                            fontWeight: isSelected ? '700' : '600',
-                          },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {t.name}
-                      </Text>
-                      <Text style={[styles.suggestionSub, { color: colors.textSecondary }]}>
-                        Tap to filter analysis for this trip
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.filterActionPill,
-                        {
-                          backgroundColor: isSelected ? colors.primary : colors.cardSecondary,
-                          borderColor: isSelected ? colors.primary : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.filterActionText,
-                          {
-                            color: isSelected ? '#FFFFFF' : colors.primary,
-                          },
-                        ]}
-                      >
-                        {isSelected ? 'Selected' : 'Select'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-
-          {/* If 3+ letters typed but no direct friend or trip match */}
-          {searchSuggestions.people.length === 0 && searchSuggestions.trips.length === 0 && (
-            <View style={styles.noSuggestionRow}>
-              <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
-              <Text style={[styles.noSuggestionText, { color: colors.textSecondary }]}>
-                No friends or trips matching "{searchQuery.trim()}". Searching notes, categories & amounts below.
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
 
       {/* Quick People Filter Bar */}
       {availablePeople.length > 0 && (
@@ -1691,7 +1835,7 @@ export default function AnalyserScreen() {
       )}
 
       {/* Active Filter Pills Bar */}
-      {(activeFiltersCount > 0 || searchQuery.length > 0) && (
+      {(activeFiltersCount > 0 || appliedExpenseSearch.length > 0) && (
         <View style={styles.activePillsContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activePillsScroll}>
             {selectedTripFilter !== 'all' && (
@@ -2348,7 +2492,7 @@ export default function AnalyserScreen() {
                     router.push({
                       pathname: '/all-expenses',
                       params: {
-                        search: searchQuery || undefined,
+                        search: appliedExpenseSearch || searchQuery || undefined,
                         category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
                         sort: selectedSort,
                       },
@@ -2491,7 +2635,7 @@ export default function AnalyserScreen() {
                     router.push({
                       pathname: '/all-expenses',
                       params: {
-                        search: searchQuery || undefined,
+                        search: appliedExpenseSearch || searchQuery || undefined,
                         category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
                         sort: selectedSort,
                       },
@@ -4508,6 +4652,64 @@ const styles = StyleSheet.create({
   modalEmptyText: {
     fontSize: 13,
     textAlign: 'center',
+  },
+  searchHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 6,
+    marginTop: -4,
+    marginBottom: 10,
+  },
+  searchHintText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  suggestionSearchExpenseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    gap: 10,
+  },
+  suggestionSearchExpenseText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  topSelectedFilterSection: {
+    marginBottom: 12,
+  },
+  topSelectedFilterScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  topSelectedFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    gap: 7,
+  },
+  topSelectedFilterChipText: {
+    fontSize: 12,
+  },
+  topClearAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 4,
+  },
+  topClearAllText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 
