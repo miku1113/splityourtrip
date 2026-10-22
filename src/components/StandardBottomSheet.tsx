@@ -49,7 +49,7 @@ export const StandardBottomSheet: React.FC<StandardBottomSheetProps> = ({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.overlayContainer}>
+      <View style={styles.overlayContainer} pointerEvents="box-none">
         {/* Backdrop: tap anywhere outside the sheet to dismiss */}
         <TouchableWithoutFeedback onPress={onClose}>
           <View style={styles.backdrop} />
@@ -59,6 +59,7 @@ export const StandardBottomSheet: React.FC<StandardBottomSheetProps> = ({
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardContainer}
+          pointerEvents="box-none"
         >
           <View
             style={[
@@ -71,6 +72,7 @@ export const StandardBottomSheet: React.FC<StandardBottomSheetProps> = ({
               },
               sheetStyle,
             ]}
+            pointerEvents="auto"
           >
             {/* Optional subtle pill handle */}
             {showHandle && (

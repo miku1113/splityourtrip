@@ -1616,17 +1616,48 @@ export default function ChatView({
     }
   };
 
-  const handlePickImage = async () => {
-    setAttachmentModalVisible(false);
-    if (Platform.OS === 'ios') {
-      await new Promise(resolve => setTimeout(resolve, 450));
+  const dismissAttachmentModalIfOpen = async () => {
+    if (attachmentModalVisible) {
+      setAttachmentModalVisible(false);
+      await new Promise(resolve => setTimeout(resolve, Platform.OS === 'ios' ? 450 : 350));
     }
+  };
+
+  const handleCameraIconPress = () => {
+    Keyboard.dismiss();
+    Alert.alert(
+      'Attach Media',
+      'Choose an option:',
+      [
+        {
+          text: 'Take Photo',
+          onPress: handleTakePhoto,
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: handlePickImage,
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
+  };
+
+  const handlePickImage = async () => {
+    await dismissAttachmentModalIfOpen();
     try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission Required', 'Please enable photo & media permissions in your device settings.');
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.8,
-        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -1658,15 +1689,13 @@ export default function ChatView({
         }, 60);
       }
     } catch (e: any) {
+      console.error('[ChatView] Pick image error:', e);
       Alert.alert('Error', e?.message || 'Could not pick media');
     }
   };
 
   const handleTakePhoto = async () => {
-    setAttachmentModalVisible(false);
-    if (Platform.OS === 'ios') {
-      await new Promise(resolve => setTimeout(resolve, 450));
-    }
+    await dismissAttachmentModalIfOpen();
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
@@ -1674,9 +1703,8 @@ export default function ChatView({
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.8,
-        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -1703,15 +1731,16 @@ export default function ChatView({
         }, 60);
       }
     } catch (e: any) {
+      console.error('[ChatView] Camera error:', e);
       Alert.alert('Camera Error', e?.message || 'Could not open camera');
     }
   };
 
   const handlePickDocument = async () => {
-    setAttachmentModalVisible(false);
+    await dismissAttachmentModalIfOpen();
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*', 'video/*', 'text/*', 'application/*'],
+        type: '*/*',
         copyToCacheDirectory: true,
       });
 
@@ -1737,6 +1766,7 @@ export default function ChatView({
         }, 60);
       }
     } catch (e: any) {
+      console.error('[ChatView] Document error:', e);
       Alert.alert('Document Error', e?.message || 'Could not pick document');
     }
   };
@@ -1785,9 +1815,14 @@ export default function ChatView({
 
   const handlePickPaymentScreenshot = async () => {
     try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission Required', 'Please enable photo permissions in device settings.');
+        return;
+      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.8,
         base64: true,
       });
@@ -1796,6 +1831,7 @@ export default function ChatView({
         setPayScreenshotBase64(result.assets[0].base64 || null);
       }
     } catch (e: any) {
+      console.error('[ChatView] Payment screenshot error:', e);
       Alert.alert('Error', e?.message || 'Could not pick screenshot');
     }
   };
@@ -1808,7 +1844,7 @@ export default function ChatView({
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.8,
         base64: true,
       });
@@ -3638,7 +3674,7 @@ export default function ChatView({
               />
 
               {/* Camera Button 📷 */}
-              <TouchableOpacity style={styles.composerIconBtn} onPress={handleTakePhoto}>
+              <TouchableOpacity style={styles.composerIconBtn} onPress={handleCameraIconPress}>
                 <Ionicons name="camera" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -3838,7 +3874,7 @@ export default function ChatView({
 
             <View style={styles.attachmentGrid}>
               {/* 1. Document */}
-              <TouchableOpacity style={styles.attachmentItem} onPress={handlePickDocument}>
+              <TouchableOpacity style={styles.attachmentItem} onPress={handlePickDocument} activeOpacity={0.7}>
                 <View style={[styles.attachCircle, { backgroundColor: '#6366F1' }]}>
                   <Ionicons name="document-text" size={26} color="#FFFFFF" />
                 </View>
@@ -3846,7 +3882,7 @@ export default function ChatView({
               </TouchableOpacity>
 
               {/* 2. Camera */}
-              <TouchableOpacity style={styles.attachmentItem} onPress={handleTakePhoto}>
+              <TouchableOpacity style={styles.attachmentItem} onPress={handleTakePhoto} activeOpacity={0.7}>
                 <View style={[styles.attachCircle, { backgroundColor: '#EC4899' }]}>
                   <Ionicons name="camera" size={26} color="#FFFFFF" />
                 </View>
@@ -3854,7 +3890,7 @@ export default function ChatView({
               </TouchableOpacity>
 
               {/* 3. Gallery */}
-              <TouchableOpacity style={styles.attachmentItem} onPress={handlePickImage}>
+              <TouchableOpacity style={styles.attachmentItem} onPress={handlePickImage} activeOpacity={0.7}>
                 <View style={[styles.attachCircle, { backgroundColor: '#8B5CF6' }]}>
                   <Ionicons name="images" size={26} color="#FFFFFF" />
                 </View>
@@ -3864,6 +3900,7 @@ export default function ChatView({
               {/* 4. Split Bill */}
               <TouchableOpacity
                 style={styles.attachmentItem}
+                activeOpacity={0.7}
                 onPress={() => {
                   setAttachmentModalVisible(false);
                   setTimeout(() => {
@@ -3879,7 +3916,7 @@ export default function ChatView({
               </TouchableOpacity>
 
               {/* 5. Pay & Share Screenshot */}
-              <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenPayModal()}>
+              <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenPayModal()} activeOpacity={0.7}>
                 <View style={[styles.attachCircle, { backgroundColor: '#F59E0B' }]}>
                   <Ionicons name="card" size={26} color="#FFFFFF" />
                 </View>
@@ -3887,7 +3924,7 @@ export default function ChatView({
               </TouchableOpacity>
 
               {/* 6. Request Money */}
-              <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenRequestMoneyModal()}>
+              <TouchableOpacity style={styles.attachmentItem} onPress={() => handleOpenRequestMoneyModal()} activeOpacity={0.7}>
                 <View style={[styles.attachCircle, { backgroundColor: '#06B6D4' }]}>
                   <Ionicons name="cash" size={26} color="#FFFFFF" />
                 </View>
