@@ -390,7 +390,7 @@ async function uploadToGoogleDriveAPI(
 }
 
 /**
- * Performs WhatsApp-style Google Drive backup.
+ * Performs personal Google Drive backup.
  * 1. Checks if Google Drive OAuth token is active -> uploads via Drive API.
  * 2. Also writes file to cache and offers native system "Save to Google Drive" share option.
  */

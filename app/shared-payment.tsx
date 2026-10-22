@@ -488,7 +488,7 @@ export default function SharedPaymentScreen() {
           )}
         </View>
 
-        {/* SECTION HEADER: WHATSAPP-STYLE DESTINATION PICKER */}
+        {/* SECTION HEADER: DESTINATION PICKER */}
         <View style={styles.destinationHeader}>
           <Text style={[styles.destinationTitle, { color: colors.text }]}>
             Send / Link Expense To
@@ -593,7 +593,7 @@ export default function SharedPaymentScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* SECTION 1: RECENT INDIVIDUAL SPLITS / CHATS (WhatsApp Style) */}
+        {/* SECTION 1: RECENT INDIVIDUAL SPLITS / CHATS */}
         {(activeTab === 'all' || activeTab === 'chats') && (
           <View style={styles.listSection}>
             <View style={styles.sectionTitleRow}>

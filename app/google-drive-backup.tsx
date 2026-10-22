@@ -171,7 +171,7 @@ export default function GoogleDriveBackupScreen() {
         }}
       />
 
-      {/* Top Banner: WhatsApp Chat Backup Style */}
+      {/* Top Banner: Personal Google Drive Backup */}
       <View
         style={[
           styles.statusCard,
@@ -192,7 +192,7 @@ export default function GoogleDriveBackupScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.statusTitle, { color: colors.text }]}>
-              WhatsApp-Style Google Backup
+              Personal Google Drive Backup
             </Text>
             <Text style={[styles.statusSubtitle, { color: colors.textSecondary }]}>
               Save your trips, expenses, chats, and receipts to your personal Google Drive account

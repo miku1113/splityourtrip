@@ -360,7 +360,7 @@ export default function SettingsScreen() {
           <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
         </View>
 
-        {/* WhatsApp-Style Google Drive Backup */}
+        {/* Google Drive Personal Backup */}
         <TouchableOpacity
           style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
           onPress={() => router.push('/google-drive-backup')}
@@ -381,7 +381,7 @@ export default function SettingsScreen() {
                   Google Drive Backup
                 </Text>
                 <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: 'rgba(37, 211, 102, 0.15)' }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#16A34A' }}>WHATSAPP STYLE</Text>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#16A34A' }}>GOOGLE DRIVE</Text>
                 </View>
               </View>
               <Text style={[styles.settingSub, { color: colors.textSecondary }]}>

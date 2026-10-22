@@ -195,7 +195,7 @@ export default function ChatView({
   const [outboxQueue, setOutboxQueue] = useState<OutboxMessageItem[]>([]);
   const [isNetOnline, setIsNetOnline] = useState(true);
 
-  // Subscribe to persistent Outbox queue & network status (WhatsApp-style resilient queue)
+  // Subscribe to persistent Outbox queue & network status (resilient outbox queue)
   useEffect(() => {
     const unsub = chatOutbox.subscribe(q => {
       setOutboxQueue(q.filter(item => !item.tripId || item.tripId === tripId));
