@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Share,
+  Image,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,7 @@ import {
   findMyMember,
   normalizePhone,
 } from '../../src/features/trips/useTripStore';
+import { useContactsStore } from '../../src/features/contacts/useContactsStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { AppStorage } from '../../src/lib/storage';
 import { Trip, TripMember, TripBalanceRow } from '../../src/types/database';
@@ -95,6 +97,8 @@ export interface PersonFilterItem {
   tripIds: string[];
   tripNames: string[];
   expenseCount: number;
+  avatarUrl?: string | null;
+  isFriend?: boolean;
 }
 
 interface DailySpendGroup {
@@ -113,6 +117,8 @@ export default function AnalyserScreen() {
   const currentUserPhone =
     profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
   const { trips, expenses, members, initTrips } = useTripStore();
+  const contacts = useContactsStore(s => s.contacts);
+  const fetchFriendsSummary = useContactsStore(s => s.fetchFriendsSummary);
 
   // Primary filters
   const [selectedTripFilter, setSelectedTripFilter] = useState<string>('all');
@@ -191,7 +197,10 @@ export default function AnalyserScreen() {
   useEffect(() => {
     getUserCurrencyPreference().then(c => setUserCurrency(c));
     loadAllTripsAnalytics();
-  }, [trips, expenses, members, loadAllTripsAnalytics]);
+    if (user?.id) {
+      fetchFriendsSummary(user.id);
+    }
+  }, [trips, expenses, members, user?.id, loadAllTripsAnalytics, fetchFriendsSummary]);
 
   useFocusEffect(
     useCallback(() => {
@@ -200,9 +209,12 @@ export default function AnalyserScreen() {
       const task = InteractionManager.runAfterInteractions(() => {
         getUserCurrencyPreference().then(c => setUserCurrency(c));
         loadAllTripsAnalytics();
+        if (user?.id) {
+          fetchFriendsSummary(user.id);
+        }
       });
       return () => task.cancel();
-    }, [loadAllTripsAnalytics])
+    }, [user?.id, loadAllTripsAnalytics, fetchFriendsSummary])
   );
 
   const handleOpenTrip = async (tripId: string, closeModalFirst = false) => {
@@ -232,6 +244,9 @@ export default function AnalyserScreen() {
     setRefreshing(true);
     await initTrips();
     await loadAllTripsAnalytics();
+    if (user?.id) {
+      await fetchFriendsSummary(user.id);
+    }
     setRefreshing(false);
   };
 
@@ -405,7 +420,7 @@ export default function AnalyserScreen() {
     return items;
   }, [uniqueAllTrips, allTripsData, selectedTripFilter, user?.id, currentUserPhone, userCurrency]);
 
-  // Extract all distinct people across the currently selected trip scope (or all trips)
+  // Extract all distinct people (trip members + friends from contacts) across the currently selected trip scope (or all trips)
   const availablePeople = useMemo<PersonFilterItem[]>(() => {
     const targetTrips =
       selectedTripFilter === 'all'
@@ -448,6 +463,8 @@ export default function AnalyserScreen() {
             tripIds: [t.id],
             tripNames: [t.name],
             expenseCount: 0,
+            avatarUrl: null,
+            isFriend: false,
           };
           peopleMap.set(key, existing);
         } else {
@@ -459,19 +476,98 @@ export default function AnalyserScreen() {
       }
     }
 
+    // Merge friends from contacts store
+    if (Array.isArray(contacts)) {
+      for (const c of contacts) {
+        if (!c || !c.name) continue;
+        const cleanPhone = c.phoneNumber ? normalizePhone(c.phoneNumber) : null;
+        const isCurrent = Boolean(
+          (currentUserId && c.profileId === currentUserId) ||
+          (currentUserPhone && cleanPhone && normalizePhone(currentUserPhone) === cleanPhone)
+        );
+        if (isCurrent) continue;
+
+        const key = c.profileId
+          ? c.profileId
+          : cleanPhone
+          ? cleanPhone
+          : c.name.trim().toLowerCase();
+
+        let existing = peopleMap.get(key);
+        if (!existing) {
+          const lowerName = c.name.trim().toLowerCase();
+          for (const [_, val] of peopleMap.entries()) {
+            if (val.name.trim().toLowerCase() === lowerName) {
+              existing = val;
+              break;
+            }
+          }
+        }
+
+        if (existing) {
+          existing.isFriend = true;
+          if (c.avatarUrl && !existing.avatarUrl) existing.avatarUrl = c.avatarUrl;
+          if (cleanPhone && !existing.phone) existing.phone = c.phoneNumber;
+        } else {
+          peopleMap.set(key, {
+            id: key,
+            name: c.name.trim(),
+            isCurrentUser: false,
+            phone: c.phoneNumber || null,
+            tripIds: c.defaultTripId ? [c.defaultTripId] : [],
+            tripNames: [],
+            expenseCount: 0,
+            avatarUrl: c.avatarUrl || null,
+            isFriend: true,
+          });
+        }
+      }
+    }
+
+    // Add any explicit payers from raw expenses who are not yet in the map
+    for (const exp of allRawExpenseItems) {
+      if (exp.payerName && exp.payerName !== 'Member' && exp.payerName !== 'You') {
+        const lowerName = exp.payerName.trim().toLowerCase();
+        let found = false;
+        for (const [_, val] of peopleMap.entries()) {
+          if (val.name.trim().toLowerCase() === lowerName) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          peopleMap.set(lowerName, {
+            id: exp.paid_by || lowerName,
+            name: exp.payerName.trim(),
+            isCurrentUser: false,
+            phone: null,
+            tripIds: [exp.trip_id],
+            tripNames: [exp.trip_name],
+            expenseCount: 0,
+            avatarUrl: null,
+            isFriend: false,
+          });
+        }
+      }
+    }
+
     // Tally matching expenses for each person
     for (const exp of allRawExpenseItems) {
       for (const person of peopleMap.values()) {
+        const pLower = person.name.toLowerCase().trim();
         const matchesKey =
           exp.involvedMemberKeys &&
           (exp.involvedMemberKeys.includes(person.id) ||
             (person.phone && exp.involvedMemberKeys.includes(normalizePhone(person.phone))));
         const matchesName =
-          exp.involvedMemberNames &&
-          exp.involvedMemberNames.includes(person.name.toLowerCase());
+          (exp.payerName && exp.payerName.toLowerCase().trim() === pLower) ||
+          (exp.involvedMemberNames &&
+            exp.involvedMemberNames.some(
+              n => n === pLower || n.includes(pLower) || pLower.includes(n)
+            ));
         const isPayer =
           exp.paid_by === person.id ||
-          exp.payerName.toLowerCase() === person.name.toLowerCase();
+          (exp.payerName && exp.payerName.toLowerCase().trim() === pLower);
 
         if (matchesKey || matchesName || isPayer) {
           person.expenseCount += 1;
@@ -484,6 +580,8 @@ export default function AnalyserScreen() {
       if (a.isCurrentUser) return -1;
       if (b.isCurrentUser) return 1;
       if (b.expenseCount !== a.expenseCount) return b.expenseCount - a.expenseCount;
+      if (a.isFriend && !b.isFriend) return -1;
+      if (!a.isFriend && b.isFriend) return 1;
       return a.name.localeCompare(b.name);
     });
 
@@ -495,6 +593,7 @@ export default function AnalyserScreen() {
     user?.id,
     profile?.id,
     currentUserPhone,
+    contacts,
     allRawExpenseItems,
   ]);
 
@@ -746,18 +845,24 @@ export default function AnalyserScreen() {
     };
   }, [filteredAndSortedExpenses, selectedPersonFilter, availablePeople]);
 
-  // Autocomplete Suggestions for Trips and People when searching
+  // Autocomplete Suggestions for Friends and Trips when searching (triggers after 3 letters)
   const searchSuggestions = useMemo(() => {
-    if (!searchQuery.trim()) return { trips: [], people: [] };
     const q = searchQuery.toLowerCase().trim();
+    // User requirement: list friends after typing 3 letters
+    if (q.length < 3) return { trips: [], people: [] };
 
     const matchedTrips = uniqueAllTrips
       .filter(t => t.name.toLowerCase().includes(q))
       .slice(0, 4);
 
     const matchedPeople = availablePeople
-      .filter(p => p.name.toLowerCase().includes(q))
-      .slice(0, 5);
+      .filter(p => {
+        if (p.isCurrentUser && 'you'.includes(q)) return true;
+        const nameMatch = p.name.toLowerCase().includes(q);
+        const phoneMatch = p.phone ? normalizePhone(p.phone).includes(q) : false;
+        return nameMatch || phoneMatch;
+      })
+      .slice(0, 8);
 
     return { trips: matchedTrips, people: matchedPeople };
   }, [searchQuery, uniqueAllTrips, availablePeople]);
@@ -1158,39 +1263,163 @@ export default function AnalyserScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Search Autocomplete Suggestions for Trips & People */}
-      {searchQuery.trim().length > 0 &&
-        (searchSuggestions.trips.length > 0 || searchSuggestions.people.length > 0) && (
-          <View
-            style={[
-              styles.searchSuggestionsCard,
-              {
-                backgroundColor: isDark ? '#1C2434' : '#FFFFFF',
-                borderColor: isDark ? 'rgba(120, 149, 183, 0.25)' : colors.border,
-              },
-            ]}
-          >
-            {/* Matching Trips */}
-            {searchSuggestions.trips.length > 0 && (
-              <View style={styles.suggestionSection}>
-                <View style={styles.suggestionSectionHeader}>
-                  <Ionicons name="airplane-outline" size={13} color={colors.primary} />
-                  <Text style={[styles.suggestionSectionTitle, { color: colors.primary }]}>
-                    TRIPS MATCHING "{searchQuery.trim()}"
-                  </Text>
-                </View>
-                {searchSuggestions.trips.map(t => (
+      {/* Search Autocomplete Suggestions for Friends & Trips (shows after typing 3 letters) */}
+      {searchQuery.trim().length >= 3 && (
+        <View
+          style={[
+            styles.searchSuggestionsCard,
+            {
+              backgroundColor: isDark ? '#1C2434' : '#FFFFFF',
+              borderColor: isDark ? 'rgba(120, 149, 183, 0.25)' : colors.border,
+            },
+          ]}
+        >
+          {/* Matching Friends & Members */}
+          {searchSuggestions.people.length > 0 && (
+            <View style={styles.suggestionSection}>
+              <View style={styles.suggestionSectionHeader}>
+                <Ionicons name="people" size={14} color="#10B981" />
+                <Text style={[styles.suggestionSectionTitle, { color: '#10B981' }]}>
+                  SELECT A FRIEND / PERSON ({searchSuggestions.people.length})
+                </Text>
+              </View>
+              {searchSuggestions.people.map(p => {
+                const isSelected =
+                  selectedPersonFilter === p.id ||
+                  selectedPersonFilter.toLowerCase() === p.name.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[
+                      styles.suggestionRow,
+                      {
+                        backgroundColor: isSelected
+                          ? isDark
+                            ? 'rgba(16, 185, 129, 0.18)'
+                            : '#ECFDF5'
+                          : 'transparent',
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedPersonFilter(p.id);
+                      setSearchQuery('');
+                    }}
+                  >
+                    {p.avatarUrl ? (
+                      <Image source={{ uri: p.avatarUrl }} style={styles.suggestionAvatarImg} />
+                    ) : (
+                      <View
+                        style={[
+                          styles.suggestionAvatar,
+                          { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.suggestionAvatarText,
+                            { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
+                          ]}
+                        >
+                          {p.name.slice(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.suggestionContent}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text
+                          style={[
+                            styles.suggestionName,
+                            {
+                              color: colors.text,
+                              fontWeight: isSelected ? '700' : '600',
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {p.name} {p.isCurrentUser ? '(You)' : ''}
+                        </Text>
+                        {p.isFriend && (
+                          <View
+                            style={[
+                              styles.friendBadge,
+                              { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7' },
+                            ]}
+                          >
+                            <Text style={styles.friendBadgeText}>Friend</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[styles.suggestionSub, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {p.expenseCount > 0
+                          ? `${p.expenseCount} ${p.expenseCount === 1 ? 'expense' : 'expenses'}${
+                              p.tripNames.length > 0 ? ` • ${p.tripNames.slice(0, 2).join(', ')}` : ''
+                            }`
+                          : p.isFriend
+                          ? 'Friend in contacts • Tap to filter analysis'
+                          : 'Tap to filter analysis'}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.filterActionPill,
+                        {
+                          backgroundColor: isSelected ? '#10B981' : colors.cardSecondary,
+                          borderColor: isSelected ? '#10B981' : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.filterActionText,
+                          {
+                            color: isSelected ? '#FFFFFF' : '#10B981',
+                          },
+                        ]}
+                      >
+                        {isSelected ? 'Selected' : 'Select'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Matching Trips */}
+          {searchSuggestions.trips.length > 0 && (
+            <View
+              style={[
+                styles.suggestionSection,
+                searchSuggestions.people.length > 0 && {
+                  borderTopWidth: 1,
+                  borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : colors.borderLight,
+                  marginTop: 6,
+                  paddingTop: 8,
+                },
+              ]}
+            >
+              <View style={styles.suggestionSectionHeader}>
+                <Ionicons name="airplane-outline" size={13} color={colors.primary} />
+                <Text style={[styles.suggestionSectionTitle, { color: colors.primary }]}>
+                  SELECT A TRIP ({searchSuggestions.trips.length})
+                </Text>
+              </View>
+              {searchSuggestions.trips.map(t => {
+                const isSelected = selectedTripFilter === t.id;
+                return (
                   <TouchableOpacity
                     key={t.id}
                     style={[
                       styles.suggestionRow,
                       {
-                        backgroundColor:
-                          selectedTripFilter === t.id
-                            ? isDark
-                              ? 'rgba(74, 144, 226, 0.15)'
-                              : '#EEF4FF'
-                            : 'transparent',
+                        backgroundColor: isSelected
+                          ? isDark
+                            ? 'rgba(74, 144, 226, 0.15)'
+                            : '#EEF4FF'
+                          : 'transparent',
                       },
                     ]}
                     onPress={() => {
@@ -1212,7 +1441,7 @@ export default function AnalyserScreen() {
                           styles.suggestionName,
                           {
                             color: colors.text,
-                            fontWeight: selectedTripFilter === t.id ? '700' : '600',
+                            fontWeight: isSelected ? '700' : '600',
                           },
                         ]}
                         numberOfLines={1}
@@ -1227,10 +1456,8 @@ export default function AnalyserScreen() {
                       style={[
                         styles.filterActionPill,
                         {
-                          backgroundColor:
-                            selectedTripFilter === t.id ? colors.primary : colors.cardSecondary,
-                          borderColor:
-                            selectedTripFilter === t.id ? colors.primary : colors.border,
+                          backgroundColor: isSelected ? colors.primary : colors.cardSecondary,
+                          borderColor: isSelected ? colors.primary : colors.border,
                         },
                       ]}
                     >
@@ -1238,119 +1465,30 @@ export default function AnalyserScreen() {
                         style={[
                           styles.filterActionText,
                           {
-                            color: selectedTripFilter === t.id ? '#FFFFFF' : colors.primary,
+                            color: isSelected ? '#FFFFFF' : colors.primary,
                           },
                         ]}
                       >
-                        {selectedTripFilter === t.id ? 'Selected' : 'Filter Trip'}
+                        {isSelected ? 'Selected' : 'Select'}
                       </Text>
                     </View>
                   </TouchableOpacity>
-                ))}
-              </View>
-            )}
+                );
+              })}
+            </View>
+          )}
 
-            {/* Matching People */}
-            {searchSuggestions.people.length > 0 && (
-              <View
-                style={[
-                  styles.suggestionSection,
-                  searchSuggestions.trips.length > 0 && {
-                    borderTopWidth: 1,
-                    borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : colors.borderLight,
-                    marginTop: 6,
-                    paddingTop: 8,
-                  },
-                ]}
-              >
-                <View style={styles.suggestionSectionHeader}>
-                  <Ionicons name="people-outline" size={13} color="#10B981" />
-                  <Text style={[styles.suggestionSectionTitle, { color: '#10B981' }]}>
-                    PEOPLE MATCHING "{searchQuery.trim()}"
-                  </Text>
-                </View>
-                {searchSuggestions.people.map(p => (
-                  <TouchableOpacity
-                    key={p.id}
-                    style={[
-                      styles.suggestionRow,
-                      {
-                        backgroundColor:
-                          selectedPersonFilter === p.id
-                            ? isDark
-                              ? 'rgba(16, 185, 129, 0.15)'
-                              : '#ECFDF5'
-                            : 'transparent',
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedPersonFilter(p.id);
-                      setSearchQuery('');
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.suggestionAvatar,
-                        { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.suggestionAvatarText,
-                          { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
-                        ]}
-                      >
-                        {p.name.slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.suggestionContent}>
-                      <Text
-                        style={[
-                          styles.suggestionName,
-                          {
-                            color: colors.text,
-                            fontWeight: selectedPersonFilter === p.id ? '700' : '600',
-                          },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {p.name} {p.isCurrentUser ? '(You)' : ''}
-                      </Text>
-                      <Text
-                        style={[styles.suggestionSub, { color: colors.textSecondary }]}
-                        numberOfLines={1}
-                      >
-                        {p.tripNames.join(', ')} • {p.expenseCount} expenses
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.filterActionPill,
-                        {
-                          backgroundColor:
-                            selectedPersonFilter === p.id ? '#10B981' : colors.cardSecondary,
-                          borderColor:
-                            selectedPersonFilter === p.id ? '#10B981' : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.filterActionText,
-                          {
-                            color: selectedPersonFilter === p.id ? '#FFFFFF' : '#10B981',
-                          },
-                        ]}
-                      >
-                        {selectedPersonFilter === p.id ? 'Selected' : 'Filter Person'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
+          {/* If 3+ letters typed but no direct friend or trip match */}
+          {searchSuggestions.people.length === 0 && searchSuggestions.trips.length === 0 && (
+            <View style={styles.noSuggestionRow}>
+              <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.noSuggestionText, { color: colors.textSecondary }]}>
+                No friends or trips matching "{searchQuery.trim()}". Searching notes, categories & amounts below.
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Quick People Filter Bar */}
       {availablePeople.length > 0 && (
@@ -3752,6 +3890,33 @@ const styles = StyleSheet.create({
   personCountText: {
     fontSize: 10,
     fontWeight: '700',
+  },
+  suggestionAvatarImg: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  friendBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  friendBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  noSuggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  noSuggestionText: {
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
   },
 });
 
