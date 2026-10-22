@@ -293,13 +293,17 @@ class ChatOutboxManager {
           }
         }
 
-        // 2. Insert message into Supabase database
-        currentItem.status = 'sending';
-        this.notifyListeners();
+        // If message has media, require remoteUrl before committing to remote database
+        if (currentItem.mediaData && !currentItem.mediaData.remoteUrl) {
+          // Media has not finished cloud upload yet. Keep in queued status and retry when network is available.
+          currentItem.status = 'queued';
+          await this.saveQueue();
+          break;
+        }
 
         try {
           const client = supabaseAdmin || supabase;
-          const remoteMediaUrl = currentItem.mediaData?.remoteUrl || currentItem.mediaData?.localUri;
+          const remoteMediaUrl = currentItem.mediaData?.remoteUrl;
 
           // Build database payload string
           let fullPayload = currentItem.text.trim();

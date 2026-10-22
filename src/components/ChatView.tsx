@@ -2558,7 +2558,12 @@ export default function ChatView({
           const isFromOther = !isGroup ? !isMine : false;
 
           // 1. Photo Message
-          if (item.type === 'image' && item.media_url) {
+          const photoUrl =
+            item.media_url ||
+            (item as any).payload?.media_url ||
+            (item as any).payload?.mediaUrl ||
+            (item as any).payload?.url;
+          if (item.type === 'image' && photoUrl) {
             return (
               <View
                 style={[
@@ -2583,11 +2588,11 @@ export default function ChatView({
                   )}
                   <TouchableOpacity
                     activeOpacity={item.is_sent === false ? 1 : 0.9}
-                    onPress={() => item.is_sent !== false && setSelectedPhotoPreview(item.media_url || null)}
+                    onPress={() => item.is_sent !== false && setSelectedPhotoPreview(photoUrl || null)}
                     onLongPress={() => item.is_sent !== false && handleMessageLongPress(item, isMine)}
                     delayLongPress={280}
                   >
-                    <Image source={{ uri: item.media_url }} style={styles.messageImage} />
+                    <Image source={{ uri: photoUrl }} style={styles.messageImage} />
                     {item.is_sent === false && (
                       <View style={styles.mediaUploadingOverlay}>
                         <View style={styles.mediaUploadingCenterPill}>
@@ -2626,7 +2631,12 @@ export default function ChatView({
           }
 
           // 1.5 Video Message
-          if (item.type === 'video' && item.media_url) {
+          const videoUrl =
+            item.media_url ||
+            (item as any).payload?.media_url ||
+            (item as any).payload?.mediaUrl ||
+            (item as any).payload?.url;
+          if (item.type === 'video' && videoUrl) {
             const isPendingUpload = item.is_sent === false;
             return (
               <View
@@ -2652,13 +2662,13 @@ export default function ChatView({
                   )}
                   <TouchableOpacity
                     activeOpacity={isPendingUpload ? 1 : 0.88}
-                    onPress={() => !isPendingUpload && setSelectedVideoPreview(item.media_url || null)}
+                    onPress={() => !isPendingUpload && setSelectedVideoPreview(videoUrl || null)}
                     onLongPress={() => !isPendingUpload && handleMessageLongPress(item, isMine)}
                     delayLongPress={280}
                     style={{ position: 'relative' }}
                   >
                     <Video
-                      source={{ uri: item.media_url }}
+                      source={{ uri: videoUrl }}
                       style={styles.messageImage}
                       resizeMode={ResizeMode.COVER}
                       useNativeControls={false}
@@ -2722,6 +2732,11 @@ export default function ChatView({
 
           // 2. Document Message
           if (item.type === 'document') {
+            const docUrl =
+              item.media_url ||
+              (item as any).payload?.media_url ||
+              (item as any).payload?.mediaUrl ||
+              (item as any).payload?.url;
             return (
               <View
                 style={[
@@ -2739,7 +2754,7 @@ export default function ChatView({
                     },
                   ]}
                   activeOpacity={0.8}
-                  onPress={() => handleOpenDoc(item.media_url)}
+                  onPress={() => handleOpenDoc(docUrl)}
                   onLongPress={() => handleMessageLongPress(item, isMine)}
                   delayLongPress={280}
                 >
@@ -2801,6 +2816,11 @@ export default function ChatView({
 
           // 2.5 Audio Voice Note Message
           if (item.type === 'audio') {
+            const audioUrl =
+              item.media_url ||
+              (item as any).payload?.media_url ||
+              (item as any).payload?.mediaUrl ||
+              (item as any).payload?.url;
             const isThisPlaying = playingAudioId === item.id && isPlayingAudio;
             const isThisLoaded = playingAudioId === item.id;
             const displayDur = isThisLoaded && audioPlaybackPosition > 0
@@ -2847,7 +2867,7 @@ export default function ChatView({
                         },
                       ]}
                       disabled={item.is_sent === false}
-                      onPress={() => handleTogglePlayAudio(item.id, item.media_url, item.duration)}
+                      onPress={() => handleTogglePlayAudio(item.id, audioUrl, item.duration)}
                     >
                       {item.is_sent === false ? (
                         <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.primary} />

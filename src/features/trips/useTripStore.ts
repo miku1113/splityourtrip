@@ -354,6 +354,8 @@ export function parseMessagePayload(rawContent: string) {
       if (parsed.expense_id) expId = parsed.expense_id;
       if (parsed.expense_data) expData = parsed.expense_data;
       if (parsed.media_url) mediaUrl = parsed.media_url;
+      else if (parsed.mediaUrl) mediaUrl = parsed.mediaUrl;
+      else if (parsed.url) mediaUrl = parsed.url;
       else if (parsed.screenshot_url) mediaUrl = parsed.screenshot_url;
       else if (parsed.screenshotUrl) mediaUrl = parsed.screenshotUrl;
       if (parsed.media_name) mediaName = parsed.media_name;
@@ -1756,10 +1758,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           content: tm.message || '',
           type: parsed.msgType,
           chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') || tm.message?.includes('"chat_type":"individual"') ? 'individual' : defaultChatType),
-          media_url: parsed.mediaUrl,
-          media_name: parsed.mediaName,
-          media_size: parsed.mediaSize,
-          duration: parsed.duration,
+          media_url: parsed.mediaUrl || (tm as any).media_url || (tm as any).attachment_url || (tm as any).screenshot_url,
+          media_name: parsed.mediaName || (tm as any).media_name,
+          media_size: parsed.mediaSize || (tm as any).media_size,
+          duration: parsed.duration || (tm as any).duration,
           expense_id: parsed.expId,
           expense_data: parsed.expData,
           payload: parsed.rawPayload,
@@ -1791,7 +1793,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           content: m.content || '',
           type: parsed.msgType,
           chat_type: resolvedChatType,
-          media_url: parsed.mediaUrl,
+          media_url: parsed.mediaUrl || (m as any).media_url || (m as any).metadata?.media_url || (m as any).metadata?.mediaUrl,
           media_name: parsed.mediaName,
           media_size: parsed.mediaSize,
           duration: parsed.duration,
@@ -4500,9 +4502,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 content: tm.message || '',
                 type: parsed.msgType,
                 chat_type: parsed.chatType || (tm.message?.includes('"chat_type":"user"') || tm.message?.includes('"chat_type":"individual"') ? 'individual' : defaultChatType),
-                media_url: parsed.mediaUrl,
-                media_name: parsed.mediaName,
-                media_size: parsed.mediaSize,
+                media_url: parsed.mediaUrl || (tm as any).media_url || (tm as any).attachment_url || (tm as any).screenshot_url,
+                media_name: parsed.mediaName || (tm as any).media_name,
+                media_size: parsed.mediaSize || (tm as any).media_size,
                 expense_id: parsed.expId,
                 expense_data: parsed.expData,
                 payload: parsed.rawPayload,
