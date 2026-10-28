@@ -12,6 +12,7 @@ import {
   StyleProp,
   ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/useThemeStore';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -95,6 +96,7 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
   onSnapChange,
 }) => {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [modalVisible, setModalVisible] = useState(visible);
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
@@ -421,23 +423,38 @@ export const DraggableBottomSheet: React.FC<DraggableBottomSheetProps> = ({
           )}
 
           {/* Content container */}
-          <View
-            style={[styles.contentWrap, hasSnapPoints && { flex: 1 }]}
-            onLayout={(e) => {
-              if (!hasSnapPoints) {
-                const h = e.nativeEvent.layout.height;
-                if (h > 60) {
-                  measuredHeightRef.current = h;
-                  const availableUp = Math.max(0, SCREEN_HEIGHT - h - 100);
-                  maxUpOffsetRef.current = Math.min(availableUp, SCREEN_HEIGHT * 0.5);
-                }
-              }
-            }}
-          >
-            {typeof children === 'function'
-              ? (children as any)({ isExpanded, snapIndex: currentSnap.current, snapOffset })
-              : children}
-          </View>
+          {(() => {
+            const hasExplicitHeight = Boolean(
+              hasSnapPoints ||
+              sheetH ||
+              minHeight ||
+              (sheetStyle && (sheetStyle as any).height) ||
+              (sheetStyle && (sheetStyle as any).minHeight)
+            );
+            return (
+              <View
+                style={[
+                  styles.contentWrap,
+                  hasExplicitHeight && { flex: 1 },
+                  { paddingBottom: Math.max(insets.bottom, 16) },
+                ]}
+                onLayout={(e) => {
+                  if (!hasSnapPoints) {
+                    const h = e.nativeEvent.layout.height;
+                    if (h > 60) {
+                      measuredHeightRef.current = h;
+                      const availableUp = Math.max(0, SCREEN_HEIGHT - h - 100);
+                      maxUpOffsetRef.current = Math.min(availableUp, SCREEN_HEIGHT * 0.5);
+                    }
+                  }
+                }}
+              >
+                {typeof children === 'function'
+                  ? (children as any)({ isExpanded, snapIndex: currentSnap.current, snapOffset })
+                  : children}
+              </View>
+            );
+          })()}
         </Animated.View>
       </View>
     </DraggableBottomSheetContext.Provider>

@@ -44,7 +44,7 @@ export const darkColors = {
   inputBackground: '#1B2330', // Elegant input surface
 };
 
-export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device } from './responsive';
+export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device, useResponsive } from './responsive';
 import { scaleFont, moderateScale } from './responsive';
 
 export const typography = {

@@ -471,12 +471,18 @@ export default function SplashScreen() {
   useEffect(() => {
     if (!isHydrated || authLoading || navigatingRef.current) return;
 
-    if (!hasChosenTheme) {
+    // Only show prompt for first-time unauthenticated users who have never selected a theme
+    if (!hasChosenTheme && !user) {
       setShowThemePrompt(true);
       return;
     }
 
-    // Returning user: automatically transition after logo presentation
+    // Returning user or authenticated user: ensure onboarding is permanently marked complete
+    if (!hasChosenTheme) {
+      completeThemeOnboarding(themeMode || 'dark').catch(() => {});
+    }
+
+    // Automatically transition after logo presentation
     splashTimerRef.current = setTimeout(() => {
       proceedNext();
     }, 2400);
@@ -488,6 +494,19 @@ export default function SplashScreen() {
       }
     };
   }, [user, authLoading, isHydrated, hasChosenTheme]);
+
+  // Failsafe timer: If auth loading or hydration takes longer than 4 seconds, force transition to prevent infinite loading
+  useEffect(() => {
+    const failsafeTimer = setTimeout(() => {
+      if (!navigatingRef.current) {
+        console.log('[SplashScreen] Failsafe timer triggered after 4s');
+        completeThemeOnboarding(selectedMode).catch(() => {});
+        proceedNext();
+      }
+    }, 4000);
+
+    return () => clearTimeout(failsafeTimer);
+  }, [selectedMode]);
 
   const handleSelectMode = (mode: ThemeMode) => {
     if (selectedMode === mode) return;

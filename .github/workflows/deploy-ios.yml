@@ -1,0 +1,210 @@
+name: Build & Deploy iOS to Apple App Store Connect
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Custom iOS Build Number (leave blank to auto-increment from GitHub run number)'
+        required: false
+        default: ''
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'assets/**'
+      - 'ios/**'
+      - 'package.json'
+      - 'app.json'
+
+concurrency:
+  group: ios-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build & Upload to App Store Connect
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: 4. Install Node dependencies
+        run: npm ci
+
+      - name: 5. Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: 6. Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: 7. Configure iOS Build Number
+        run: |
+          BUILD_NUM="${{ github.event.inputs.build_number }}"
+          if [ -z "$BUILD_NUM" ]; then
+            BUILD_NUM="${{ github.run_number }}"
+          fi
+          echo "Setting iOS build number to: $BUILD_NUM"
+          cd ios
+          xcrun agvtool new-version -all "$BUILD_NUM"
+
+      - name: 8. Install Apple Certificates and Provisioning Profiles
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          MAIN_PROVISION_PROFILE_BASE64: ${{ secrets.MAIN_PROVISION_PROFILE_BASE64 }}
+          WIDGET_PROVISION_PROFILE_BASE64: ${{ secrets.WIDGET_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'temporal-ci-keychain-pass' }}
+        run: |
+          # 1. Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # 2. Decode and import Distribution Certificate (.p12)
+          CERT_PATH=$RUNNER_TEMP/distribution.p12
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERT_PATH
+          security import $CERT_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Add keychain to search list
+          security list-keychains -d user -s $KEYCHAIN_PATH $(security list-keychains -d user | tr -d '"')
+
+          # 3. Create Provisioning Profiles directory
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES_DIR"
+
+          # 4. Decode Main App Provisioning Profile
+          echo -n "$MAIN_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PROFILES_DIR/main_app.mobileprovision"
+          MAIN_UUID=$(security cms -D -i "$PROFILES_DIR/main_app.mobileprovision" | grep -A1 "<key>UUID</key>" | tail -n1 | sed -e 's/.*<string>//' -e 's/<\/string>.*//')
+          MAIN_NAME=$(security cms -D -i "$PROFILES_DIR/main_app.mobileprovision" | grep -A1 "<key>Name</key>" | tail -n1 | sed -e 's/.*<string>//' -e 's/<\/string>.*//')
+          cp "$PROFILES_DIR/main_app.mobileprovision" "$PROFILES_DIR/${MAIN_UUID}.mobileprovision"
+          echo "Main App Profile: $MAIN_NAME ($MAIN_UUID)"
+
+          # 5. Decode Widget Extension Provisioning Profile
+          echo -n "$WIDGET_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PROFILES_DIR/widget.mobileprovision"
+          WIDGET_UUID=$(security cms -D -i "$PROFILES_DIR/widget.mobileprovision" | grep -A1 "<key>UUID</key>" | tail -n1 | sed -e 's/.*<string>//' -e 's/<\/string>.*//')
+          WIDGET_NAME=$(security cms -D -i "$PROFILES_DIR/widget.mobileprovision" | grep -A1 "<key>Name</key>" | tail -n1 | sed -e 's/.*<string>//' -e 's/<\/string>.*//')
+          cp "$PROFILES_DIR/widget.mobileprovision" "$PROFILES_DIR/${WIDGET_UUID}.mobileprovision"
+          echo "Widget Profile: $WIDGET_NAME ($WIDGET_UUID)"
+
+          # Export variables for subsequent steps
+          echo "MAIN_PROFILE_UUID=$MAIN_UUID" >> $GITHUB_ENV
+          echo "WIDGET_PROFILE_UUID=$WIDGET_UUID" >> $GITHUB_ENV
+
+      - name: 9. Generate ExportOptions.plist
+        run: |
+          cat <<EOF > ios/ExportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>destination</key>
+              <string>export</string>
+              <key>method</key>
+              <string>app-store</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>teamID</key>
+              <string>GBSNS2SUWV</string>
+              <key>uploadSymbols</key>
+              <true/>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.splityourtrip.app</key>
+                  <string>${MAIN_PROFILE_UUID}</string>
+                  <key>com.splityourtrip.app.SplitYourTripWidgets</key>
+                  <string>${WIDGET_PROFILE_UUID}</string>
+              </dict>
+          </dict>
+          </plist>
+          EOF
+          cat ios/ExportOptions.plist
+
+      - name: 10. Generate .env Configuration
+        run: |
+          echo "EXPO_PUBLIC_SUPABASE_URL=https://hpjizujbzvwkxvfsoqqd.supabase.co" > .env
+          echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}" >> .env
+          echo "EXPO_PUBLIC_GROQ_API_KEY=${{ secrets.EXPO_PUBLIC_GROQ_API_KEY }}" >> .env
+
+      - name: 11. Archive iOS Application
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://hpjizujbzvwkxvfsoqqd.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_GROQ_API_KEY: ${{ secrets.EXPO_PUBLIC_GROQ_API_KEY }}
+        run: |
+          xcodebuild archive \
+            -workspace ios/SplitYourTrip.xcworkspace \
+            -scheme SplitYourTrip \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/SplitYourTrip.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE="Manual" \
+            DEVELOPMENT_TEAM="GBSNS2SUWV" \
+            PROVISIONING_PROFILE_SPECIFIER="$MAIN_PROFILE_UUID" \
+            | xcpretty || xcodebuild archive \
+            -workspace ios/SplitYourTrip.xcworkspace \
+            -scheme SplitYourTrip \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/SplitYourTrip.xcarchive \
+            -destination "generic/platform=iOS"
+
+      - name: 12. Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/SplitYourTrip.xcarchive \
+            -exportPath $RUNNER_TEMP/build \
+            -exportOptionsPlist ios/ExportOptions.plist
+
+      - name: 13. Upload IPA to App Store Connect (TestFlight)
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          # 1. Store private key in default search directory for xcrun altool
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo -n "$APP_STORE_CONNECT_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8
+
+          # 2. Upload IPA
+          IPA_PATH=$(find $RUNNER_TEMP/build -name "*.ipa" | head -n 1)
+          echo "Found IPA at: $IPA_PATH"
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --show-progress
+
+      - name: 14. Clean up Keychain & Sensitive Files
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+          rm -rf ~/.appstoreconnect 2>/dev/null || true
+          rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles" 2>/dev/null || true

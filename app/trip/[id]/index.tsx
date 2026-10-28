@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { useTripStore, findMyMember } from '../../../src/features/trips/useTripStore';
+import { useTripStore, findMyMember, deletedTripIdsSet } from '../../../src/features/trips/useTripStore';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import { useTheme } from '../../../src/theme/useThemeStore';
 import { getEffectiveContactName } from '../../../src/features/contacts/useContactsStore';
@@ -19,6 +19,12 @@ export default function TripDetailScreen() {
     loadTripDetails,
     subscribeTripRealtime,
   } = useTripStore();
+
+  useEffect(() => {
+    if (id && deletedTripIdsSet.has(id)) {
+      router.replace('/(tabs)');
+    }
+  }, [id, trips]);
 
   const members = React.useMemo(
     () => rawMembers.filter(m => !m.trip_id || m.trip_id === id),
@@ -62,7 +68,7 @@ export default function TripDetailScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, title: 'Trip', headerBackTitle: 'Back' }} />
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={colors.card}

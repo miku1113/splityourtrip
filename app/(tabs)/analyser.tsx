@@ -20,6 +20,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme/useThemeStore';
+import { useResponsive } from '../../src/theme/responsive';
 import {
   useTripStore,
   computeBalances,
@@ -34,10 +35,12 @@ import { Trip, TripMember, TripBalanceRow } from '../../src/types/database';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import AnalyserSkeleton from '../../src/components/AnalyserSkeleton';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
+import SpendingLineChart from '../../src/components/SpendingLineChart';
 
 const PAGE_SIZE = 10;
 const INLINE_TRIPS_LIMIT = 5;
-const INLINE_EXPENSES_LIMIT = 10;
+const INLINE_EXPENSES_LIMIT = 5;
+const INLINE_DAILY_GROUPS_LIMIT = 5;
 
 const CATEGORY_ICONS: Record<string, { icon: any; color: string; bg: string }> = {
   Food: { icon: 'fast-food', color: '#F59E0B', bg: '#FEF3C7' },
@@ -114,6 +117,7 @@ interface DailySpendGroup {
 export default function AnalyserScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
+  const { width, isSmall, isTablet, scaleFont: sf } = useResponsive();
   const { user, profile } = useAuthStore();
   const currentUserPhone =
     profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
@@ -149,6 +153,7 @@ export default function AnalyserScreen() {
 
   // Daily Expenses UI state
   const [expandedDateKeys, setExpandedDateKeys] = useState<Record<string, boolean>>({});
+  const [showAllDailyGroups, setShowAllDailyGroups] = useState<boolean>(false);
 
   // View More All Trips Modal state
   const [allTripsModalVisible, setAllTripsModalVisible] = useState(false);
@@ -177,11 +182,20 @@ export default function AnalyserScreen() {
           }
         } catch {}
 
-        if (tMembers.length === 0) {
-          tMembers = useTripStore.getState().members.filter(m => m.trip_id === t.id);
+        const storeExpenses = useTripStore.getState().expenses.filter(e => e.trip_id === t.id);
+        const storeMembers = useTripStore.getState().members.filter(m => m.trip_id === t.id);
+
+        if (storeExpenses.length > 0) {
+          const map = new Map<string, any>();
+          tExpenses.forEach(e => { if (e?.id) map.set(e.id, e); });
+          storeExpenses.forEach(e => { if (e?.id) map.set(e.id, e); });
+          tExpenses = Array.from(map.values());
         }
-        if (tExpenses.length === 0) {
-          tExpenses = useTripStore.getState().expenses.filter(e => e.trip_id === t.id);
+        if (storeMembers.length > 0) {
+          const mMap = new Map<string, TripMember>();
+          tMembers.forEach(m => { if (m?.id) mMap.set(m.id, m); });
+          storeMembers.forEach(m => { if (m?.id) mMap.set(m.id, m); });
+          tMembers = Array.from(mMap.values());
         }
 
         const normalizedExps = normalizeExpensesForTrip(tExpenses, tMembers);
@@ -260,9 +274,10 @@ export default function AnalyserScreen() {
   const uniqueGroupTrips = useMemo(() => {
     const groupOnly = trips.filter(
       t =>
+        t &&
         t.trip_type !== 'friend_split' &&
         !(t as any).is_friend_split &&
-        !t.name.toLowerCase().startsWith('split with ')
+        !(typeof t.name === 'string' && t.name.toLowerCase().trim().startsWith('split with '))
     );
 
     const sorted = [...groupOnly].sort(
@@ -321,7 +336,9 @@ export default function AnalyserScreen() {
     }, 250);
   };
 
-  const uniqueAllTrips = useMemo(() => {
+  // Deduplicated master trips across all trip types (group trips + direct friend splits)
+  // Used for total spending aggregation and friend filter so latest bills & expenses are never omitted
+  const allMasterTrips = useMemo(() => {
     const seen = new Set<string>();
     return trips.filter(t => {
       if (!t?.id || seen.has(t.id)) return false;
@@ -332,10 +349,12 @@ export default function AnalyserScreen() {
 
   // Aggregate master raw expense items for the selected trip(s)
   const allRawExpenseItems = useMemo(() => {
+    // When 'all' is selected: include group trips and friend direct splits so overall spending and friend filter include all expenses.
+    // When a specific group trip is selected: strictly isolate to that trip only.
     const targetTrips =
       selectedTripFilter === 'all'
-        ? uniqueAllTrips
-        : uniqueAllTrips.filter(t => t.id === selectedTripFilter);
+        ? allMasterTrips
+        : uniqueGroupTrips.filter(t => t.id === selectedTripFilter);
 
     const items: AnalyzedExpenseItem[] = [];
 
@@ -424,14 +443,14 @@ export default function AnalyserScreen() {
     }
 
     return items;
-  }, [uniqueAllTrips, allTripsData, selectedTripFilter, user?.id, currentUserPhone, userCurrency]);
+  }, [selectedTripFilter, allMasterTrips, uniqueGroupTrips, allTripsData, user?.id, currentUserPhone, userCurrency]);
 
   // Extract all distinct people (trip members + friends from contacts) across the currently selected trip scope (or all trips)
   const availablePeople = useMemo<PersonFilterItem[]>(() => {
     const targetTrips =
       selectedTripFilter === 'all'
-        ? uniqueAllTrips
-        : uniqueAllTrips.filter(t => t.id === selectedTripFilter);
+        ? allMasterTrips
+        : uniqueGroupTrips.filter(t => t.id === selectedTripFilter);
 
     const peopleMap = new Map<string, PersonFilterItem>();
     const currentUserId = user?.id || profile?.id;
@@ -593,7 +612,9 @@ export default function AnalyserScreen() {
 
     return list;
   }, [
-    uniqueAllTrips,
+    selectedTripFilter,
+    allMasterTrips,
+    uniqueGroupTrips,
     allTripsData,
     selectedTripFilter,
     user?.id,
@@ -834,9 +855,9 @@ export default function AnalyserScreen() {
       .sort((a, b) => b.amount - a.amount);
 
     const paidLabel =
-      isCustomPerson && targetPerson ? `${targetPerson.name} Paid` : 'You Paid';
+      isCustomPerson && targetPerson ? 'Paid' : 'You Paid';
     const shareLabel =
-      isCustomPerson && targetPerson ? `${targetPerson.name}'s Share` : 'Your Share';
+      isCustomPerson && targetPerson ? 'Share' : 'Your Share';
 
     return {
       totalPaise,
@@ -857,7 +878,7 @@ export default function AnalyserScreen() {
     // User requirement: list friends after typing 3 letters
     if (q.length < 3) return { trips: [], people: [] };
 
-    const matchedTrips = uniqueAllTrips
+    const matchedTrips = uniqueGroupTrips
       .filter(t => t.name.toLowerCase().includes(q))
       .slice(0, 4);
 
@@ -871,7 +892,7 @@ export default function AnalyserScreen() {
       .slice(0, 8);
 
     return { trips: matchedTrips, people: matchedPeople };
-  }, [searchQuery, uniqueAllTrips, availablePeople]);
+  }, [searchQuery, uniqueGroupTrips, availablePeople]);
 
   // Daily Spending Analytics & Day-by-Day grouping ("daily expence")
   const dailySpendingData = useMemo(() => {
@@ -989,8 +1010,8 @@ export default function AnalyserScreen() {
 
   const selectedTripName = useMemo(() => {
     if (selectedTripFilter === 'all') return null;
-    return uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip';
-  }, [selectedTripFilter, uniqueAllTrips]);
+    return uniqueGroupTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip';
+  }, [selectedTripFilter, uniqueGroupTrips]);
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -1013,6 +1034,27 @@ export default function AnalyserScreen() {
     selectedPayerFilter,
     selectedSort,
   ]);
+
+  const activeModalFiltersCount = useMemo(() => {
+    let count = 0;
+    if (selectedCategoryFilter !== 'all') count += 1;
+    if (selectedTimeframe !== 'all') count += 1;
+    if (selectedPaymentMode !== 'all') count += 1;
+    if (selectedPayerFilter !== 'all') count += 1;
+    return count;
+  }, [
+    selectedCategoryFilter,
+    selectedTimeframe,
+    selectedPaymentMode,
+    selectedPayerFilter,
+  ]);
+
+  const resetModalFilters = () => {
+    setSelectedCategoryFilter('all');
+    setSelectedTimeframe('all');
+    setSelectedPaymentMode('all');
+    setSelectedPayerFilter('all');
+  };
 
   const resetAllFilters = () => {
     setSelectedTripFilter('all');
@@ -1041,8 +1083,12 @@ export default function AnalyserScreen() {
       }
       message += `━━━━━━━━━━━━━━━━━━━━━\n`;
       message += `💰 Total Spending: ${formatCurrencyAmount(analytics.totalPaise, userCurrency)}\n`;
-      message += `👤 ${analytics.paidLabel}: ${formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}\n`;
-      message += `🤝 ${analytics.shareLabel}: ${formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}\n`;
+      const pPaidName =
+        selectedPersonFilter !== 'all'
+          ? availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Member'
+          : null;
+      message += `👤 ${pPaidName ? `${pPaidName} Paid` : 'You Paid'}: ${formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}\n`;
+      message += `🤝 ${pPaidName ? `${pPaidName}'s Share` : 'Your Share'}: ${formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}\n`;
       message += `🧾 Total Expenses: ${analytics.count}\n`;
       if (dailySpendingData.activeDaysCount > 0) {
         message += `📅 Daily Average: ${formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}/day\n`;
@@ -1072,10 +1118,21 @@ export default function AnalyserScreen() {
   const showCategoriesSection = viewMode === 'all' || viewMode === 'categories';
   const showTransactionsSection = viewMode === 'all' || viewMode === 'transactions';
 
+  if (loadingAnalytics && Object.keys(allTripsData).length === 0) {
+    return (
+      <ScrollView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={[styles.content, { maxWidth: 840, width: '100%', alignSelf: 'center', padding: isSmall ? 12 : 16 }]}
+      >
+        <AnalyserSkeleton colors={colors} isDark={isDark} />
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { maxWidth: 840, width: '100%', alignSelf: 'center', padding: isSmall ? 12 : 16 }]}
       keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
@@ -1092,44 +1149,18 @@ export default function AnalyserScreen() {
             styles.searchBar,
             {
               backgroundColor: colors.card,
-              borderColor: isSearchFocused
-                ? colors.primary
-                : selectedPersonFilter !== 'all'
-                ? '#10B981'
-                : selectedTripFilter !== 'all'
-                ? colors.primary
-                : appliedExpenseSearch.length > 0
-                ? '#F59E0B'
-                : colors.border,
+              borderColor: isSearchFocused ? colors.primary : colors.border,
             },
           ]}
         >
           <Ionicons
-            name={
-              selectedPersonFilter !== 'all'
-                ? 'person'
-                : selectedTripFilter !== 'all'
-                ? 'airplane'
-                : 'search'
-            }
-            size={17}
-            color={
-              selectedPersonFilter !== 'all'
-                ? '#10B981'
-                : selectedTripFilter !== 'all'
-                ? colors.primary
-                : colors.textSecondary
-            }
+            name="search"
+            size={sf(16)}
+            color={isSearchFocused ? colors.primary : colors.textSecondary}
           />
           <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            placeholder={
-              selectedPersonFilter !== 'all'
-                ? `Filter: ${selectedPersonName}`
-                : selectedTripFilter !== 'all'
-                ? `Filter: ${selectedTripName}`
-                : 'Search friends, trips, expenses...'
-            }
+            style={[styles.searchInput, { color: colors.text, fontSize: sf(13) }]}
+            placeholder={width < 360 ? "Search friends, trips..." : "Search friends, trips, expenses..."}
             placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1151,7 +1182,7 @@ export default function AnalyserScreen() {
               onPress={() => setSearchQuery('')}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
+              <Ionicons name="close-circle" size={sf(16)} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
         </View>
@@ -1161,18 +1192,20 @@ export default function AnalyserScreen() {
           style={[
             styles.iconActionBtn,
             {
-              backgroundColor: activeFiltersCount > 0 ? colors.primary : colors.card,
-              borderColor: activeFiltersCount > 0 ? colors.primary : colors.border,
+              backgroundColor: activeModalFiltersCount > 0 ? colors.primary : colors.card,
+              borderColor: activeModalFiltersCount > 0 ? colors.primary : colors.border,
+              width: isSmall ? 38 : 42,
+              height: isSmall ? 38 : 42,
             },
           ]}
           onPress={() => setFilterModalVisible(true)}
         >
           <Ionicons
             name="filter"
-            size={18}
-            color={activeFiltersCount > 0 ? '#FFFFFF' : colors.text}
+            size={sf(17)}
+            color={activeModalFiltersCount > 0 ? '#FFFFFF' : colors.text}
           />
-          {activeFiltersCount > 0 && <View style={styles.activeFilterDot} />}
+          {activeModalFiltersCount > 0 && <View style={styles.activeFilterDot} />}
         </TouchableOpacity>
 
         {/* Sort Trigger Button */}
@@ -1182,11 +1215,13 @@ export default function AnalyserScreen() {
             {
               backgroundColor: colors.card,
               borderColor: colors.border,
+              width: isSmall ? 38 : 42,
+              height: isSmall ? 38 : 42,
             },
           ]}
           onPress={() => setSortModalVisible(true)}
         >
-          <Ionicons name="swap-vertical" size={18} color={colors.text} />
+          <Ionicons name="swap-vertical" size={sf(17)} color={colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -1215,8 +1250,8 @@ export default function AnalyserScreen() {
           {searchSuggestions.people.length > 0 && (
             <View style={styles.suggestionSection}>
               <View style={styles.suggestionSectionHeader}>
-                <Ionicons name="people" size={14} color="#10B981" />
-                <Text style={[styles.suggestionSectionTitle, { color: '#10B981' }]}>
+                <Ionicons name="people" size={14} color={colors.primary} />
+                <Text style={[styles.suggestionSectionTitle, { color: colors.primary }]}>
                   SELECT A FRIEND / PERSON ({searchSuggestions.people.length})
                 </Text>
               </View>
@@ -1231,9 +1266,7 @@ export default function AnalyserScreen() {
                       styles.suggestionRow,
                       {
                         backgroundColor: isSelected
-                          ? isDark
-                            ? 'rgba(16, 185, 129, 0.18)'
-                            : '#ECFDF5'
+                          ? colors.primaryLight
                           : 'transparent',
                       },
                     ]}
@@ -1249,13 +1282,13 @@ export default function AnalyserScreen() {
                       <View
                         style={[
                           styles.suggestionAvatar,
-                          { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
+                          { backgroundColor: p.isCurrentUser ? colors.primaryLight : isDark ? '#283449' : '#E6EEFA' },
                         ]}
                       >
                         <Text
                           style={[
                             styles.suggestionAvatarText,
-                            { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
+                            { color: colors.primary },
                           ]}
                         >
                           {p.name.slice(0, 2).toUpperCase()}
@@ -1263,13 +1296,15 @@ export default function AnalyserScreen() {
                       </View>
                     )}
                     <View style={styles.suggestionContent}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 6 }}>
                         <Text
                           style={[
                             styles.suggestionName,
                             {
                               color: colors.text,
                               fontWeight: isSelected ? '700' : '600',
+                              flexShrink: 1,
+                              fontSize: sf(13),
                             },
                           ]}
                           numberOfLines={1}
@@ -1280,10 +1315,10 @@ export default function AnalyserScreen() {
                           <View
                             style={[
                               styles.friendBadge,
-                              { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7' },
+                              { backgroundColor: colors.primaryLight },
                             ]}
                           >
-                            <Text style={styles.friendBadgeText}>Friend</Text>
+                            <Text style={[styles.friendBadgeText, { color: colors.primary }]}>Friend</Text>
                           </View>
                         )}
                       </View>
@@ -1304,8 +1339,8 @@ export default function AnalyserScreen() {
                       style={[
                         styles.filterActionPill,
                         {
-                          backgroundColor: isSelected ? '#10B981' : colors.cardSecondary,
-                          borderColor: isSelected ? '#10B981' : colors.border,
+                          backgroundColor: isSelected ? colors.primary : colors.cardSecondary,
+                          borderColor: isSelected ? colors.primary : colors.border,
                         },
                       ]}
                     >
@@ -1313,7 +1348,7 @@ export default function AnalyserScreen() {
                         style={[
                           styles.filterActionText,
                           {
-                            color: isSelected ? '#FFFFFF' : '#10B981',
+                            color: isSelected ? '#FFFFFF' : colors.primary,
                           },
                         ]}
                       >
@@ -1354,9 +1389,7 @@ export default function AnalyserScreen() {
                       styles.suggestionRow,
                       {
                         backgroundColor: isSelected
-                          ? isDark
-                            ? 'rgba(74, 144, 226, 0.15)'
-                            : '#EEF4FF'
+                          ? colors.primaryLight
                           : 'transparent',
                       },
                     ]}
@@ -1445,106 +1478,77 @@ export default function AnalyserScreen() {
         </View>
       )}
 
-      {/* 2. ACTIVE SELECTED FILTER (Shows chosen friend, trip, or keyword) */}
+      {/* 2. ACTIVE SELECTED FILTER (Shows chosen friend, trip, or search) */}
       {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all' || appliedExpenseSearch.length > 0) && (
-        <View style={styles.topSelectedFilterSection}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.topSelectedFilterScroll}
-          >
-            {selectedPersonFilter !== 'all' && (
-              <View
-                style={[
-                  styles.topSelectedFilterChip,
-                  {
-                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.16)' : '#ECFDF5',
-                    borderColor: '#10B981',
-                  },
-                ]}
-              >
-                <Ionicons name="person" size={13} color="#10B981" />
-                <Text style={[styles.topSelectedFilterChipText, { color: colors.text }]} numberOfLines={1}>
-                  Friend:{' '}
-                  <Text style={{ fontWeight: '700', color: '#10B981' }}>{selectedPersonName}</Text>
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setSelectedPersonFilter('all')}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="close-circle" size={16} color="#10B981" />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedTripFilter !== 'all' && (
-              <View
-                style={[
-                  styles.topSelectedFilterChip,
-                  {
-                    backgroundColor: isDark ? 'rgba(74, 144, 226, 0.16)' : '#EEF4FF',
-                    borderColor: colors.primary,
-                  },
-                ]}
-              >
-                <Ionicons name="airplane" size={13} color={colors.primary} />
-                <Text style={[styles.topSelectedFilterChipText, { color: colors.text }]} numberOfLines={1}>
-                  Trip:{' '}
-                  <Text style={{ fontWeight: '700', color: colors.primary }}>{selectedTripName}</Text>
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setSelectedTripFilter('all')}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="close-circle" size={16} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {appliedExpenseSearch.length > 0 && (
-              <View
-                style={[
-                  styles.topSelectedFilterChip,
-                  {
-                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.16)' : '#FEF3C7',
-                    borderColor: '#F59E0B',
-                  },
-                ]}
-              >
-                <Ionicons name="search" size={13} color="#F59E0B" />
-                <Text style={[styles.topSelectedFilterChipText, { color: colors.text }]} numberOfLines={1}>
-                  Search:{' '}
-                  <Text style={{ fontWeight: '700', color: '#F59E0B' }}>"{appliedExpenseSearch}"</Text>
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setAppliedExpenseSearch('')}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="close-circle" size={16} color="#F59E0B" />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            <TouchableOpacity
+        <View style={styles.topSelectedFilterRow}>
+          {selectedPersonFilter !== 'all' && (
+            <View
               style={[
-                styles.topClearAllBtn,
+                styles.topSelectedFilterPill,
                 {
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.cardSecondary,
-                  borderColor: colors.border,
+                  backgroundColor: colors.primaryLight,
+                  borderColor: colors.primary,
                 },
               ]}
-              onPress={() => {
-                setSelectedPersonFilter('all');
-                setSelectedTripFilter('all');
-                setAppliedExpenseSearch('');
-              }}
             >
-              <Ionicons name="refresh-outline" size={12} color={colors.textSecondary} />
-              <Text style={[styles.topClearAllText, { color: colors.textSecondary }]}>
-                Clear Filter
+              <Ionicons name="person" size={sf(12)} color={colors.primary} />
+              <Text style={[styles.topSelectedFilterPillText, { color: colors.text, fontSize: sf(11.5) }]} numberOfLines={1}>
+                Friend: <Text style={{ fontWeight: '700', color: colors.primary }}>{selectedPersonName}</Text>
               </Text>
-            </TouchableOpacity>
-          </ScrollView>
+              <TouchableOpacity
+                onPress={() => setSelectedPersonFilter('all')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={sf(14)} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {selectedTripFilter !== 'all' && (
+            <View
+              style={[
+                styles.topSelectedFilterPill,
+                {
+                  backgroundColor: colors.primaryLight,
+                  borderColor: colors.primary,
+                },
+              ]}
+            >
+              <Ionicons name="airplane" size={sf(12)} color={colors.primary} />
+              <Text style={[styles.topSelectedFilterPillText, { color: colors.text, fontSize: sf(11.5) }]} numberOfLines={1}>
+                Trip: <Text style={{ fontWeight: '700', color: colors.primary }}>{selectedTripName}</Text>
+              </Text>
+              <TouchableOpacity
+                onPress={() => setSelectedTripFilter('all')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={sf(14)} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {appliedExpenseSearch.length > 0 && (
+            <View
+              style={[
+                styles.topSelectedFilterPill,
+                {
+                  backgroundColor: colors.primaryLight,
+                  borderColor: colors.primary,
+                },
+              ]}
+            >
+              <Ionicons name="search" size={sf(12)} color={colors.primary} />
+              <Text style={[styles.topSelectedFilterPillText, { color: colors.text, fontSize: sf(11.5) }]} numberOfLines={1}>
+                Search: <Text style={{ fontWeight: '700', color: colors.primary }}>"{appliedExpenseSearch}"</Text>
+              </Text>
+              <TouchableOpacity
+                onPress={() => setAppliedExpenseSearch('')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={sf(14)} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
 
@@ -1621,8 +1625,8 @@ export default function AnalyserScreen() {
       >
         <View style={styles.heroTopBar}>
           <View style={styles.heroTagBadge}>
-            <Ionicons name="analytics" size={13} color={colors.primary} />
-            <Text style={[styles.heroLabel, { color: colors.primary }]}>
+            <Ionicons name="analytics" size={sf(13)} color={colors.primary} />
+            <Text style={[styles.heroLabel, { color: colors.primary, fontSize: sf(11) }]} numberOfLines={1}>
               SPENDING ANALYSER
             </Text>
           </View>
@@ -1630,303 +1634,151 @@ export default function AnalyserScreen() {
             style={[styles.shareHeaderBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF' }]}
             onPress={handleShareSummary}
           >
-            <Ionicons name="share-social-outline" size={15} color={colors.primary} />
-            <Text style={[styles.shareHeaderText, { color: colors.primary }]}>Share Report</Text>
+            <Ionicons name="share-social-outline" size={sf(14)} color={colors.primary} />
+            <Text style={[styles.shareHeaderText, { color: colors.primary, fontSize: sf(11.5) }]}>
+              {width < 350 ? 'Share' : 'Share Report'}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Active Filter Banner if Person or Trip is filtered */}
-        {(selectedPersonFilter !== 'all' || selectedTripFilter !== 'all') && (
-          <View
-            style={[
-              styles.heroActiveFilterBanner,
-              { backgroundColor: isDark ? 'rgba(74, 144, 226, 0.15)' : 'rgba(74, 144, 226, 0.12)' },
-            ]}
-          >
-            <Ionicons name="filter" size={12} color={colors.primary} />
-            <Text style={[styles.heroActiveFilterText, { color: colors.primary }]} numberOfLines={1}>
-              Filtered:{' '}
-              {selectedTripFilter !== 'all'
-                ? uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip'
-                : 'All Trips'}
-              {selectedPersonFilter !== 'all'
-                ? ` • ${availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Person'}`
-                : ''}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setSelectedPersonFilter('all');
-                setSelectedTripFilter('all');
-              }}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Ionicons name="close-circle" size={14} color={colors.primary} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <Text style={[styles.heroAmount, { color: colors.primary }]}>
+        <Text
+          style={[
+            styles.heroAmount,
+            { color: colors.primary, fontSize: width < 360 ? sf(28) : sf(34) },
+          ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit={true}
+          minimumFontScale={0.72}
+        >
           {formatCurrencyAmount(analytics.totalPaise, userCurrency)}
         </Text>
 
-        {/* 4-Stat Hero Matrix */}
-        <View style={styles.heroSubRow}>
-          <View style={styles.heroStatCol}>
-            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]} numberOfLines={1}>
-              {analytics.paidLabel}
-            </Text>
-            <Text style={[styles.heroStatValue, { color: colors.success }]}>
-              {formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}
-            </Text>
+        {/* 4-Stat Hero Matrix (2x2 on <360, 4-col on >=360) */}
+        {width < 360 ? (
+          <View style={styles.heroSubGrid}>
+            <View style={styles.heroGridRow}>
+              <View style={styles.heroStatCol}>
+                <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>
+                  {analytics.paidLabel}
+                </Text>
+                <Text
+                  style={[styles.heroStatValue, { color: colors.success, fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.75}
+                >
+                  {formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}
+                </Text>
+              </View>
+              <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
+              <View style={styles.heroStatCol}>
+                <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>
+                  {analytics.shareLabel}
+                </Text>
+                <Text
+                  style={[styles.heroStatValue, { color: colors.text, fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.75}
+                >
+                  {formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.heroHorizontalDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
+            <View style={styles.heroGridRow}>
+              <View style={styles.heroStatCol}>
+                <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>
+                  Expenses
+                </Text>
+                <Text
+                  style={[styles.heroStatValue, { color: colors.text, fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                >
+                  {analytics.count}
+                </Text>
+              </View>
+              <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
+              <View style={styles.heroStatCol}>
+                <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>
+                  Daily Avg
+                </Text>
+                <Text
+                  style={[styles.heroStatValue, { color: '#F59E0B', fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.75}
+                >
+                  {formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}
+                </Text>
+              </View>
+            </View>
           </View>
+        ) : (
+          <View style={styles.heroSubRow}>
+            <View style={styles.heroStatCol}>
+              <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>
+                {analytics.paidLabel}
+              </Text>
+              <Text
+                style={[styles.heroStatValue, { color: colors.success, fontSize: sf(13) }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.72}
+              >
+                {formatCurrencyAmount(analytics.yourPaidPaise, userCurrency)}
+              </Text>
+            </View>
 
-          <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
+            <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
 
-          <View style={styles.heroStatCol}>
-            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]} numberOfLines={1}>
-              {analytics.shareLabel}
-            </Text>
-            <Text style={[styles.heroStatValue, { color: colors.text }]}>
-              {formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}
-            </Text>
+            <View style={styles.heroStatCol}>
+              <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>
+                {analytics.shareLabel}
+              </Text>
+              <Text
+                style={[styles.heroStatValue, { color: colors.text, fontSize: sf(13) }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.72}
+              >
+                {formatCurrencyAmount(analytics.yourSharePaise, userCurrency)}
+              </Text>
+            </View>
+
+            <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
+
+            <View style={styles.heroStatCol}>
+              <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>Expenses</Text>
+              <Text
+                style={[styles.heroStatValue, { color: colors.text, fontSize: sf(13) }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+              >
+                {analytics.count}
+              </Text>
+            </View>
+
+            <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
+
+            <View style={styles.heroStatCol}>
+              <Text style={[styles.heroStatLabel, { color: colors.textSecondary, fontSize: sf(10) }]} numberOfLines={1}>Daily Avg</Text>
+              <Text
+                style={[styles.heroStatValue, { color: '#F59E0B', fontSize: sf(13) }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.72}
+              >
+                {formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}
+              </Text>
+            </View>
           </View>
-
-          <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
-
-          <View style={styles.heroStatCol}>
-            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]}>Expenses</Text>
-            <Text style={[styles.heroStatValue, { color: colors.text }]}>
-              {analytics.count}
-            </Text>
-          </View>
-
-          <View style={[styles.heroDivider, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.borderLight }]} />
-
-          <View style={styles.heroStatCol}>
-            <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]}>Daily Avg</Text>
-            <Text style={[styles.heroStatValue, { color: '#F59E0B' }]}>
-              {formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}
-            </Text>
-          </View>
-        </View>
+        )}
       </View>
 
 
-      {/* Quick People Filter Bar */}
-      {availablePeople.length > 0 && (
-        <View style={styles.peopleQuickBar}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.peopleQuickScroll}
-          >
-            <TouchableOpacity
-              style={[
-                styles.personQuickChip,
-                {
-                  backgroundColor:
-                    selectedPersonFilter === 'all'
-                      ? colors.primary
-                      : isDark
-                      ? '#182132'
-                      : colors.card,
-                  borderColor: selectedPersonFilter === 'all' ? colors.primary : colors.border,
-                },
-              ]}
-              onPress={() => setSelectedPersonFilter('all')}
-            >
-              <Ionicons
-                name="people"
-                size={13}
-                color={selectedPersonFilter === 'all' ? '#FFFFFF' : colors.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.personQuickText,
-                  { color: selectedPersonFilter === 'all' ? '#FFFFFF' : colors.textSecondary },
-                ]}
-              >
-                All People ({availablePeople.length})
-              </Text>
-            </TouchableOpacity>
 
-            {availablePeople.map(p => {
-              const isSelected = selectedPersonFilter === p.id;
-              return (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[
-                    styles.personQuickChip,
-                    {
-                      backgroundColor: isSelected
-                        ? colors.primary
-                        : isDark
-                        ? '#182132'
-                        : colors.card,
-                      borderColor: isSelected ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setSelectedPersonFilter(isSelected ? 'all' : p.id)}
-                >
-                  <View
-                    style={[
-                      styles.personMiniAvatar,
-                      {
-                        backgroundColor: isSelected
-                          ? 'rgba(255,255,255,0.25)'
-                          : p.isCurrentUser
-                          ? '#E0E7FF'
-                          : '#DCFCE7',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.personMiniAvatarText,
-                        {
-                          color: isSelected
-                            ? '#FFFFFF'
-                            : p.isCurrentUser
-                            ? '#4F46E5'
-                            : '#059669',
-                        },
-                      ]}
-                    >
-                      {p.name.slice(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.personQuickText,
-                      { color: isSelected ? '#FFFFFF' : colors.text },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {p.isCurrentUser ? 'You' : p.name}
-                  </Text>
-                  {p.expenseCount > 0 && (
-                    <View
-                      style={[
-                        styles.personCountBadge,
-                        {
-                          backgroundColor: isSelected
-                            ? 'rgba(255,255,255,0.22)'
-                            : isDark
-                            ? 'rgba(255,255,255,0.08)'
-                            : colors.inputBackground,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.personCountText,
-                          { color: isSelected ? '#FFFFFF' : colors.textMuted },
-                        ]}
-                      >
-                        {p.expenseCount}
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Active Filter Pills Bar */}
-      {(activeFiltersCount > 0 || appliedExpenseSearch.length > 0) && (
-        <View style={styles.activePillsContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activePillsScroll}>
-            {selectedTripFilter !== 'all' && (
-              <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
-                <Ionicons name="airplane-outline" size={12} color={colors.primary} style={{ marginRight: 3 }} />
-                <Text style={[styles.activePillText, { color: colors.primary }]} numberOfLines={1}>
-                  Trip: {uniqueAllTrips.find(t => t.id === selectedTripFilter)?.name || 'Trip'}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedTripFilter('all')}>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedPersonFilter !== 'all' && (
-              <View style={[styles.activePill, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7', borderColor: '#10B981' }]}>
-                <Ionicons name="person-outline" size={12} color="#10B981" style={{ marginRight: 3 }} />
-                <Text style={[styles.activePillText, { color: isDark ? '#34D399' : '#059669' }]} numberOfLines={1}>
-                  Person: {availablePeople.find(p => p.id === selectedPersonFilter)?.name || 'Person'}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedPersonFilter('all')}>
-                  <Ionicons name="close" size={14} color={isDark ? '#34D399' : '#059669'} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedCategoryFilter !== 'all' && (
-              <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
-                <Text style={[styles.activePillText, { color: colors.primary }]}>
-                  Cat: {selectedCategoryFilter}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedCategoryFilter('all')}>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedTimeframe !== 'all' && (
-              <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
-                <Text style={[styles.activePillText, { color: colors.primary }]}>
-                  {selectedTimeframe === 'today' ? 'Today' : selectedTimeframe === 'week' ? 'Last 7 Days' : 'This Month'}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedTimeframe('all')}>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedPaymentMode !== 'all' && (
-              <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
-                <Text style={[styles.activePillText, { color: colors.primary }]}>
-                  Mode: {selectedPaymentMode.toUpperCase()}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedPaymentMode('all')}>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedPayerFilter !== 'all' && (
-              <View style={[styles.activePill, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
-                <Text style={[styles.activePillText, { color: colors.primary }]}>
-                  {selectedPayerFilter === 'me' ? 'Paid by me' : 'Paid by others'}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedPayerFilter('all')}>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedSort !== 'date_desc' && (
-              <View style={[styles.activePill, { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}>
-                <Text style={[styles.activePillText, { color: colors.textSecondary }]}>
-                  Sort: {SORT_OPTIONS.find(s => s.id === selectedSort)?.label}
-                </Text>
-                <TouchableOpacity onPress={() => setSelectedSort('date_desc')}>
-                  <Ionicons name="close" size={14} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={[styles.resetFiltersBtn, { borderColor: colors.danger }]}
-              onPress={resetAllFilters}
-            >
-              <Ionicons name="trash-outline" size={13} color={colors.danger} />
-              <Text style={[styles.resetFiltersText, { color: colors.danger }]}>Clear all</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      )}
 
       {/* View Mode Quick Switcher Pills (Dashboard | Daily | Categories | Transactions) */}
       <View style={styles.viewModeScrollWrap}>
@@ -2037,87 +1889,59 @@ export default function AnalyserScreen() {
       {showDailySection && (
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderWithAction}>
-            <View>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={[styles.sectionTitle, { color: colors.text, fontSize: sf(16) }]} numberOfLines={1}>
                 Daily Expense & Trends
               </Text>
-              <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+              <Text style={[styles.sectionSubtitle, { color: colors.textSecondary, fontSize: sf(11.5) }]} numberOfLines={1}>
                 Spending velocity across {dailySpendingData.activeDaysCount} active {dailySpendingData.activeDaysCount === 1 ? 'day' : 'days'}
               </Text>
             </View>
-            <View style={[styles.dailyAvgBadge, { backgroundColor: isDark ? '#2D3748' : '#EEF2FF' }]}>
-              <Text style={[styles.dailyAvgBadgeText, { color: colors.primary }]}>
-                Avg: {formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}/day
-              </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              {width >= 420 && (
+                <View style={[styles.dailyAvgBadge, { backgroundColor: isDark ? '#2D3748' : '#EEF2FF' }]}>
+                  <Text style={[styles.dailyAvgBadgeText, { color: colors.primary, fontSize: sf(11) }]} numberOfLines={1}>
+                    Avg: {formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}/day
+                  </Text>
+                </View>
+              )}
+              {dailySpendingData.groups.length > INLINE_DAILY_GROUPS_LIMIT && (
+                <TouchableOpacity
+                  style={[styles.viewMoreTopBtn, { backgroundColor: colors.primaryLight }]}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/all-expenses',
+                      params: {
+                        search: appliedExpenseSearch || searchQuery || undefined,
+                        category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
+                        sort: 'newest',
+                      },
+                    })
+                  }
+                >
+                  <Text style={[styles.viewMoreTopText, { color: colors.primary, fontSize: sf(11.5) }]}>
+                    {isSmall ? `All (${dailySpendingData.groups.length})` : `View All (${dailySpendingData.groups.length})`}
+                  </Text>
+                  <Ionicons
+                    name="arrow-forward"
+                    size={sf(13)}
+                    color={colors.primary}
+                  />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
-          {/* Daily Vertical Bar Chart Card */}
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {dailySpendingData.recentBarDays.length > 0 ? (
-              <View style={styles.barChartWrap}>
-                <View style={styles.barChartGrid}>
-                  {dailySpendingData.recentBarDays.map(item => {
-                    const heightPct = Math.max(
-                      Math.round((item.totalPaise / dailySpendingData.maxBarSpend) * 100),
-                      10
-                    );
-                    const isPeak =
-                      dailySpendingData.peakDay && item.dateKey === dailySpendingData.peakDay.dateKey;
-                    return (
-                      <View key={item.dateKey} style={styles.barCol}>
-                        <Text style={[styles.barAmtLabel, { color: colors.textMuted }]}>
-                          ₹{Math.round(item.totalPaise / 100)}
-                        </Text>
-                        <View style={styles.barSlot}>
-                          <View
-                            style={[
-                              styles.barFill,
-                              {
-                                height: `${heightPct}%`,
-                                backgroundColor: isPeak ? '#EF4444' : colors.primary,
-                              },
-                            ]}
-                          />
-                        </View>
-                        <Text
-                          style={[
-                            styles.barDayLabel,
-                            {
-                              color: isPeak ? '#EF4444' : colors.textSecondary,
-                              fontWeight: isPeak ? '700' : '500',
-                            },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.displayLabel.split(',')[0]}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
+          {/* Interactive Spending Line Chart (Week / Month / Year) */}
+          <SpendingLineChart
+            expenses={filteredAndSortedExpenses}
+            userCurrency={userCurrency}
+            colors={colors}
+            isDark={isDark}
+          />
 
-                {dailySpendingData.peakDay && (
-                  <View style={styles.peakHighlightRow}>
-                    <Ionicons name="flame" size={14} color="#EF4444" />
-                    <Text style={[styles.peakHighlightText, { color: colors.textSecondary }]}>
-                      Peak Spend Day: <Text style={{ color: colors.text, fontWeight: '700' }}>{formatCurrencyAmount(dailySpendingData.peakDay.totalPaise, userCurrency)}</Text> on {dailySpendingData.peakDay.displayLabel}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            ) : (
-              <View style={styles.emptyState}>
-                <Ionicons name="calendar-outline" size={36} color={colors.textMuted} />
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                  No daily spending activity recorded yet.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Day-by-Day Expandable Cards */}
-          {dailySpendingData.groups.map(group => {
+          {/* Day-by-Day Expandable Cards (first 5 by default, expandable) */}
+          {dailySpendingData.groups.slice(0, INLINE_DAILY_GROUPS_LIMIT).map(group => {
             const isExpanded = Boolean(expandedDateKeys[group.dateKey]);
             const isPeak =
               dailySpendingData.peakDay && group.dateKey === dailySpendingData.peakDay.dateKey;
@@ -2146,27 +1970,32 @@ export default function AnalyserScreen() {
                     >
                       <Ionicons
                         name={isPeak ? 'flame' : 'calendar'}
-                        size={16}
+                        size={sf(16)}
                         color={isPeak ? '#EF4444' : colors.primary}
                       />
                     </View>
-                    <View>
-                      <Text style={[styles.dayGroupTitle, { color: colors.text }]}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={[styles.dayGroupTitle, { color: colors.text, fontSize: sf(14) }]} numberOfLines={1}>
                         {group.displayLabel}
                       </Text>
-                      <Text style={[styles.dayGroupSubtitle, { color: colors.textSecondary }]}>
+                      <Text style={[styles.dayGroupSubtitle, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
                         {group.formattedDate} • {group.count} {group.count === 1 ? 'expense' : 'expenses'}
                       </Text>
                     </View>
                   </View>
 
                   <View style={styles.dayGroupHeaderRight}>
-                    <Text style={[styles.dayGroupTotal, { color: colors.text }]}>
+                    <Text
+                      style={[styles.dayGroupTotal, { color: colors.text, fontSize: sf(14) }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.72}
+                    >
                       {formatCurrencyAmount(group.totalPaise, userCurrency)}
                     </Text>
                     <Ionicons
                       name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                      size={16}
+                      size={sf(16)}
                       color={colors.textMuted}
                     />
                   </View>
@@ -2189,24 +2018,30 @@ export default function AnalyserScreen() {
                           onPress={() => handleOpenExpense(exp.trip_id, exp.id)}
                         >
                           <View style={[styles.miniCatIcon, { backgroundColor: meta.bg }]}>
-                            <Ionicons name={meta.icon} size={15} color={meta.color} />
+                            <Ionicons name={meta.icon} size={sf(15)} color={meta.color} />
                           </View>
                           <View style={{ flex: 1, marginHorizontal: 10 }}>
-                            <Text style={[styles.dayExpenseDesc, { color: colors.text }]} numberOfLines={1}>
+                            <Text style={[styles.dayExpenseDesc, { color: colors.text, fontSize: sf(13) }]} numberOfLines={1}>
                               {exp.description}
                             </Text>
-                            <Text style={[styles.dayExpenseSub, { color: colors.textSecondary }]}>
+                            <Text style={[styles.dayExpenseSub, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
                               {exp.payerName} • {exp.trip_name}
                             </Text>
                           </View>
-                          <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={[styles.dayExpenseAmt, { color: colors.text }]}>
+                          <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>
+                            <Text
+                              style={[styles.dayExpenseAmt, { color: colors.text, fontSize: sf(13) }]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit={true}
+                              minimumFontScale={0.75}
+                            >
                               {formatCurrencyAmount(exp.amount, exp.currency || userCurrency)}
                             </Text>
                             <Text
                               style={[
                                 styles.dayExpenseMode,
                                 {
+                                  fontSize: sf(9),
                                   color:
                                     exp.payment_mode === 'upi'
                                       ? colors.primary
@@ -2227,6 +2062,40 @@ export default function AnalyserScreen() {
               </View>
             );
           })}
+
+          {dailySpendingData.groups.length > INLINE_DAILY_GROUPS_LIMIT && (
+            <TouchableOpacity
+              style={[
+                styles.viewMoreCardBtn,
+                {
+                  backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
+                  borderColor: isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)',
+                  borderWidth: 1,
+                  marginTop: 4,
+                  marginBottom: 16,
+                },
+              ]}
+              onPress={() =>
+                router.push({
+                  pathname: '/all-expenses',
+                  params: {
+                    search: appliedExpenseSearch || searchQuery || undefined,
+                    category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : undefined,
+                    sort: 'newest',
+                  },
+                })
+              }
+            >
+              <Text style={[styles.viewMoreCardBtnText, { color: colors.primary }]}>
+                View All Expenses ({filteredAndSortedExpenses.length})
+              </Text>
+              <Ionicons
+                name="arrow-forward"
+                size={16}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -2290,20 +2159,25 @@ export default function AnalyserScreen() {
                     }}
                   >
                     <View style={[styles.categoryIconBox, { backgroundColor: meta.bg }]}>
-                      <Ionicons name={meta.icon} size={20} color={meta.color} />
+                      <Ionicons name={meta.icon} size={sf(18)} color={meta.color} />
                     </View>
 
-                    <View style={{ flex: 1, marginHorizontal: 12 }}>
+                    <View style={{ flex: 1, marginHorizontal: 10 }}>
                       <View style={styles.categoryHeaderLine}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={[styles.categoryName, { color: colors.text }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1, marginRight: 8 }}>
+                          <Text style={[styles.categoryName, { color: colors.text, fontSize: sf(13.5) }]} numberOfLines={1}>
                             {cat.name}
                           </Text>
-                          <Text style={[styles.categoryItemCount, { color: colors.textMuted }]}>
+                          <Text style={[styles.categoryItemCount, { color: colors.textMuted, fontSize: sf(11.5) }]}>
                             ({cat.count})
                           </Text>
                         </View>
-                        <Text style={[styles.categoryAmount, { color: colors.text }]}>
+                        <Text
+                          style={[styles.categoryAmount, { color: colors.text, fontSize: sf(13.5) }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit={true}
+                          minimumFontScale={0.75}
+                        >
                           {formatCurrencyAmount(cat.amount, userCurrency)}
                         </Text>
                       </View>
@@ -2322,7 +2196,7 @@ export default function AnalyserScreen() {
                     </View>
 
                     <View style={[styles.percentageBadge, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
-                      <Text style={[styles.percentageText, { color: colors.textSecondary }]}>
+                      <Text style={[styles.percentageText, { color: colors.textSecondary, fontSize: sf(11) }]}>
                         {cat.percentage}%
                       </Text>
                     </View>
@@ -2353,23 +2227,28 @@ export default function AnalyserScreen() {
               <View style={[styles.insightIcon, { backgroundColor: '#FEE2E2' }]}>
                 <Ionicons name="flame" size={20} color="#EF4444" />
               </View>
-              <Text style={[styles.insightLabel, { color: colors.textSecondary }]}>
+              <Text style={[styles.insightLabel, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
                 Highest Expense
               </Text>
               {analytics.maxExpense ? (
                 <>
-                  <Text style={[styles.insightValue, { color: colors.text }]} numberOfLines={1}>
+                  <Text
+                    style={[styles.insightValue, { color: colors.text, fontSize: sf(14) }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.75}
+                  >
                     {formatCurrencyAmount(analytics.maxExpense.amount, userCurrency)}
                   </Text>
-                  <Text style={[styles.insightSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                  <Text style={[styles.insightSub, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
                     {analytics.maxExpense.description}
                   </Text>
-                  <Text style={[styles.insightMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                  <Text style={[styles.insightMeta, { color: colors.textMuted, fontSize: sf(10) }]} numberOfLines={1}>
                     {analytics.maxExpense.trip_name}
                   </Text>
                 </>
               ) : (
-                <Text style={[styles.insightSub, { color: colors.textMuted }]}>No records yet</Text>
+                <Text style={[styles.insightSub, { color: colors.textMuted, fontSize: sf(11) }]}>No records yet</Text>
               )}
             </View>
 
@@ -2380,19 +2259,24 @@ export default function AnalyserScreen() {
               ]}
             >
               <View style={[styles.insightIcon, { backgroundColor: '#FEF3C7' }]}>
-                <Ionicons name="speedometer-outline" size={20} color="#F59E0B" />
+                <Ionicons name="speedometer-outline" size={sf(18)} color="#F59E0B" />
               </View>
-              <Text style={[styles.insightLabel, { color: colors.textSecondary }]}>
+              <Text style={[styles.insightLabel, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
                 Spending Pace
               </Text>
-              <Text style={[styles.insightValue, { color: colors.text }]} numberOfLines={1}>
+              <Text
+                style={[styles.insightValue, { color: colors.text, fontSize: sf(14) }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.75}
+              >
                 {formatCurrencyAmount(dailySpendingData.dailyAveragePaise, userCurrency)}/day
               </Text>
-              <Text style={[styles.insightSub, { color: colors.textSecondary }]}>
+              <Text style={[styles.insightSub, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
                 Across {dailySpendingData.activeDaysCount} active days
               </Text>
               {dailySpendingData.peakDay && (
-                <Text style={[styles.insightMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                <Text style={[styles.insightMeta, { color: colors.textMuted, fontSize: sf(10) }]} numberOfLines={1}>
                   Peak: {dailySpendingData.peakDay.displayLabel}
                 </Text>
               )}
@@ -2413,45 +2297,62 @@ export default function AnalyserScreen() {
             <View style={styles.cardHeaderRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <View style={[styles.insightIconSmall, { backgroundColor: '#EEF2FF' }]}>
-                  <Ionicons name="wallet-outline" size={16} color={colors.primary} />
+                  <Ionicons name="wallet-outline" size={sf(15)} color={colors.primary} />
                 </View>
-                <Text style={[styles.cardHeaderTitle, { color: colors.text }]}>
+                <Text style={[styles.cardHeaderTitle, { color: colors.text, fontSize: sf(14.5) }]}>
                   Payment Mode Distribution
                 </Text>
               </View>
             </View>
 
             <View style={styles.paymentModesRow}>
-              <View style={[styles.paymentBox, { backgroundColor: isDark ? '#1C2432' : '#F9FAFB' }]}>
-                <Text style={[styles.paymentLabel, { color: colors.textSecondary }]}>UPI</Text>
-                <Text style={[styles.paymentAmount, { color: colors.text }]}>
+              <View style={[styles.paymentBox, { backgroundColor: isDark ? '#1C2432' : '#F9FAFB', padding: isSmall ? 8 : 10 }]}>
+                <Text style={[styles.paymentLabel, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>UPI</Text>
+                <Text
+                  style={[styles.paymentAmount, { color: colors.text, fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.75}
+                >
                   {formatCurrencyAmount(analytics.paymentModeTotals.upi, userCurrency)}
                 </Text>
-                <Text style={[styles.paymentPct, { color: colors.primary }]}>
+                <Text style={[styles.paymentPct, { color: colors.primary, fontSize: sf(11) }]}>
                   {analytics.totalPaise > 0
                     ? `${Math.round((analytics.paymentModeTotals.upi / analytics.totalPaise) * 100)}%`
                     : '0%'}
                 </Text>
               </View>
 
-              <View style={[styles.paymentBox, { backgroundColor: isDark ? '#1C2432' : '#F9FAFB' }]}>
-                <Text style={[styles.paymentLabel, { color: colors.textSecondary }]}>Cash</Text>
-                <Text style={[styles.paymentAmount, { color: colors.text }]}>
+              <View style={[styles.paymentBox, { backgroundColor: isDark ? '#1C2432' : '#F9FAFB', padding: isSmall ? 8 : 10 }]}>
+                <Text style={[styles.paymentLabel, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>Cash</Text>
+                <Text
+                  style={[styles.paymentAmount, { color: colors.text, fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.75}
+                >
                   {formatCurrencyAmount(analytics.paymentModeTotals.cash, userCurrency)}
                 </Text>
-                <Text style={[styles.paymentPct, { color: colors.success }]}>
+                <Text style={[styles.paymentPct, { color: colors.success, fontSize: sf(11) }]}>
                   {analytics.totalPaise > 0
                     ? `${Math.round((analytics.paymentModeTotals.cash / analytics.totalPaise) * 100)}%`
                     : '0%'}
                 </Text>
               </View>
 
-              <View style={[styles.paymentBox, { backgroundColor: isDark ? '#1C2432' : '#F9FAFB' }]}>
-                <Text style={[styles.paymentLabel, { color: colors.textSecondary }]}>Other / Card</Text>
-                <Text style={[styles.paymentAmount, { color: colors.text }]}>
+              <View style={[styles.paymentBox, { backgroundColor: isDark ? '#1C2432' : '#F9FAFB', padding: isSmall ? 8 : 10 }]}>
+                <Text style={[styles.paymentLabel, { color: colors.textSecondary, fontSize: sf(11) }]} numberOfLines={1}>
+                  {isSmall ? 'Other' : 'Other / Card'}
+                </Text>
+                <Text
+                  style={[styles.paymentAmount, { color: colors.text, fontSize: sf(12.5) }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.75}
+                >
                   {formatCurrencyAmount(analytics.paymentModeTotals.other, userCurrency)}
                 </Text>
-                <Text style={[styles.paymentPct, { color: '#8B5CF6' }]}>
+                <Text style={[styles.paymentPct, { color: '#8B5CF6', fontSize: sf(11) }]}>
                   {analytics.totalPaise > 0
                     ? `${Math.round((analytics.paymentModeTotals.other / analytics.totalPaise) * 100)}%`
                     : '0%'}
@@ -2467,22 +2368,22 @@ export default function AnalyserScreen() {
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderWithAction}>
             <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              <Text style={[styles.sectionTitle, { color: colors.text, fontSize: sf(16) }]} numberOfLines={1}>
                 Expenses Explorer ({filteredAndSortedExpenses.length})
               </Text>
-              <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+              <Text style={[styles.sectionSubtitle, { color: colors.textSecondary, fontSize: sf(11.5) }]} numberOfLines={1}>
                 {filteredAndSortedExpenses.length > INLINE_EXPENSES_LIMIT
-                  ? `Showing first 10 • Sorted by ${SORT_OPTIONS.find(s => s.id === selectedSort)?.label}`
+                  ? `Showing first ${INLINE_EXPENSES_LIMIT} • Sorted by ${SORT_OPTIONS.find(s => s.id === selectedSort)?.label}`
                   : `Sorted by ${SORT_OPTIONS.find(s => s.id === selectedSort)?.label}`}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               {activeFiltersCount > 0 && (
                 <TouchableOpacity
                   style={[styles.clearCatChip, { backgroundColor: colors.dangerBg }]}
                   onPress={resetAllFilters}
                 >
-                  <Text style={[styles.clearCatText, { color: colors.danger }]}>Clear</Text>
+                  <Text style={[styles.clearCatText, { color: colors.danger, fontSize: sf(11) }]}>Clear</Text>
                 </TouchableOpacity>
               )}
               {filteredAndSortedExpenses.length > INLINE_EXPENSES_LIMIT && (
@@ -2499,10 +2400,10 @@ export default function AnalyserScreen() {
                     })
                   }
                 >
-                  <Text style={[styles.viewMoreTopText, { color: colors.primary }]}>
-                    View All ({filteredAndSortedExpenses.length})
+                  <Text style={[styles.viewMoreTopText, { color: colors.primary, fontSize: sf(11.5) }]}>
+                    {isSmall ? `All (${filteredAndSortedExpenses.length})` : `View All (${filteredAndSortedExpenses.length})`}
                   </Text>
-                  <Ionicons name="arrow-forward" size={14} color={colors.primary} />
+                  <Ionicons name="arrow-forward" size={sf(13)} color={colors.primary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -2540,15 +2441,20 @@ export default function AnalyserScreen() {
                     onPress={() => handleOpenExpense(exp.trip_id, exp.id)}
                   >
                     <View style={[styles.categoryIconBox, { backgroundColor: meta.bg }]}>
-                      <Ionicons name={meta.icon} size={20} color={meta.color} />
+                      <Ionicons name={meta.icon} size={sf(18)} color={meta.color} />
                     </View>
 
-                    <View style={{ flex: 1, marginHorizontal: 12 }}>
+                    <View style={{ flex: 1, marginHorizontal: 10 }}>
                       <View style={styles.expenseExplorerMainLine}>
-                        <Text style={[styles.expenseExplorerTitle, { color: colors.text }]} numberOfLines={1}>
+                        <Text style={[styles.expenseExplorerTitle, { color: colors.text, fontSize: sf(13.5) }]} numberOfLines={1}>
                           {exp.description}
                         </Text>
-                        <Text style={[styles.expenseExplorerAmount, { color: colors.text }]}>
+                        <Text
+                          style={[styles.expenseExplorerAmount, { color: colors.text, fontSize: sf(13.5) }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit={true}
+                          minimumFontScale={0.75}
+                        >
                           {formatCurrencyAmount(exp.amount, exp.currency || userCurrency)}
                         </Text>
                       </View>
@@ -2557,20 +2463,20 @@ export default function AnalyserScreen() {
                         <Text
                           style={[
                             styles.expenseExplorerPayer,
-                            { color: exp.isMyExpense ? colors.success : colors.textSecondary },
+                            { color: exp.isMyExpense ? colors.success : colors.textSecondary, fontSize: sf(11.5) },
                           ]}
                           numberOfLines={1}
                         >
                           {exp.isMyExpense ? 'Paid by You' : `Paid by ${exp.payerName}`}
                         </Text>
-                        <Text style={[styles.expenseExplorerTripBadge, { color: colors.textMuted }]} numberOfLines={1}>
+                        <Text style={[styles.expenseExplorerTripBadge, { color: colors.textMuted, fontSize: sf(11) }]} numberOfLines={1}>
                           • {exp.trip_name}
                         </Text>
                       </View>
 
-                      <View style={styles.expenseExplorerTagRow}>
+                      <View style={[styles.expenseExplorerTagRow, { flexWrap: 'wrap', gap: 5 }]}>
                         <View style={[styles.miniBadgeTag, { backgroundColor: isDark ? '#2D3748' : '#F3F4F6' }]}>
-                          <Text style={[styles.miniBadgeText, { color: colors.textSecondary }]}>
+                          <Text style={[styles.miniBadgeText, { color: colors.textSecondary, fontSize: sf(10) }]}>
                             {exp.dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </Text>
                         </View>
@@ -2593,6 +2499,7 @@ export default function AnalyserScreen() {
                             style={[
                               styles.miniBadgeText,
                               {
+                                fontSize: sf(10),
                                 color:
                                   exp.payment_mode === 'upi'
                                     ? colors.primary
@@ -2607,7 +2514,7 @@ export default function AnalyserScreen() {
                         </View>
                         {exp.mySharePaise > 0 && !exp.isMyExpense && (
                           <View style={[styles.miniBadgeTag, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
-                            <Text style={[styles.miniBadgeText, { color: colors.danger }]}>
+                            <Text style={[styles.miniBadgeText, { color: colors.danger, fontSize: sf(10) }]}>
                               Your Share: {formatCurrencyAmount(exp.mySharePaise, userCurrency)}
                             </Text>
                           </View>
@@ -2615,7 +2522,7 @@ export default function AnalyserScreen() {
                       </View>
                     </View>
 
-                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                    <Ionicons name="chevron-forward" size={sf(15)} color={colors.textMuted} />
                   </TouchableOpacity>
                 );
               })}
@@ -2726,25 +2633,30 @@ export default function AnalyserScreen() {
                     />
                   </View>
                   <View style={{ flex: 1, marginHorizontal: 12 }}>
-                    <Text style={[styles.tripName, { color: colors.text }]}>{trip.name}</Text>
-                    <Text style={[styles.tripMeta, { color: colors.textSecondary }]}>
+                    <Text style={[styles.tripName, { color: colors.text, fontSize: sf(14.5) }]} numberOfLines={1}>{trip.name}</Text>
+                    <Text style={[styles.tripMeta, { color: colors.textSecondary, fontSize: sf(11.5) }]} numberOfLines={1}>
                       {tripExps.length} {tripExps.length === 1 ? 'expense' : 'expenses'}
                     </Text>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
+                  <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>
                     {isOpeningThisTrip ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <ActivityIndicator size="small" color={colors.primary} />
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>
+                        <Text style={{ fontSize: sf(11), fontWeight: '700', color: colors.primary }}>
                           Opening...
                         </Text>
                       </View>
                     ) : (
                       <>
-                        <Text style={[styles.tripAmount, { color: colors.text }]}>
+                        <Text
+                          style={[styles.tripAmount, { color: colors.text, fontSize: sf(14) }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit={true}
+                          minimumFontScale={0.75}
+                        >
                           {formatCurrencyAmount(tripTotal, trip.currency || userCurrency)}
                         </Text>
-                        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                        <Ionicons name="chevron-forward" size={sf(15)} color={colors.textMuted} />
                       </>
                     )}
                   </View>
@@ -2776,7 +2688,7 @@ export default function AnalyserScreen() {
         visible={searchModalVisible}
         onClose={() => setSearchModalVisible(false)}
         maxHeight="92%"
-        sheetStyle={{ paddingBottom: 20 }}
+        sheetStyle={{ maxWidth: 640, alignSelf: 'center', width: '100%', paddingBottom: 20 }}
       >
         <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
           <View>
@@ -2848,8 +2760,8 @@ export default function AnalyserScreen() {
             style={[
               styles.modalTabPill,
               {
-                backgroundColor: searchModalTab === 'friends' ? '#10B981' : colors.inputBackground,
-                borderColor: searchModalTab === 'friends' ? '#10B981' : colors.border,
+                backgroundColor: searchModalTab === 'friends' ? colors.primary : colors.inputBackground,
+                borderColor: searchModalTab === 'friends' ? colors.primary : colors.border,
               },
             ]}
             onPress={() => setSearchModalTab('friends')}
@@ -2857,7 +2769,7 @@ export default function AnalyserScreen() {
             <Ionicons
               name="people"
               size={13}
-              color={searchModalTab === 'friends' ? '#FFFFFF' : '#10B981'}
+              color={searchModalTab === 'friends' ? '#FFFFFF' : colors.primary}
               style={{ marginRight: 4 }}
             />
             <Text
@@ -2932,8 +2844,8 @@ export default function AnalyserScreen() {
           {(searchModalTab === 'all' || searchModalTab === 'friends') && (
             <View style={{ marginBottom: 16 }}>
               <View style={styles.modalSectionHeadingRow}>
-                <Ionicons name="people" size={14} color="#10B981" />
-                <Text style={[styles.modalSectionHeading, { color: '#10B981' }]}>
+                <Ionicons name="people" size={14} color={colors.primary} />
+                <Text style={[styles.modalSectionHeading, { color: colors.primary }]}>
                   {searchModalQuery.trim().length >= 3
                     ? `FRIENDS MATCHING "${searchModalQuery.trim()}"`
                     : 'SELECT A FRIEND'}
@@ -2958,11 +2870,9 @@ export default function AnalyserScreen() {
                         styles.modalListItem,
                         {
                           backgroundColor: isSelected
-                            ? isDark
-                              ? 'rgba(16, 185, 129, 0.18)'
-                              : '#ECFDF5'
+                            ? colors.primaryLight
                             : colors.card,
-                          borderColor: isSelected ? '#10B981' : colors.borderLight,
+                          borderColor: isSelected ? colors.primary : colors.borderLight,
                         },
                       ]}
                       onPress={() => {
@@ -2977,13 +2887,13 @@ export default function AnalyserScreen() {
                         <View
                           style={[
                             styles.modalAvatarInitials,
-                            { backgroundColor: p.isCurrentUser ? '#E0E7FF' : '#DCFCE7' },
+                            { backgroundColor: p.isCurrentUser ? colors.primaryLight : isDark ? '#283449' : '#E6EEFA' },
                           ]}
                         >
                           <Text
                             style={[
                               styles.modalAvatarText,
-                              { color: p.isCurrentUser ? '#4F46E5' : '#059669' },
+                              { color: colors.primary },
                             ]}
                           >
                             {p.name.slice(0, 2).toUpperCase()}
@@ -3010,13 +2920,11 @@ export default function AnalyserScreen() {
                               style={[
                                 styles.friendBadge,
                                 {
-                                  backgroundColor: isDark
-                                    ? 'rgba(16, 185, 129, 0.2)'
-                                    : '#DCFCE7',
+                                  backgroundColor: colors.primaryLight,
                                 },
                               ]}
                             >
-                              <Text style={styles.friendBadgeText}>Friend</Text>
+                              <Text style={[styles.friendBadgeText, { color: colors.primary }]}>Friend</Text>
                             </View>
                           )}
                         </View>
@@ -3038,15 +2946,15 @@ export default function AnalyserScreen() {
                         style={[
                           styles.filterActionPill,
                           {
-                            backgroundColor: isSelected ? '#10B981' : colors.inputBackground,
-                            borderColor: isSelected ? '#10B981' : colors.border,
+                            backgroundColor: isSelected ? colors.primary : colors.inputBackground,
+                            borderColor: isSelected ? colors.primary : colors.border,
                           },
                         ]}
                       >
                         <Text
                           style={[
                             styles.filterActionText,
-                            { color: isSelected ? '#FFFFFF' : '#10B981' },
+                            { color: isSelected ? '#FFFFFF' : colors.primary },
                           ]}
                         >
                           {isSelected ? 'Selected' : 'Select'}
@@ -3185,7 +3093,7 @@ export default function AnalyserScreen() {
         visible={filterModalVisible}
         onClose={() => setFilterModalVisible(false)}
         maxHeight="85%"
-        sheetStyle={{ paddingBottom: 20 }}
+        sheetStyle={{ maxWidth: 640, alignSelf: 'center', width: '100%', paddingBottom: 20 }}
       >
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
@@ -3203,116 +3111,6 @@ export default function AnalyserScreen() {
             </View>
 
             <ScrollView style={{ paddingHorizontal: 18, paddingTop: 14 }}>
-              {/* Trip Filter */}
-              <Text style={[styles.filterGroupHeading, { color: colors.text }]}>Trip</Text>
-              <View style={styles.filterChipGroup}>
-                <TouchableOpacity
-                  style={[
-                    styles.modalOptionChip,
-                    {
-                      backgroundColor: selectedTripFilter === 'all' ? colors.primary : colors.inputBackground,
-                      borderColor: selectedTripFilter === 'all' ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setSelectedTripFilter('all')}
-                >
-                  <Text
-                    style={[
-                      styles.modalOptionText,
-                      { color: selectedTripFilter === 'all' ? '#FFFFFF' : colors.text },
-                    ]}
-                  >
-                    All ({uniqueGroupTrips.length} Trips)
-                  </Text>
-                </TouchableOpacity>
-                {uniqueGroupTrips.map(t => (
-                  <TouchableOpacity
-                    key={t.id}
-                    style={[
-                      styles.modalOptionChip,
-                      {
-                        backgroundColor: selectedTripFilter === t.id ? colors.primary : colors.inputBackground,
-                        borderColor: selectedTripFilter === t.id ? colors.primary : colors.border,
-                      },
-                    ]}
-                    onPress={() => setSelectedTripFilter(t.id)}
-                  >
-                    <Ionicons
-                      name="airplane-outline"
-                      size={12}
-                      color={selectedTripFilter === t.id ? '#FFFFFF' : colors.textSecondary}
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text
-                      style={[
-                        styles.modalOptionText,
-                        { color: selectedTripFilter === t.id ? '#FFFFFF' : colors.text },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {t.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Person / Member Filter */}
-              {availablePeople.length > 0 && (
-                <>
-                  <Text style={[styles.filterGroupHeading, { color: colors.text }]}>Person / Member</Text>
-                  <View style={styles.filterChipGroup}>
-                    <TouchableOpacity
-                      style={[
-                        styles.modalOptionChip,
-                        {
-                          backgroundColor: selectedPersonFilter === 'all' ? colors.primary : colors.inputBackground,
-                          borderColor: selectedPersonFilter === 'all' ? colors.primary : colors.border,
-                        },
-                      ]}
-                      onPress={() => setSelectedPersonFilter('all')}
-                    >
-                      <Text
-                        style={[
-                          styles.modalOptionText,
-                          { color: selectedPersonFilter === 'all' ? '#FFFFFF' : colors.text },
-                        ]}
-                      >
-                        All People ({availablePeople.length})
-                      </Text>
-                    </TouchableOpacity>
-                    {availablePeople.map(p => (
-                      <TouchableOpacity
-                        key={p.id}
-                        style={[
-                          styles.modalOptionChip,
-                          {
-                            backgroundColor: selectedPersonFilter === p.id ? '#10B981' : colors.inputBackground,
-                            borderColor: selectedPersonFilter === p.id ? '#10B981' : colors.border,
-                          },
-                        ]}
-                        onPress={() => setSelectedPersonFilter(p.id)}
-                      >
-                        <Ionicons
-                          name="person-outline"
-                          size={12}
-                          color={selectedPersonFilter === p.id ? '#FFFFFF' : colors.textSecondary}
-                          style={{ marginRight: 4 }}
-                        />
-                        <Text
-                          style={[
-                            styles.modalOptionText,
-                            { color: selectedPersonFilter === p.id ? '#FFFFFF' : colors.text },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {p.name} {p.isCurrentUser ? '(You)' : ''}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-
               <Text style={[styles.filterGroupHeading, { color: colors.text }]}>Category</Text>
               <View style={styles.filterChipGroup}>
                 {['all', 'Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General', 'Shopping'].map(cat => (
@@ -3439,7 +3237,7 @@ export default function AnalyserScreen() {
             <View style={[styles.modalActionsRow, { borderTopColor: colors.borderLight }]}>
               <TouchableOpacity
                 style={[styles.modalResetBtn, { borderColor: colors.border }]}
-                onPress={resetAllFilters}
+                onPress={resetModalFilters}
               >
                 <Text style={[styles.modalResetBtnText, { color: colors.danger }]}>Reset All</Text>
               </TouchableOpacity>
@@ -3457,7 +3255,7 @@ export default function AnalyserScreen() {
         visible={sortModalVisible}
         onClose={() => setSortModalVisible(false)}
         dragEntireSheet={true}
-        sheetStyle={{ paddingBottom: 20 }}
+        sheetStyle={{ maxWidth: 640, alignSelf: 'center', width: '100%', paddingBottom: 20 }}
       >
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
@@ -3525,7 +3323,7 @@ export default function AnalyserScreen() {
           visible={allTripsModalVisible}
           onClose={() => setAllTripsModalVisible(false)}
           maxHeight="88%"
-          sheetStyle={{ paddingBottom: 20 }}
+          sheetStyle={{ maxWidth: 640, alignSelf: 'center', width: '100%', paddingBottom: 20 }}
         >
               <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                 <View>
@@ -3728,6 +3526,23 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(0,0,0,0.06)',
   },
+  heroSubGrid: {
+    width: '100%',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.06)',
+  },
+  heroGridRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  heroHorizontalDivider: {
+    height: 1,
+    width: '100%',
+    marginVertical: 4,
+  },
   heroStatCol: {
     alignItems: 'center',
     flex: 1,
@@ -3778,10 +3593,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#EF4444',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
   },
   activePillsContainer: {
     marginBottom: 10,
@@ -4100,12 +3915,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   dayGroupHeaderLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    marginRight: 10,
   },
   dayCalendarBadge: {
     width: 36,
@@ -4123,8 +3941,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   dayGroupHeaderRight: {
-    alignItems: 'flex-end',
-    gap: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   dayGroupTotal: {
     fontSize: 14,
@@ -4132,7 +3952,7 @@ const styles = StyleSheet.create({
   },
   dayExpensesContainer: {
     borderTopWidth: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingBottom: 6,
   },
   dayExpenseRow: {
@@ -4535,7 +4355,7 @@ const styles = StyleSheet.create({
   friendBadgeText: {
     fontSize: 9,
     fontWeight: '700',
-    color: '#059669',
+    color: '#7895B7',
   },
   noSuggestionRow: {
     flexDirection: 'row',
@@ -4678,38 +4498,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
-  topSelectedFilterSection: {
-    marginBottom: 12,
-  },
-  topSelectedFilterScroll: {
+  topSelectedFilterRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
+    marginBottom: 10,
   },
-  topSelectedFilterChip: {
+  topSelectedFilterPill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    borderWidth: 1.5,
-    gap: 7,
-  },
-  topSelectedFilterChipText: {
-    fontSize: 12,
-  },
-  topClearAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
     borderWidth: 1,
-    gap: 4,
+    gap: 6,
+    maxWidth: '100%',
+    flexShrink: 1,
   },
-  topClearAllText: {
-    fontSize: 11,
-    fontWeight: '600',
+  topSelectedFilterPillText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flexShrink: 1,
   },
 });
 

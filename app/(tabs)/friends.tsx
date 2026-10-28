@@ -40,6 +40,7 @@ interface FriendRowItemProps {
   currentUserName?: string | null;
   userAvatarUrl?: string | null;
   onOpen: (item: FriendContact) => void;
+  onAddExpense: (item: FriendContact) => void;
   onInvite: (name: string, phone?: string) => void;
 }
 
@@ -56,6 +57,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
   currentUserName,
   userAvatarUrl,
   onOpen,
+  onAddExpense,
   onInvite,
 }: FriendRowItemProps) {
   const isFirst = index === 0;
@@ -295,6 +297,25 @@ const FriendRowItem = React.memo(function FriendRowItem({
                 )}
               </View>
 
+              <TouchableOpacity
+                style={[
+                  styles.quickAddBtn,
+                  {
+                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF',
+                    borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+                    marginRight: 6,
+                  },
+                ]}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onAddExpense(item);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={16} color={colors.primary} />
+              </TouchableOpacity>
+
               {!item.isRegistered && item.phoneNumber ? (
                 <TouchableOpacity
                   style={[styles.inviteMiniBtn, { backgroundColor: '#25D366' }]}
@@ -303,7 +324,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                   <Ionicons name="logo-whatsapp" size={13} color="#FFFFFF" />
                 </TouchableOpacity>
               ) : (
-                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 2 }} />
               )}
             </View>
           )}
@@ -322,6 +343,9 @@ export default function FriendsScreen() {
   const user = useAuthStore(s => s.user);
   const profile = useAuthStore(s => s.profile);
   const findOrCreateFriendSplitTrip = useTripStore(s => s.findOrCreateFriendSplitTrip);
+  const getOrCreatePersonalTrip = useTripStore(s => s.getOrCreatePersonalTrip);
+  const getPersonalExpensesTotalPaise = useTripStore(s => s.getPersonalExpensesTotalPaise);
+  const personalTotalSpent = getPersonalExpensesTotalPaise();
   const contacts = useContactsStore(s => s.contacts);
   const friendsSummary = useContactsStore(s => s.friendsSummary);
   const fetchFriendsSummary = useContactsStore(s => s.fetchFriendsSummary);
@@ -525,6 +549,45 @@ export default function FriendsScreen() {
     }
   }, [openingFriendId, findOrCreateFriendSplitTrip, router]);
 
+  const handleAddFriendExpense = useCallback(async (friend: FriendContact) => {
+    try {
+      const targetTrip = await findOrCreateFriendSplitTrip(friend);
+      if (targetTrip) {
+        router.push({
+          pathname: '/trip/[id]/add',
+          params: { id: targetTrip.id },
+        });
+      }
+    } catch (e) {
+      console.log('Error opening friend add expense:', e);
+    }
+  }, [findOrCreateFriendSplitTrip, router]);
+
+  const handleOpenPersonalChat = useCallback(async () => {
+    try {
+      const personalTrip = await getOrCreatePersonalTrip();
+      if (personalTrip) {
+        router.push(`/trip/${personalTrip.id}`);
+      }
+    } catch (e) {
+      console.log('Error opening personal chat:', e);
+    }
+  }, [getOrCreatePersonalTrip, router]);
+
+  const handleAddPersonalExpense = useCallback(async () => {
+    try {
+      const personalTrip = await getOrCreatePersonalTrip();
+      if (personalTrip) {
+        router.push({
+          pathname: '/trip/[id]/add',
+          params: { id: personalTrip.id },
+        });
+      }
+    } catch (e) {
+      console.log('Error adding personal expense:', e);
+    }
+  }, [getOrCreatePersonalTrip, router]);
+
   const renderItem = useCallback(
     ({ item, index }: { item: FriendContact; index: number }) => (
       <FriendRowItem
@@ -540,6 +603,7 @@ export default function FriendsScreen() {
         currentUserName={currentUserName}
         userAvatarUrl={profile?.avatar_url}
         onOpen={handleOpenFriendChat}
+        onAddExpense={handleAddFriendExpense}
         onInvite={inviteFriend}
       />
     ),
@@ -553,6 +617,7 @@ export default function FriendsScreen() {
       currentUserName,
       profile?.avatar_url,
       handleOpenFriendChat,
+      handleAddFriendExpense,
       inviteFriend,
     ]
   );
@@ -701,6 +766,83 @@ export default function FriendsScreen() {
         initialNumToRender={10}
         maxToRenderPerBatch={10}
         windowSize={5}
+        ListHeaderComponent={
+          !searchQuery ? (
+            <View
+              style={[
+                styles.youCardContainer,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: isDark ? 'rgba(99, 102, 241, 0.35)' : '#E0E7FF',
+                },
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.youCard}
+                onPress={handleOpenPersonalChat}
+                activeOpacity={0.7}
+              >
+                <View style={styles.youAvatarWrapper}>
+                  <View
+                    style={[
+                      styles.youAvatar,
+                      {
+                        backgroundColor: colors.primaryLight,
+                      },
+                    ]}
+                  >
+                    {profile?.avatar_url ? (
+                      <Image
+                        source={{ uri: profile.avatar_url }}
+                        style={{ width: '100%', height: '100%', borderRadius: 21 }}
+                      />
+                    ) : (
+                      <Ionicons name="person" size={20} color={colors.primary} />
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.youInfo}>
+                  <View style={styles.youTitleRow}>
+                    <Text style={[styles.youTitle, { color: colors.text }]} numberOfLines={1}>
+                      You (Personal Expenses)
+                    </Text>
+                    <View style={[styles.youBadge, { backgroundColor: colors.primaryLight }]}>
+                      <Text style={[styles.youBadgeText, { color: colors.primary }]}>Self</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.youSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {personalTotalSpent > 0
+                      ? `${formatCurrencyAmount(personalTotalSpent, userCurrency)} spent on yourself`
+                      : 'Track self-expenses & personal spending'}
+                  </Text>
+                </View>
+
+                <View style={styles.youRightCol}>
+                  <TouchableOpacity
+                    style={[
+                      styles.quickAddBtn,
+                      {
+                        backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF',
+                        borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+                        marginRight: 6,
+                      },
+                    ]}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleAddPersonalExpense();
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="add" size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          ) : null
+        }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
@@ -1015,5 +1157,64 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 16,
+  },
+  quickAddBtn: {
+    width: moderateScale(26),
+    height: moderateScale(26),
+    borderRadius: moderateScale(13),
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  youCardContainer: {
+    marginBottom: moderateScale(12),
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  youCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: moderateScale(12),
+    paddingHorizontal: moderateScale(14),
+  },
+  youAvatarWrapper: {
+    marginRight: moderateScale(12),
+  },
+  youAvatar: {
+    width: moderateScale(42),
+    height: moderateScale(42),
+    borderRadius: moderateScale(21),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  youInfo: {
+    flex: 1,
+  },
+  youTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  youTitle: {
+    fontSize: scaleFont(15),
+    fontWeight: '700',
+  },
+  youBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  youBadgeText: {
+    fontSize: scaleFont(10),
+    fontWeight: '700',
+  },
+  youSub: {
+    fontSize: scaleFont(12),
+    marginTop: 2,
+  },
+  youRightCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

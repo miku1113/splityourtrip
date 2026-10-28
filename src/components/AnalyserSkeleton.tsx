@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
-import { moderateScale } from '../theme/responsive';
+import { moderateScale, useResponsive } from '../theme/responsive';
 
 interface AnalyserSkeletonProps {
   colors: {
@@ -22,6 +22,7 @@ export default function AnalyserSkeleton({
   colors,
   isDark = true,
 }: AnalyserSkeletonProps) {
+  const { width } = useResponsive();
   const pulseAnim = useRef(new Animated.Value(0.35)).current;
 
   useEffect(() => {
@@ -123,74 +124,142 @@ export default function AnalyserSkeleton({
           />
         </View>
 
-        {/* 4-Stat Hero Matrix */}
-        <View style={styles.heroSubRow}>
-          <View style={styles.heroStatCol}>
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: blockSecondary, opacity: pulseAnim, width: 50, height: 10 },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: colors.success || '#4ADE80', opacity: pulseAnim, width: 62, height: 15, marginTop: 4 },
-              ]}
-            />
+        {/* 4-Stat Hero Matrix (2x2 on <360, 4-col on >=360) */}
+        {width < 360 ? (
+          <View style={{ width: '100%', paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8 }}>
+              <View style={styles.heroStatCol}>
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: blockSecondary, opacity: pulseAnim, width: 50, height: 10 },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: colors.success || '#4ADE80', opacity: pulseAnim, width: 62, height: 14, marginTop: 4 },
+                  ]}
+                />
+              </View>
+              <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.heroStatCol}>
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: blockSecondary, opacity: pulseAnim, width: 58, height: 10 },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: blockColor, opacity: pulseAnim, width: 68, height: 14, marginTop: 4 },
+                  ]}
+                />
+              </View>
+            </View>
+            <View style={{ height: 1, backgroundColor: 'rgba(0,0,0,0.06)', width: '100%' }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8 }}>
+              <View style={styles.heroStatCol}>
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: blockSecondary, opacity: pulseAnim, width: 52, height: 10 },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: blockColor, opacity: pulseAnim, width: 32, height: 14, marginTop: 4 },
+                  ]}
+                />
+              </View>
+              <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.heroStatCol}>
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: blockSecondary, opacity: pulseAnim, width: 50, height: 10 },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.skeletonLine,
+                    { backgroundColor: colors.warning || '#F59E0B', opacity: pulseAnim, width: 58, height: 14, marginTop: 4 },
+                  ]}
+                />
+              </View>
+            </View>
           </View>
+        ) : (
+          <View style={styles.heroSubRow}>
+            <View style={styles.heroStatCol}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockSecondary, opacity: pulseAnim, width: 50, height: 10 },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: colors.success || '#4ADE80', opacity: pulseAnim, width: 62, height: 15, marginTop: 4 },
+                ]}
+              />
+            </View>
 
-          <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
+            <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
 
-          <View style={styles.heroStatCol}>
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: blockSecondary, opacity: pulseAnim, width: 58, height: 10 },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: blockColor, opacity: pulseAnim, width: 68, height: 15, marginTop: 4 },
-              ]}
-            />
+            <View style={styles.heroStatCol}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockSecondary, opacity: pulseAnim, width: 58, height: 10 },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockColor, opacity: pulseAnim, width: 68, height: 15, marginTop: 4 },
+                ]}
+              />
+            </View>
+
+            <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.heroStatCol}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockSecondary, opacity: pulseAnim, width: 52, height: 10 },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockColor, opacity: pulseAnim, width: 32, height: 15, marginTop: 4 },
+                ]}
+              />
+            </View>
+
+            <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
+
+            <View style={styles.heroStatCol}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockSecondary, opacity: pulseAnim, width: 52, height: 10 },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: colors.warning || '#F59E0B', opacity: pulseAnim, width: 64, height: 15, marginTop: 4 },
+                ]}
+              />
+            </View>
           </View>
-
-          <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
-
-          <View style={styles.heroStatCol}>
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: blockSecondary, opacity: pulseAnim, width: 52, height: 10 },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: blockColor, opacity: pulseAnim, width: 32, height: 15, marginTop: 4 },
-              ]}
-            />
-          </View>
-
-          <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />
-
-          <View style={styles.heroStatCol}>
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: blockSecondary, opacity: pulseAnim, width: 52, height: 10 },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.skeletonLine,
-                { backgroundColor: colors.warning || '#F59E0B', opacity: pulseAnim, width: 64, height: 15, marginTop: 4 },
-              ]}
-            />
-          </View>
-        </View>
+        )}
       </View>
 
       {/* 3. Search, Filter & Sort Controls Row */}
@@ -343,6 +412,8 @@ export default function AnalyserSkeleton({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
+    maxWidth: 840,
+    alignSelf: 'center',
     paddingVertical: moderateScale(4),
   },
   tripFilterRow: {

@@ -11,6 +11,7 @@ import SidebarDrawer from '../../src/components/SidebarDrawer';
 import NotificationToast from '../../src/components/NotificationToast';
 import NotificationCenterModal from '../../src/components/NotificationCenterModal';
 import SettleUpModal from '../../src/components/SettleUpModal';
+import VoiceExpenseModal from '../../src/components/VoiceExpenseModal';
 import { useNotificationStore } from '../../src/features/notifications/useNotificationStore';
 import { syncWidgetSummary } from '../../src/services/widgetService';
 import { scaleFont } from '../../src/theme/responsive';
@@ -21,6 +22,8 @@ export default function TabLayout() {
   const { colors } = useTheme();
   const { user, profile } = useAuthStore();
   const { trips } = useTripStore();
+  const isVoiceModalOpen = useTripStore(s => s.isVoiceModalOpen);
+  const setVoiceModalOpen = useTripStore(s => s.setVoiceModalOpen);
   const [expenseModalVisible, setExpenseModalVisible] = useState(false);
   const [settleUpModalVisible, setSettleUpModalVisible] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -46,7 +49,11 @@ export default function TabLayout() {
       if (!url || url === lastProcessedUrl) return;
       lastProcessedUrl = url;
       const lower = url.toLowerCase();
-      if (lower.includes('add-expense') || lower.includes('add-trip') || lower.includes('add-contact')) {
+      if (lower.includes('voice-expense') || lower.includes('openvoice=true')) {
+        setTimeout(() => {
+          useTripStore.getState().setVoiceModalOpen(true);
+        }, 150);
+      } else if (lower.includes('add-expense') || lower.includes('add-trip') || lower.includes('add-contact')) {
         if (lower.includes('new-trip') || lower.includes('add-trip')) {
           router.push('/add-expense?action=new-trip' as any);
         } else if (lower.includes('new-contact') || lower.includes('add-contact')) {
@@ -283,6 +290,12 @@ export default function TabLayout() {
       <NotificationCenterModal
         visible={notifModalVisible}
         onClose={() => setNotifModalVisible(false)}
+      />
+
+      {/* Voice Expense Assistant Modal */}
+      <VoiceExpenseModal
+        visible={isVoiceModalOpen}
+        onClose={() => setVoiceModalOpen(false)}
       />
     </>
   );

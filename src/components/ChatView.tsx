@@ -6,6 +6,7 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Image,
   Modal,
   Alert,
@@ -23,7 +24,30 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { Audio, Video, ResizeMode } from 'expo-av';
+// Safely load expo-av if ExponentAV native module is compiled into this binary
+let Audio: any = null;
+let Video: any = null;
+let ResizeMode: any = { CONTAIN: 'contain', COVER: 'cover', STRETCH: 'stretch' };
+
+try {
+  const ExpoAV = require('expo-av');
+  Audio = ExpoAV.Audio;
+  Video = ExpoAV.Video;
+  ResizeMode = ExpoAV.ResizeMode || ResizeMode;
+} catch (e) {
+  // Graceful fallback when running on a native binary without ExponentAV compiled in
+}
+
+const SafeVideo = (props: any) => {
+  if (Video) {
+    return <Video {...props} />;
+  }
+  return (
+    <View style={[props.style, { backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }]}>
+      <Ionicons name="videocam-outline" size={28} color="#94A3B8" />
+    </View>
+  );
+};
 import { uploadAudioToSupabase, uploadDocumentToSupabase, uploadVideoToSupabase } from '../services/imageUpload';
 import { chatOutbox, OutboxMessageItem } from '../services/chatOutboxService';
 import { useTheme } from '../theme/useThemeStore';
@@ -34,6 +58,7 @@ import {
   computeBalances,
   normalizeExpensesForTrip,
   deletedExpenseIdsSet,
+  deletedTripIdsSet,
   findMyMember,
   isValidUUID,
 } from '../features/trips/useTripStore';
@@ -316,14 +341,14 @@ export default function ChatView({
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
   // Voice note recording & playback state
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingRef = useRef<any>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isSendingVoice, setIsSendingVoice] = useState(false);
   const recordingBlinkAnim = useRef(new Animated.Value(1)).current;
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<any>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [audioPlaybackPosition, setAudioPlaybackPosition] = useState(0);
@@ -1021,16 +1046,24 @@ export default function ChatView({
         }
       }, 1200);
 
+      const startTime = Date.now();
+      const minAnimationTime = 400; // brief smooth skeleton animation on initial load
+
       loadTripDetails(tripId)
         .catch(err => console.log('loadTripDetails error in ChatView:', err))
         .finally(() => {
           clearTimeout(safetyTimer);
-          if (isMounted) {
-            setIsChatLoading(false);
-            setIsTripDataLoaded(true);
-            // Re-mark seen once fresh remote messages are loaded
-            markTripMessagesAsSeen(tripId, currentUserId);
-          }
+          const elapsed = Date.now() - startTime;
+          const remaining = Math.max(0, minAnimationTime - elapsed);
+          setTimeout(() => {
+            if (isMounted) {
+              setIsChatLoading(false);
+              setIsTripDataLoaded(true);
+              setIsFriendDataLoaded(true);
+              // Re-mark seen once fresh remote messages are loaded
+              markTripMessagesAsSeen(tripId, currentUserId);
+            }
+          }, remaining);
         });
 
       const unsub = subscribeTripRealtime(tripId);
@@ -1055,6 +1088,13 @@ export default function ChatView({
       setIsChatLoading(false);
     }
   }, [tripId, currentUserId, markTripMessagesAsSeen]);
+
+  // If trip was deleted remotely while viewing, exit gracefully
+  useEffect(() => {
+    if (tripId && deletedTripIdsSet.has(tripId)) {
+      onBack ? onBack() : router.back();
+    }
+  }, [tripId, trips, onBack]);
 
   // Keep seen status synced whenever messages change while chat is active
   useEffect(() => {
@@ -1082,12 +1122,6 @@ export default function ChatView({
       computeSharedFriendData();
     } else {
       setIsFriendDataLoaded(true);
-      const hasLocalTripMessages = messages && messages.some(m => !m.trip_id || m.trip_id === tripId);
-      const hasLocalTripExpenses = expenses && expenses.some(e => !e.trip_id || e.trip_id === tripId);
-      if (!hasLocalTripMessages && !hasLocalTripExpenses) {
-        setIsTripDataLoaded(false);
-        setIsChatLoading(true);
-      }
     }
   }, [isGroup, friendId, displayTitle, displayPhone, tripId, computeSharedFriendData]);
 
@@ -1387,6 +1421,40 @@ export default function ChatView({
   const isBannerLoading = !isChatContentReady;
   const isFeedLoading = !isChatContentReady;
 
+  // Helper to extract date from message or expense
+  const getMessageDate = (item?: TripMessage | null): Date | null => {
+    if (!item) return null;
+    const raw = item.created_at || (item as any).expense_data?.date || (item as any).date;
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  // Format date separators: Today, Yesterday, Tomorrow, or formatted calendar date
+  const formatChatDateSeparator = (dateObj: Date): string => {
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+
+    if (dateObj.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (dateObj.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else if (dateObj.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow';
+    }
+
+    const isCurrentYear = dateObj.getFullYear() === today.getFullYear();
+    return dateObj.toLocaleDateString(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: isCurrentYear ? undefined : 'numeric',
+    });
+  };
+
   // Format time (e.g. 10:45 AM)
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -1437,6 +1505,13 @@ export default function ChatView({
 
   const startVoiceRecording = async () => {
     try {
+      if (!Audio?.requestPermissionsAsync) {
+        Alert.alert(
+          'Microphone / Audio Unavailable',
+          'Voice notes require the expo-av native module which is not linked in this simulator binary.'
+        );
+        return;
+      }
       const permission = await Audio.requestPermissionsAsync();
       if (!permission.granted) {
         Alert.alert(
@@ -1556,6 +1631,14 @@ export default function ChatView({
   const handleTogglePlayAudio = async (messageId: string, audioUrl?: string, originalDuration?: number) => {
     if (!audioUrl) return;
 
+    if (!Audio?.Sound) {
+      Alert.alert(
+        'Audio Playback Unavailable',
+        'Voice playback requires the expo-av native module which is not linked in this simulator binary.'
+      );
+      return;
+    }
+
     try {
       if (playingAudioId === messageId && soundRef.current) {
         if (isPlayingAudio) {
@@ -1587,7 +1670,7 @@ export default function ChatView({
       const { sound } = await Audio.Sound.createAsync(
         { uri: audioUrl },
         { shouldPlay: true },
-        (status) => {
+        (status: any) => {
           if (status.isLoaded) {
             setAudioPlaybackPosition(status.positionMillis || 0);
             setAudioPlaybackDuration(status.durationMillis || (originalDuration ? originalDuration * 1000 : 0));
@@ -2421,6 +2504,8 @@ export default function ChatView({
                   ? isGroup
                     ? `You are owed ${formatCurrencyAmount(activeBannerNetPaise, currentTrip?.currency)}`
                     : `${displayTitle} owes you ${formatCurrencyAmount(activeBannerNetPaise, currentTrip?.currency)}`
+                  : isGroup
+                  ? 'All settled up'
                   : `Settled up with ${displayTitle}`}
               </Text>
               {!isGroup && sharedTripLabels.length > 0 && activeBannerNetPaise !== 0 ? (
@@ -2480,6 +2565,47 @@ export default function ChatView({
       <View style={{ flex: 1, position: 'relative' }}>
         {isFeedLoading ? (
           <ChatFeedSkeleton colors={colors} isDark={isDark} />
+        ) : combinedMessages.length === 0 ? (
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={styles.emptyCenterWrapper}>
+              <View
+                style={[
+                  styles.emptyIconCircle,
+                  {
+                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.14)' : 'rgba(99, 102, 241, 0.08)',
+                    borderColor: isDark ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.2)',
+                  },
+                ]}
+              >
+                <Ionicons name="chatbubbles-outline" size={32} color={colors.primary} />
+              </View>
+
+              <Text style={[styles.emptyCenterTitle, { color: colors.text }]} allowFontScaling={false}>
+                No messages yet
+              </Text>
+
+              <Text style={[styles.emptyCenterSubtitle, { color: colors.textSecondary }]} allowFontScaling={false}>
+                {isGroup
+                  ? `Send a message or tap "+ Split" to add the first expense for ${displayTitle}.`
+                  : `Send a message or tap "+ Split" to add an expense with ${displayTitle}.`}
+              </Text>
+
+              <View
+                style={[
+                  styles.emptySecurityBadge,
+                  {
+                    backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+                  },
+                ]}
+              >
+                <Ionicons name="lock-closed" size={12} color={colors.textSecondary} />
+                <Text style={[styles.emptySecurityText, { color: colors.textSecondary }]} allowFontScaling={false}>
+                  Messages & bills are end-to-end encrypted
+                </Text>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
         ) : (
           <FlatList
             ref={flatListRef}
@@ -2490,10 +2616,7 @@ export default function ChatView({
             maxToRenderPerBatch={PAGE_SIZE}
             windowSize={11}
             removeClippedSubviews={false}
-            contentContainerStyle={[
-              styles.messagesList,
-              invertedMessages.length === 0 && { flex: 1, justifyContent: 'center' },
-            ]}
+            contentContainerStyle={styles.messagesList}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             onEndReached={handleLoadEarlierMessages}
@@ -2525,20 +2648,51 @@ export default function ChatView({
                 </View>
               ) : null
             }
-            ListEmptyComponent={
-              <View style={[styles.emptyContainer, { transform: [{ scaleY: -1 }] }]}>
-                <View style={[styles.encryptionCard, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
-                  <Ionicons name="lock-closed" size={14} color={colors.textSecondary} />
-                  <Text style={[styles.encryptionText, { color: colors.textSecondary }]}>
-                    Messages and shared bills in this chat are end-to-end encrypted and saved locally.
-                  </Text>
-                </View>
-                <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-                  Say hello or split an expense with {displayTitle}!
-                </Text>
-              </View>
+          renderItem={({ item, index }) => {
+            const prevItem = invertedMessages[index + 1];
+            const currentDate = getMessageDate(item);
+            const prevDate = getMessageDate(prevItem);
+
+            let shouldShowDateHeader = false;
+            if (currentDate) {
+              if (!prevDate) {
+                shouldShowDateHeader = true;
+              } else if (currentDate.toDateString() !== prevDate.toDateString()) {
+                shouldShowDateHeader = true;
+              }
             }
-          renderItem={({ item }) => {
+
+            const wrapWithDateHeader = (node: React.ReactElement) => {
+              if (!shouldShowDateHeader || !currentDate) {
+                return node;
+              }
+              return (
+                <View style={styles.messageWithDateWrapper} key={`date_wrap_${item.id}`}>
+                  <View style={styles.dateSeparatorRow}>
+                    <View
+                      style={[
+                        styles.dateSeparatorBadge,
+                        {
+                          backgroundColor: isDark ? '#1E293B' : '#E2E8F0',
+                          borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dateSeparatorText,
+                          { color: isDark ? '#E2E8F0' : '#475569' },
+                        ]}
+                      >
+                        {formatChatDateSeparator(currentDate)}
+                      </Text>
+                    </View>
+                  </View>
+                  {node}
+                </View>
+              );
+            };
+
           // Reliably identify if message was sent by active user
           const isSenderOther = Boolean(
             otherMember &&
@@ -2564,7 +2718,7 @@ export default function ChatView({
             (item as any).payload?.mediaUrl ||
             (item as any).payload?.url;
           if (item.type === 'image' && photoUrl) {
-            return (
+            return wrapWithDateHeader(
               <View
                 style={[
                   styles.bubbleContainer,
@@ -2638,7 +2792,7 @@ export default function ChatView({
             (item as any).payload?.url;
           if (item.type === 'video' && videoUrl) {
             const isPendingUpload = item.is_sent === false;
-            return (
+            return wrapWithDateHeader(
               <View
                 style={[
                   styles.bubbleContainer,
@@ -2667,7 +2821,7 @@ export default function ChatView({
                     delayLongPress={280}
                     style={{ position: 'relative' }}
                   >
-                    <Video
+                    <SafeVideo
                       source={{ uri: videoUrl }}
                       style={styles.messageImage}
                       resizeMode={ResizeMode.COVER}
@@ -2737,7 +2891,7 @@ export default function ChatView({
               (item as any).payload?.media_url ||
               (item as any).payload?.mediaUrl ||
               (item as any).payload?.url;
-            return (
+            return wrapWithDateHeader(
               <View
                 style={[
                   styles.bubbleContainer,
@@ -2831,7 +2985,7 @@ export default function ChatView({
               ? Math.min(1, Math.max(0, audioPlaybackPosition / audioPlaybackDuration))
               : 0;
 
-            return (
+            return wrapWithDateHeader(
               <View
                 style={[
                   styles.bubbleContainer,
@@ -2953,7 +3107,7 @@ export default function ChatView({
             const exp = item.expense_data;
             const impactPaise = Number(exp.impact_paise) || 0;
             const targetTripId = exp.trip_id || tripId;
-            return (
+            return wrapWithDateHeader(
               <View style={styles.expenseCardContainer}>
                 <View
                   style={[
@@ -3155,7 +3309,7 @@ export default function ChatView({
             const isRejected = status === 'rejected';
             const isPending = status === 'pending';
 
-            return (
+            return wrapWithDateHeader(
               <View style={styles.settlementCardContainer}>
                 <View
                   style={[
@@ -3346,7 +3500,7 @@ export default function ChatView({
               (!isGroup && !isMine)
             );
 
-            return (
+            return wrapWithDateHeader(
               <View style={styles.settlementCardContainer}>
                 <View
                   style={[
@@ -3405,7 +3559,7 @@ export default function ChatView({
           }
 
           // 6. Standard Text Message Bubble
-          return (
+          return wrapWithDateHeader(
             <View
               style={[
                 styles.bubbleContainer,
@@ -3729,7 +3883,9 @@ export default function ChatView({
           visible={linkContactModalVisible}
           onClose={() => setLinkContactModalVisible(false)}
           maxHeight="88%"
-          sheetStyle={{ paddingBottom: 20 }}
+          scrollable={false}
+          showHandle={true}
+          sheetStyle={{ paddingHorizontal: 20, paddingTop: 4 }}
         >
             <View style={styles.linkModalHeader}>
               <View style={{ flex: 1 }}>
@@ -3886,7 +4042,9 @@ export default function ChatView({
         <StandardBottomSheet
           visible={attachmentModalVisible}
           onClose={() => setAttachmentModalVisible(false)}
-          sheetStyle={{ padding: 20 }}
+          scrollable={false}
+          showHandle={true}
+          sheetStyle={{ paddingHorizontal: 20, paddingTop: 4 }}
         >
             <Text style={[styles.attachmentHeader, { color: colors.textSecondary }]}>
               SHARE TO CHAT
@@ -3958,11 +4116,13 @@ export default function ChatView({
       <StandardBottomSheet
         visible={payModalVisible}
         onClose={() => setPayModalVisible(false)}
-        maxHeight="88%"
-        sheetStyle={{ padding: 20 }}
+        maxHeight="90%"
+        scrollable={true}
+        showHandle={true}
+        sheetStyle={{ paddingHorizontal: 20, paddingTop: 4 }}
       >
             <View style={styles.payModalHeader}>
-              <View>
+              <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={[styles.payModalTitle, { color: colors.text }]}>Pay / Settle Up</Text>
                 <Text style={[styles.payModalSubtitle, { color: colors.textSecondary }]}>
                   Attach payment screenshot for receiver to accept
@@ -3970,9 +4130,10 @@ export default function ChatView({
               </View>
               <TouchableOpacity
                 onPress={() => setPayModalVisible(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={styles.modalCloseCircle}
               >
-                <Ionicons name="close" size={24} color={colors.text} />
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -4124,11 +4285,13 @@ export default function ChatView({
       <StandardBottomSheet
         visible={requestMoneyModalVisible}
         onClose={() => setRequestMoneyModalVisible(false)}
-        maxHeight="88%"
-        sheetStyle={{ padding: 20 }}
+        maxHeight="90%"
+        scrollable={true}
+        showHandle={true}
+        sheetStyle={{ paddingHorizontal: 20, paddingTop: 4 }}
       >
             <View style={styles.payModalHeader}>
-              <View>
+              <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={[styles.payModalTitle, { color: colors.text }]}>Request Money</Text>
                 <Text style={[styles.payModalSubtitle, { color: colors.textSecondary }]}>
                   Select amount you are going to receive
@@ -4136,9 +4299,10 @@ export default function ChatView({
               </View>
               <TouchableOpacity
                 onPress={() => setRequestMoneyModalVisible(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={styles.modalCloseCircle}
               >
-                <Ionicons name="close" size={24} color={colors.text} />
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -4284,7 +4448,7 @@ export default function ChatView({
               <Ionicons name="close-circle" size={32} color="#FFFFFF" />
             </TouchableOpacity>
             {selectedVideoPreview && (
-              <Video
+              <SafeVideo
                 source={{ uri: selectedVideoPreview }}
                 style={styles.fullScreenPhoto}
                 resizeMode={ResizeMode.CONTAIN}
@@ -5044,6 +5208,48 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 12,
   },
+  emptyCenterWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: moderateScale(28),
+    width: '100%',
+  },
+  emptyIconCircle: {
+    width: moderateScale(68),
+    height: moderateScale(68),
+    borderRadius: moderateScale(34),
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  emptyCenterTitle: {
+    fontSize: scaleFont(18),
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyCenterSubtitle: {
+    fontSize: scaleFont(13),
+    textAlign: 'center',
+    lineHeight: scaleFont(20),
+    marginBottom: 20,
+    maxWidth: 290,
+  },
+  emptySecurityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  emptySecurityText: {
+    fontSize: scaleFont(11),
+    fontWeight: '500',
+  },
   emptyContainer: {
     alignItems: 'center',
     paddingTop: 40,
@@ -5067,6 +5273,31 @@ const styles = StyleSheet.create({
   emptySubtitle: {
     fontSize: scaleFont(13),
     marginTop: 8,
+  },
+  messageWithDateWrapper: {
+    width: '100%',
+  },
+  dateSeparatorRow: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: moderateScale(10),
+  },
+  dateSeparatorBadge: {
+    paddingHorizontal: moderateScale(14),
+    paddingVertical: moderateScale(4),
+    borderRadius: moderateScale(12),
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  dateSeparatorText: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   bubbleContainer: {
     marginVertical: 3,
@@ -5855,13 +6086,22 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: scaleFont(13.5),
   },
+  modalCloseCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(150, 150, 150, 0.12)',
+  },
   submitPayBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: 15,
     borderRadius: 16,
-    marginTop: 6,
+    marginTop: 10,
+    marginBottom: 8,
   },
   submitPayBtnText: {
     color: '#FFFFFF',

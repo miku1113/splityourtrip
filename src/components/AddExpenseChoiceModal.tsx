@@ -23,6 +23,7 @@ import { useContactsStore, FriendContact } from '../features/contacts/useContact
 import { useAuthStore } from '../features/auth/useAuthStore';
 import { scaleFont, moderateScale } from '../theme/responsive';
 import BillScannerModal from './BillScannerModal';
+import VoiceExpenseModal from './VoiceExpenseModal';
 import { DraggableBottomSheet } from './DraggableBottomSheet';
 
 const PAGE_SIZE = 10;
@@ -39,7 +40,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
-  const { trips, createTrip, addMember, findOrCreateFriendSplitTrip, isLoading: tripsLoading } = useTripStore();
+  const { trips, createTrip, addMember, findOrCreateFriendSplitTrip, getOrCreatePersonalTrip, isLoading: tripsLoading } = useTripStore();
   const { contacts, deviceContacts, isLoading: contactsLoading, initContacts, addManualFriend } = useContactsStore();
   const { user, profile } = useAuthStore();
 
@@ -48,6 +49,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showBillScanner, setShowBillScanner] = useState(false);
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
 
   // Inline Add Contact State
   const [showInlineAddContact, setShowInlineAddContact] = useState(false);
@@ -233,7 +235,14 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
     }, 120);
   };
 
-  if (!visible && !showBillScanner) return null;
+  const handleOpenVoiceExpense = () => {
+    handleClose();
+    setTimeout(() => {
+      setShowVoiceModal(true);
+    }, 120);
+  };
+
+  if (!visible && !showBillScanner && !showVoiceModal) return null;
 
   return (
     <>
@@ -347,6 +356,45 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
 
+              {/* Option: Personal Expense (You) */}
+              <TouchableOpacity
+                style={[
+                  styles.choiceCard,
+                  {
+                    backgroundColor: isDark ? 'rgba(168, 85, 247, 0.12)' : '#FAF5FF',
+                    borderColor: isDark ? colors.border : '#F3E8FF',
+                  },
+                ]}
+                onPress={async () => {
+                  try {
+                    handleClose();
+                    const personalTrip = await getOrCreatePersonalTrip();
+                    if (personalTrip) {
+                      router.push({
+                        pathname: '/trip/[id]/add',
+                        params: { id: personalTrip.id },
+                      });
+                    }
+                  } catch (e) {
+                    console.log('Error opening personal expense:', e);
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: '#8B5CF6' }]}>
+                  <Ionicons name="person" size={22} color="#FFFFFF" />
+                </View>
+                <View style={styles.choiceTextContainer}>
+                  <Text style={[styles.choiceTitle, { color: colors.text }]}>
+                    Personal Expense (You)
+                  </Text>
+                  <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
+                    Track an expense spent on yourself (not split)
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+
               {/* Option 3: Scan Bill or Payment (AI Auto-detect) */}
               <TouchableOpacity
                 style={[
@@ -378,7 +426,38 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
 
-              {/* Option 4: Settle Up / Pay (Cash or UPI) */}
+              {/* Option 4: Add Expense with Voice (AI Voice Assistant) */}
+              <TouchableOpacity
+                style={[
+                  styles.choiceCard,
+                  {
+                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#F5F7FF',
+                    borderColor: isDark ? colors.border : '#E0E7FF',
+                  },
+                ]}
+                onPress={handleOpenVoiceExpense}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
+                  <Ionicons name="mic" size={24} color="#FFFFFF" />
+                </View>
+                <View style={styles.choiceTextContainer}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.choiceTitle, { color: colors.text }]}>
+                      Add Expense with Voice
+                    </Text>
+                    <View style={[styles.ocrChoiceBadge, { backgroundColor: colors.primaryLight }]}>
+                      <Text style={[styles.ocrChoiceBadgeText, { color: colors.primary }]}>AI VOICE</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
+                    Speak bill details to auto-split across all or specific members
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* Option 5: Settle Up / Pay (Cash or UPI) */}
               <TouchableOpacity
                 style={[
                   styles.choiceCard,
@@ -823,6 +902,10 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
     <BillScannerModal
       visible={showBillScanner}
       onClose={() => setShowBillScanner(false)}
+    />
+    <VoiceExpenseModal
+      visible={showVoiceModal}
+      onClose={() => setShowVoiceModal(false)}
     />
     </>
   );

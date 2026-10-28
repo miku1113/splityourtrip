@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   InteractionManager,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -37,7 +38,7 @@ export default function MyTripsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, profile } = useAuthStore();
-  const { trips, fetchTrips, initTrips, createTrip, addMember, joinTripByCode, isLoading, isHydrated } = useTripStore();
+  const { trips, fetchTrips, initTrips, createTrip, addMember, joinTripByCode, isLoading, isHydrated, setVoiceModalOpen } = useTripStore();
   const { contacts, isLoading: contactsLoading, initContacts } = useContactsStore();
   const { colors, isDark } = useTheme();
 
@@ -63,7 +64,7 @@ export default function MyTripsScreen() {
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const { openCreate } = useLocalSearchParams<{ openCreate?: string }>();
+  const { openCreate, openVoice } = useLocalSearchParams<{ openCreate?: string; openVoice?: string }>();
 
   useEffect(() => {
     if (openCreate === 'true') {
@@ -71,6 +72,28 @@ export default function MyTripsScreen() {
       setCreateModalVisible(true);
     }
   }, [openCreate]);
+
+  useEffect(() => {
+    if (openVoice === 'true') {
+      setVoiceModalOpen(true);
+    }
+  }, [openVoice, setVoiceModalOpen]);
+
+  // Direct deep link listener for widget voice shortcut
+  useEffect(() => {
+    const handleVoiceUrl = (event: { url: string }) => {
+      if (event?.url && (event.url.includes('voice-expense') || event.url.includes('openVoice=true'))) {
+        setVoiceModalOpen(true);
+      }
+    };
+    const sub = Linking.addEventListener('url', handleVoiceUrl);
+    Linking.getInitialURL().then(url => {
+      if (url && (url.includes('voice-expense') || url.includes('openVoice=true'))) {
+        setVoiceModalOpen(true);
+      }
+    }).catch(() => {});
+    return () => sub.remove();
+  }, [setVoiceModalOpen]);
 
   // Initial local hydration on mount (instant cache load, matching contacts)
   useEffect(() => {
@@ -125,41 +148,47 @@ export default function MyTripsScreen() {
     setCreating(true);
     setErrorMsg(null);
 
-    const activeUser = user || useAuthStore.getState().user;
-    const userId = activeUser?.id || '';
-    const userName =
-      profile?.full_name ||
-      profile?.name ||
-      activeUser?.email?.split('@')[0] ||
-      'Traveler';
+    try {
+      const activeUser = user || useAuthStore.getState().user;
+      const userId = activeUser?.id || '';
+      const userName =
+        profile?.full_name ||
+        profile?.name ||
+        activeUser?.email?.split('@')[0] ||
+        'Traveler';
 
-    const trip = await createTrip(
-      newTripName.trim(),
-      userId,
-      userName,
-      'group',
-      undefined,
-      newTripImage,
-      newTripDescription,
-      []
-    );
-    setCreating(false);
+      const trip = await createTrip(
+        newTripName.trim(),
+        userId,
+        userName,
+        'group',
+        undefined,
+        newTripImage,
+        newTripDescription,
+        []
+      );
 
-    if (trip) {
-      setCreatedTrip(trip);
-      setCreatedTripMembers([
-        {
-          id: userId || 'admin',
-          name: `${userName} (You)`,
-          phone: profile?.phone_number || null,
-          isGuest: false,
-        },
-      ]);
-      setCreateStep('members');
-      // Proactively load phonebook contacts for step 2
-      initContacts().catch(() => {});
-    } else {
-      setErrorMsg('Failed to create trip. Please try again.');
+      if (trip) {
+        setCreatedTrip(trip);
+        setCreatedTripMembers([
+          {
+            id: userId || 'admin',
+            name: `${userName} (You)`,
+            phone: profile?.phone_number || null,
+            isGuest: false,
+          },
+        ]);
+        setCreateStep('members');
+        // Proactively load phonebook contacts for step 2
+        initContacts().catch(() => {});
+      } else {
+        setErrorMsg('Failed to create trip. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('Error creating trip:', err);
+      setErrorMsg(err?.message || 'Failed to create trip. Please try again.');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -318,14 +347,19 @@ export default function MyTripsScreen() {
     }
   };
 
-  // Only show deduplicated group trips here; 1-on-1 friend splits are managed in Friends tab
+  // Only show deduplicated group trips here; 1-on-1 friend splits and personal "You" expenses are managed in Friends tab
   const groupTrips = useMemo(() => {
     const seenIds = new Set<string>();
     return trips.filter(t => {
       if (
         t.trip_type === 'friend_split' ||
+        t.trip_type === 'personal' ||
         (t as any).is_friend_split ||
-        t.name.toLowerCase().startsWith('split with ')
+        t.name.toLowerCase().startsWith('split with ') ||
+        t.name.toLowerCase().startsWith('personal (you)') ||
+        t.name.toLowerCase() === 'personal' ||
+        t.name.toLowerCase() === 'you (personal)' ||
+        t.name.toLowerCase() === 'personal expenses'
       ) {
         return false;
       }
@@ -414,6 +448,39 @@ export default function MyTripsScreen() {
           <Text style={[styles.joinBtnText, { color: colors.primary }]}>Join via Code</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Voice Detection Expense Assistant Widget */}
+      <TouchableOpacity
+        style={[
+          styles.voiceWidgetCard,
+          {
+            backgroundColor: isDark ? colors.card : '#FFFFFF',
+            borderColor: isDark ? colors.border : colors.borderLight,
+          },
+        ]}
+        onPress={() => setVoiceModalOpen(true)}
+        activeOpacity={0.85}
+      >
+        <View style={styles.voiceWidgetLeft}>
+          <View style={[styles.voiceMicCircle, { backgroundColor: colors.primary }]}>
+            <Ionicons name="mic" size={18} color="#FFFFFF" />
+          </View>
+          <View style={styles.voiceWidgetTextCol}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.voiceWidgetTitle, { color: colors.text }]}>
+                Add Expense with Voice
+              </Text>
+              <View style={[styles.aiBadge, { backgroundColor: colors.primaryLight }]}>
+                <Text style={[styles.aiBadgeText, { color: colors.primary }]}>AI</Text>
+              </View>
+            </View>
+            <Text style={[styles.voiceWidgetSub, { color: colors.textSecondary }]} numberOfLines={1}>
+              "Add an expense in Goa trip of ₹45 paid by me..."
+            </Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+      </TouchableOpacity>
 
       {!user && (
         <TouchableOpacity
@@ -554,46 +621,28 @@ export default function MyTripsScreen() {
                     <ActivityIndicator size="small" color={colors.primary} />
                   ) : (
                     <View style={styles.tripStatusChevronRow}>
-                      <View
-                        style={[
-                          styles.statusTag,
-                          {
-                            backgroundColor:
-                              (item.status || 'active') === 'active'
-                                ? isDark
-                                  ? 'rgba(34, 197, 94, 0.15)'
-                                  : '#DCFCE7'
-                                : isDark
-                                ? 'rgba(148, 163, 184, 0.15)'
-                                : '#F1F5F9',
-                          },
-                        ]}
-                      >
-                        <View
+                      {(item.status || 'active') === 'active' && (
+                        <TouchableOpacity
                           style={[
-                            styles.statusDot,
+                            styles.quickAddBtn,
                             {
-                              backgroundColor:
-                                (item.status || 'active') === 'active'
-                                  ? colors.success
-                                  : colors.textMuted,
+                              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF',
+                              borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
                             },
                           ]}
-                        />
-                        <Text
-                          style={[
-                            styles.statusTagText,
-                            {
-                              color:
-                                (item.status || 'active') === 'active'
-                                  ? colors.success
-                                  : colors.textSecondary,
-                            },
-                          ]}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            router.push({
+                              pathname: '/trip/[id]/add',
+                              params: { id: item.id },
+                            });
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          activeOpacity={0.7}
                         >
-                          {(item.status || 'active').toUpperCase()}
-                        </Text>
-                      </View>
+                          <Ionicons name="add" size={18} color={colors.primary} />
+                        </TouchableOpacity>
+                      )}
                       <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
                     </View>
                   )}
@@ -616,6 +665,8 @@ export default function MyTripsScreen() {
             setCreateStep('details');
           }}
           maxHeight="94%"
+          defaultHeight={createStep === 'members' ? '88%' : undefined}
+          initialHeight={createStep === 'members' ? '88%' : undefined}
           sheetStyle={{
             backgroundColor: colors.card,
             borderTopColor: colors.border,
@@ -841,18 +892,17 @@ export default function MyTripsScreen() {
                 </ScrollView>
               ) : (
                 /* STEP 2: ADD MEMBERS (DRAWER REUSED) */
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minHeight: 460 }}>
                   <View style={styles.step2HeaderRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
-                      <Text style={[styles.modalDesc, { color: colors.textSecondary }]} numberOfLines={1}>
-                        Trip "{createdTrip?.name}" created! Add companions from contacts.
-                      </Text>
-                    </View>
+                    <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
+                    <Text style={[styles.modalDesc, { color: colors.textSecondary }]} numberOfLines={1}>
+                      Trip "{createdTrip?.name || newTripName}" created! Add companions from contacts.
+                    </Text>
                   </View>
 
                   <ScrollView
                     style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingBottom: 24 }}
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                   >
@@ -1356,6 +1406,54 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: scaleFont(14),
   },
+  voiceWidgetCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: moderateScale(16),
+    marginBottom: moderateScale(10),
+    paddingHorizontal: moderateScale(14),
+    paddingVertical: moderateScale(12),
+    borderRadius: 14,
+    borderWidth: 1.5,
+  },
+  voiceWidgetLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  voiceMicCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  voiceWidgetTextCol: {
+    flex: 1,
+  },
+  voiceWidgetTitle: {
+    fontSize: scaleFont(14),
+    fontWeight: '700',
+  },
+  aiBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  aiBadgeText: {
+    fontSize: scaleFont(10),
+    fontWeight: '800',
+  },
+  voiceWidgetSub: {
+    fontSize: scaleFont(12),
+    marginTop: 2,
+  },
   loadingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1422,6 +1520,15 @@ const styles = StyleSheet.create({
   tripStatusChevronRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  quickAddBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginRight: 6,
   },
   statusTag: {
     flexDirection: 'row',
@@ -1536,6 +1643,7 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     fontWeight: '600',
+    fontSize: scaleFont(14),
   },
   submitBtn: {
     flex: 1,
@@ -1546,6 +1654,7 @@ const styles = StyleSheet.create({
   submitBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
+    fontSize: scaleFont(14),
   },
   errorModalBanner: {
     borderRadius: 6,

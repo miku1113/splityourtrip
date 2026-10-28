@@ -39,7 +39,6 @@ export default function SettingsScreen() {
   const [preferredCurrency, setPreferredCurrency] = useState('INR');
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
   const [currencySearch, setCurrencySearch] = useState('');
-  const [notifyWhatsApp, setNotifyWhatsApp] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedText, setLastSyncedText] = useState('Live & Synchronized');
 
@@ -65,15 +64,7 @@ export default function SettingsScreen() {
     getUserCurrencyPreference().then(code => {
       setPreferredCurrency(code);
     });
-    AppStorage.getItem('@splityourtrip_notify_whatsapp').then(val => {
-      setNotifyWhatsApp(val === 'true');
-    });
   }, []);
-
-  const handleToggleWhatsAppNotify = async (val: boolean) => {
-    setNotifyWhatsApp(val);
-    await AppStorage.setItem('@splityourtrip_notify_whatsapp', val ? 'true' : 'false');
-  };
 
   const handleSelectCurrency = async (curr: CurrencyItem) => {
     setPreferredCurrency(curr.code);
@@ -210,7 +201,7 @@ export default function SettingsScreen() {
 
         {/* Global Currency Preference */}
         <TouchableOpacity
-          style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
+          style={[styles.settingRow, { borderBottomWidth: 0 }]}
           onPress={() => setCurrencyModalVisible(true)}
         >
           <View style={styles.settingLabelRow}>
@@ -239,41 +230,6 @@ export default function SettingsScreen() {
             <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
           </View>
         </TouchableOpacity>
-
-        {/* WhatsApp Notification on Expense Added */}
-        <View style={styles.settingRow}>
-          <View style={styles.settingLabelRow}>
-            <View
-              style={[
-                styles.iconBox,
-                { backgroundColor: isDark ? 'rgba(37, 211, 102, 0.2)' : '#DCFCE7' },
-              ]}
-            >
-              <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-            </View>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.settingTitle, { color: colors.text }]}>
-                  Connect WhatsApp Alerts
-                </Text>
-                {notifyWhatsApp && (
-                  <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: 'rgba(37, 211, 102, 0.15)' }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#16A34A' }}>CONNECTED</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
-                Automatically sends expense alerts to members in the background without leaving the app
-              </Text>
-            </View>
-          </View>
-          <Switch
-            value={notifyWhatsApp}
-            onValueChange={handleToggleWhatsAppNotify}
-            trackColor={{ false: '#D1D5DB', true: '#25D366' }}
-            thumbColor="#FFFFFF"
-          />
-        </View>
       </View>
 
       {/* Cloud Sync & Backup Section */}
@@ -502,7 +458,7 @@ export default function SettingsScreen() {
               </Text>
             </View>
           </View>
-          <Text style={[styles.versionTag, { color: colors.textMuted }]}>v1.0.40 (41)</Text>
+          <Text style={[styles.versionTag, { color: colors.textMuted }]}>v1.0.44 (45)</Text>
         </View>
 
         <View style={styles.settingRow}>

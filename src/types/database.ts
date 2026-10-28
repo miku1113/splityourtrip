@@ -25,7 +25,7 @@ export interface Trip {
   end_date?: string | null;
   currency?: string;
   status?: 'active' | 'settled' | 'archived';
-  trip_type?: 'group' | 'friend_split';
+  trip_type?: 'group' | 'friend_split' | 'personal';
   friend_id?: string;
   image_url?: string | null;
   invite_code?: string;

@@ -45,6 +45,10 @@ export default function AddExpenseScreen() {
     upiTxnId: paramUpiTxnId,
     paymentApp: paramPaymentApp,
     attachmentUri: paramAttachmentUri,
+    prefillPaidBy,
+    prefillParticipants,
+    prefillPaymentMode,
+    voicePrompt,
   } = useLocalSearchParams<{
     id: string;
     expenseId?: string;
@@ -56,6 +60,10 @@ export default function AddExpenseScreen() {
     paymentApp?: string;
     attachmentUri?: string;
     fromShare?: string;
+    prefillPaidBy?: string;
+    prefillParticipants?: string;
+    prefillPaymentMode?: string;
+    voicePrompt?: string;
   }>();
 
   const router = useRouter();
@@ -126,7 +134,10 @@ export default function AddExpenseScreen() {
     existingExpense?.category || prefillCategory || 'Food'
   );
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(
-    (existingExpense?.payment_mode as PaymentMode) || (paramPaymentApp || paramUpiTxnId ? 'upi' : 'upi')
+    (existingExpense?.payment_mode as PaymentMode) ||
+    (prefillPaymentMode && ['upi', 'cash', 'other'].includes(prefillPaymentMode.toLowerCase())
+      ? (prefillPaymentMode.toLowerCase() as PaymentMode)
+      : (paramPaymentApp || paramUpiTxnId ? 'upi' : 'upi'))
   );
   const [upiTxnId, setUpiTxnId] = useState<string>(
     (existingExpense as any)?.upi_txn_id || paramUpiTxnId || ''
@@ -139,7 +150,7 @@ export default function AddExpenseScreen() {
     (existingExpense?.split_type as SplitType) || 'equal'
   );
   const [paidBy, setPaidBy] = useState<string>(
-    existingExpense?.paid_by || ''
+    existingExpense?.paid_by || prefillPaidBy || ''
   );
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>(() => {
     if (existingExpense?.splits && existingExpense.splits.length > 0) {
@@ -152,6 +163,10 @@ export default function AddExpenseScreen() {
         })
         .filter(Boolean) as string[];
       if (pIds.length > 0) return pIds;
+    }
+    if (prefillParticipants) {
+      const pList = prefillParticipants.split(',').filter(Boolean);
+      if (pList.length > 0) return pList;
     }
     return members.map(m => m.id);
   });
@@ -368,15 +383,48 @@ export default function AddExpenseScreen() {
   }, [expenseId]);
 
   React.useEffect(() => {
+    if (!existingExpense) {
+      if (prefillAmount) setAmountRupees(prefillAmount);
+      if (prefillDescription) setDescription(prefillDescription);
+      if (prefillCategory && CATEGORIES.includes(prefillCategory)) setCategory(prefillCategory);
+      if (prefillPaymentMode && ['upi', 'cash', 'other'].includes(prefillPaymentMode.toLowerCase())) {
+        setPaymentMode(prefillPaymentMode.toLowerCase() as PaymentMode);
+      }
+    }
+  }, [prefillAmount, prefillDescription, prefillCategory, prefillPaymentMode, existingExpense]);
+
+  React.useEffect(() => {
     if (members.length > 0 && !existingExpense) {
       const myMember = findMyMember(members, user?.id, currentUserPhone);
-      if (!paidBy || !members.some(m => m.id === paidBy)) {
+
+      // Handle prefilled paidBy from voice or navigation
+      if (prefillPaidBy && members.some(m => m.id === prefillPaidBy)) {
+        setPaidBy(prefillPaidBy);
+      } else if (!paidBy || !members.some(m => m.id === paidBy)) {
         if (myMember) {
           setPaidBy(myMember.id);
         } else {
           setPaidBy(members[0].id);
         }
       }
+
+      // Handle prefilled participants from voice
+      if (prefillParticipants) {
+        const parsedList = prefillParticipants
+          .split(',')
+          .map(p => p.trim())
+          .filter(pId => members.some(m => m.id === pId));
+        if (parsedList.length > 0) {
+          setSelectedParticipants(parsedList);
+          return;
+        }
+      }
+
+      // Handle prefilled payment mode
+      if (prefillPaymentMode && ['upi', 'cash', 'other'].includes(prefillPaymentMode.toLowerCase())) {
+        setPaymentMode(prefillPaymentMode.toLowerCase() as PaymentMode);
+      }
+
       if (
         selectedParticipants.length === 0 ||
         !selectedParticipants.every(pId => members.some(m => m.id === pId))
@@ -384,7 +432,7 @@ export default function AddExpenseScreen() {
         setSelectedParticipants(members.map(m => m.id));
       }
     }
-  }, [members, id, existingExpense, user?.id, currentUserPhone]);
+  }, [members, id, existingExpense, user?.id, currentUserPhone, prefillPaidBy, prefillParticipants, prefillPaymentMode]);
 
   const toggleParticipant = (memberId: string) => {
     if (selectedParticipants.includes(memberId)) {
@@ -610,11 +658,43 @@ export default function AddExpenseScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-      <Stack.Screen options={{ title: expenseId ? 'Edit Expense' : 'Add Expense' }} />
+      <Stack.Screen
+        options={{
+          title: expenseId ? 'Edit Expense' : 'Add Expense',
+          headerBackTitleVisible: false,
+          headerBackTitle: 'Back',
+        }}
+      />
 
       {errorMsg && (
         <View style={[styles.errorBanner, { backgroundColor: colors.dangerBg }]}>
           <Text style={[styles.errorText, { color: colors.danger }]}>{errorMsg}</Text>
+        </View>
+      )}
+
+      {/* Voice Auto-filled Review Banner */}
+      {Boolean(voicePrompt) && (
+        <View
+          style={[
+            styles.voiceBannerCard,
+            {
+              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
+              borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+            },
+          ]}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <Ionicons name="mic" size={16} color={colors.primary} />
+            <Text style={[styles.voiceBannerTitle, { color: colors.primary }]}>
+              Voice Auto-filled: Review Details Below
+            </Text>
+          </View>
+          <Text style={[styles.voiceBannerPrompt, { color: colors.textSecondary }]} numberOfLines={2}>
+            "{voicePrompt}"
+          </Text>
+          <Text style={[styles.voiceBannerHint, { color: colors.textMuted }]}>
+            Review the amount, payer, and split members below, then tap Save Expense.
+          </Text>
         </View>
       )}
 
@@ -1648,6 +1728,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 12,
     marginBottom: 16,
+  },
+  voiceBannerCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 16,
+  },
+  voiceBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  voiceBannerPrompt: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  voiceBannerHint: {
+    fontSize: 11,
   },
   ocrBannerLeft: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppStorage } from '../lib/storage';
 import { darkColors, lightColors, theme } from './colors';
 
 export type ThemeMode = 'dark' | 'light';
@@ -13,8 +14,8 @@ interface ThemeState {
   initTheme: () => Promise<void>;
 }
 
-const THEME_STORAGE_KEY = '@splityourtrip_theme_mode';
-const THEME_ONBOARDED_KEY = '@splityourtrip_theme_onboarded';
+export const THEME_STORAGE_KEY = '@splityourtrip_theme_mode';
+export const THEME_ONBOARDED_KEY = '@splityourtrip_theme_onboarded';
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
   themeMode: 'dark', // Default to Dark Theme as requested
@@ -24,42 +25,62 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   initTheme: async () => {
     try {
       const [savedMode, savedOnboarded] = await Promise.all([
-        AsyncStorage.getItem(THEME_STORAGE_KEY),
-        AsyncStorage.getItem(THEME_ONBOARDED_KEY),
+        AppStorage.getItem(THEME_STORAGE_KEY).catch(() => AsyncStorage.getItem(THEME_STORAGE_KEY)),
+        AppStorage.getItem(THEME_ONBOARDED_KEY).catch(() => AsyncStorage.getItem(THEME_ONBOARDED_KEY)),
       ]);
 
+      const effectiveMode: ThemeMode =
+        savedMode === 'light' || savedMode === 'dark' ? savedMode : 'dark';
+
+      // If either the onboarded flag was set OR a mode preference was already saved,
+      // consider theme preference permanently established.
+      const hasChosen = savedOnboarded === 'true' || Boolean(savedMode);
+
       set({
-        themeMode: (savedMode as ThemeMode) || 'dark',
-        hasChosenTheme: savedOnboarded === 'true',
+        themeMode: effectiveMode,
+        hasChosenTheme: hasChosen,
         isHydrated: true,
       });
     } catch {
-      set({ isHydrated: true });
+      set({ isHydrated: true, hasChosenTheme: true });
     }
   },
 
   setThemeMode: async (mode: ThemeMode) => {
-    set({ themeMode: mode });
+    const finalMode: ThemeMode = mode === 'light' ? 'light' : 'dark';
+    set({ themeMode: finalMode, hasChosenTheme: true });
     try {
-      await AsyncStorage.setItem(THEME_STORAGE_KEY, mode);
+      await Promise.all([
+        AppStorage.setItem(THEME_STORAGE_KEY, finalMode),
+        AppStorage.setItem(THEME_ONBOARDED_KEY, 'true'),
+        AsyncStorage.setItem(THEME_STORAGE_KEY, finalMode).catch(() => {}),
+        AsyncStorage.setItem(THEME_ONBOARDED_KEY, 'true').catch(() => {}),
+      ]);
     } catch (e) {
       // Ignored
     }
   },
 
   completeThemeOnboarding: async (mode?: ThemeMode) => {
-    const finalMode = mode || get().themeMode || 'dark';
+    const finalMode: ThemeMode = mode || get().themeMode || 'dark';
+    set({ themeMode: finalMode, hasChosenTheme: true });
     try {
       await Promise.all([
-        AsyncStorage.setItem(THEME_STORAGE_KEY, finalMode),
-        AsyncStorage.setItem(THEME_ONBOARDED_KEY, 'true'),
+        AppStorage.setItem(THEME_STORAGE_KEY, finalMode),
+        AppStorage.setItem(THEME_ONBOARDED_KEY, 'true'),
+        AsyncStorage.setItem(THEME_STORAGE_KEY, finalMode).catch(() => {}),
+        AsyncStorage.setItem(THEME_ONBOARDED_KEY, 'true').catch(() => {}),
       ]);
     } catch (e) {
       // Ignored
     }
-    set({ themeMode: finalMode, hasChosenTheme: true });
   },
 }));
+
+// Run self-hydration immediately so preference is loaded before views mount
+try {
+  useThemeStore.getState().initTheme().catch(() => {});
+} catch {}
 
 // Convenience hook to access reactive theme colors anywhere
 export function useTheme() {

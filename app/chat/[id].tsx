@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import ChatView from '../../src/components/ChatView';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { getEffectiveContactName } from '../../src/features/contacts/useContactsStore';
+import { deletedTripIdsSet } from '../../src/features/trips/useTripStore';
 
 export default function FriendChatScreen() {
   const router = useRouter();
@@ -14,6 +15,12 @@ export default function FriendChatScreen() {
     friendId?: string;
   }>();
   const { colors, isDark } = useTheme();
+
+  React.useEffect(() => {
+    if (id && deletedTripIdsSet.has(id)) {
+      router.replace('/(tabs)/friends');
+    }
+  }, [id]);
 
   const title = getEffectiveContactName({
     phoneNumber: friendPhone,

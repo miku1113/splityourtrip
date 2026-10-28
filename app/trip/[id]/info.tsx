@@ -727,7 +727,7 @@ export default function TripInfoScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, title: 'Trip Info', headerBackTitle: 'Back' }} />
 
       {/* Top Header Bar with Trip Icon + Trip Name + Info Subtitle */}
       <View

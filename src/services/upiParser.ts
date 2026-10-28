@@ -155,6 +155,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     lower.includes('super.money') ||
     lower.includes('super money') ||
     lower.includes('supermoney') ||
+    /(?:super[.\s]+money)/i.test(normalized) ||
     lower.includes('@superyes') ||
     lower.includes('@superaxis')
   ) {
@@ -342,8 +343,12 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       /\b(?:cash(?:\s*tendered|\s*received|\s*paid)?|tendered|change(?:\s*due|\s*returned)?|return(?:\s*amt|\s*amount)?|refund|balance\s*return)\b/i
     )[0];
 
+    // Strip VPA handles and email addresses (e.g. "mab.037327026400016@axisbank", "user@upi")
+    // so account/phone digits inside VPAs are never parsed as amounts
+    let norm = isolated.replace(/\S+@\S+/g, ' ');
+
     // 2. Normalize spaces around decimal points: e.g. "450 . 00" -> "450.00"
-    let norm = isolated.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
+    norm = norm.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
 
     // 3. Mask out 10-digit mobile phone numbers and formatted +91 phone numbers
     norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b/g, ' ');
@@ -373,9 +378,9 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       norm = norm.replace(/\b(?:[1-9]|[12]\d|3[01])\b/g, ' ');
     }
 
-    // 7. Mask out bank account / card numbers: ending 1234, •••• 1234, xxxx 5678
-    norm = norm.replace(/\b(?:a\/c|acc|ending|card)\s*(?:no\.?|ending)?\s*[:\-]?\s*\d{3,6}\b/gi, ' ');
-    norm = norm.replace(/[•x*.\-]{3,}\s*\d{3,6}\b/gi, ' ');
+    // 7. Mask out bank account / card numbers: Axis Bank - 3732, A/c 1234, ending 5678, •••• 1234, xxxx 5678
+    norm = norm.replace(/\b(?:bank|a\/c|acc|account|card|ending|debited|paid\s*from|paid\s*using|using)[^\n\d]{0,40}\b\d{3,6}\b/gi, ' ');
+    norm = norm.replace(/[•·\u2022\u00B7\u2024*xX.\-]{2,}\s*\d{3,6}\b/gi, ' ');
 
     // 8. Normalize OCR misread zeros (O or o) in number sequences (e.g. 25,OOO -> 25,000)
     norm = norm.replace(/\b(\d{1,3})[,.\s']?([oO0]{3})\b/g, '$1,000');
@@ -389,11 +394,11 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     norm = norm.replace(/\b(\d{1,2})[.\s'](\d{2})[.\s'](\d{3})(?!\d)/g, '$1,$2,$3');
     norm = norm.replace(/\b(\d{1,3})[.\s'](\d{3})(?!\d)/g, '$1,$2');
 
-    // 10. Remove currency symbols, checkmarks, trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V, £, €, ¥)
+    // 10. Remove currency symbols, checkmarks, OCR bullets (·, •, ․), trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V, £, €, ¥)
     norm = norm
-      .replace(/[₹\u20B9$€£¥✓✔]/g, ' ')
+      .replace(/[₹\u20B9$€£¥✓✔·•․\u00B7\u2022\u2024\u2219\u25cf]/g, ' ')
       .replace(/\b(?:rs\.?|inr|inr\.?|rp|usd|eur|gbp)\b/gi, ' ')
-      .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•:\-~'"`]\s*(?=\d)/g, ' ')
+      .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•·․\u00B7\u2022\u2024\u2219\u25cf:\-~'"`]\s*(?=\d)/g, ' ')
       .replace(/[\/\-=:;|]+$/, '')
       .trim();
 
@@ -518,6 +523,18 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     }
   }
 
+  // Helper: check if a line contains a real currency symbol or unambiguous OCR rupee glyph
+  const isCurrencyLine = (str: string): boolean => {
+    if (!str) return false;
+    // Standard currency symbols: ₹, Rs, INR, $, €, £, checkmark
+    if (/(?:^|[^\w])(?:[₹\u20B9$€£¥✓✔]|Rs\.?|INR)\s*[0-9]+/i.test(str)) return true;
+    // OCR bullet glyphs (·, •, ․, etc.) or OCR symbol artifacts (? * # >) right before a number
+    if (/(?:^|\s)[·•․\u00B7\u2022\u2024\u2219\u25cf?*#>]\s*[0-9]+/.test(str)) return true;
+    // OCR uppercase T, F, z followed by a number
+    if (/(?:^|\s)[TFz]\s+[0-9]+/.test(str)) return true;
+    return false;
+  };
+
   // Strategy 2: Digital Payment & UPI Confirmation Anchors (Highest Priority for Google Pay, PhonePe, Paytm, etc.)
   if (!amountPaise) {
     const paymentAnchorRegex =
@@ -525,28 +542,36 @@ export function parseUpiReceipt(text: string): ParsedPayment {
 
     // Helper to score and pick the best amount candidate from a pool
     const pickBestAmountCandidate = (
-      pool: Array<{ paise: number; raw: string; hasDecimals: boolean; lineIdx: number; hasCurrencySymbol: boolean }>
+      pool: Array<{ paise: number; raw: string; hasDecimals: boolean; lineIdx: number; hasCurrencySymbol: boolean }>,
+      anchorIdx: number
     ) => {
       if (!pool || pool.length === 0) return undefined;
-      // Filter out small day numbers (1 to 31) if larger realistic payment amounts exist in the pool
-      const hasLargeAmount = pool.some(c => c.paise >= 5000); // >= ₹50
-      const filtered = hasLargeAmount ? pool.filter(c => c.paise > 3100) : pool;
-      const sorted = [...filtered].sort((a, b) => {
-        // Priority 1: line had currency symbol (₹, Rs, INR, ✓)
+      const sorted = [...pool].sort((a, b) => {
+        // Priority 1: line had currency symbol (₹, Rs, INR, ·, •, ✓)
         if (a.hasCurrencySymbol !== b.hasCurrencySymbol) {
           return a.hasCurrencySymbol ? -1 : 1;
         }
-        // Priority 2: candidate has decimals
+        // Priority 2: candidate immediately adjacent to the anchor (distance <= 1)
+        const distA = Math.abs(a.lineIdx - anchorIdx);
+        const distB = Math.abs(b.lineIdx - anchorIdx);
+        if (distA !== distB && (distA <= 1 || distB <= 1)) {
+          return distA - distB;
+        }
+        // Priority 3: candidate has decimals
         if (a.hasDecimals !== b.hasDecimals) {
           return a.hasDecimals ? -1 : 1;
         }
-        // Priority 3: candidate raw has thousand separator comma
+        // Priority 4: candidate raw has thousand separator comma
         const aHasComma = a.raw.includes(',');
         const bHasComma = b.raw.includes(',');
         if (aHasComma !== bHasComma) {
           return aHasComma ? -1 : 1;
         }
-        // Priority 4: higher amount (e.g. ₹25,000 > ₹19)
+        // Priority 5: closer line distance to anchor
+        if (distA !== distB) {
+          return distA - distB;
+        }
+        // Priority 6: higher amount (e.g. ₹25,000 > ₹19)
         return b.paise - a.paise;
       });
       return sorted[0];
@@ -564,12 +589,12 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
           const prevLine = lines[j];
           if (
-            /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking\s*name|account|acc)\b/i.test(prevLine) ||
-            prevLine.includes('@')
+            prevLine.includes('@') ||
+            /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking\s*name|account|acc|bank|card|ending)\b/i.test(prevLine)
           ) {
             continue;
           }
-          const hasCurrencySymbol = /(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(prevLine);
+          const hasCurrencySymbol = isCurrencyLine(prevLine);
           const prevCandidates = extractAmountCandidatesFromSlice(prevLine);
           for (const cand of prevCandidates) {
             pool.push({ ...cand, lineIdx: j, hasCurrencySymbol });
@@ -577,8 +602,8 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         }
 
         // 2B. Check SAME line ONLY if it's NOT a status/completion timestamp line
-        if (!/\b(?:completed|status|successful|timestamp)\b/i.test(line)) {
-          const hasCurrencySymbol = /(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(line);
+        if (!/\b(?:completed|status|successful|timestamp)\b/i.test(line) && !line.includes('@')) {
+          const hasCurrencySymbol = isCurrencyLine(line);
           const sameCandidates = extractAmountCandidatesFromSlice(line);
           for (const cand of sameCandidates) {
             pool.push({ ...cand, lineIdx: i, hasCurrencySymbol });
@@ -590,17 +615,20 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         // Line i+1: ₹25,000
         for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
           const nextLine = lines[j];
-          if (/^(?:upi|utr|txn|ref|from|to|google\s*transaction|banking\s*name)\b/i.test(nextLine)) {
+          if (
+            nextLine.includes('@') ||
+            /\b(?:upi|utr|txn|ref|reference|from|to|google\s*transaction|banking\s*name|bank|a\/c|acc|account|card|ending|debited)\b/i.test(nextLine)
+          ) {
             continue;
           }
-          const hasCurrencySymbol = /(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(nextLine);
+          const hasCurrencySymbol = isCurrencyLine(nextLine);
           const nextCandidates = extractAmountCandidatesFromSlice(nextLine);
           for (const cand of nextCandidates) {
             pool.push({ ...cand, lineIdx: j, hasCurrencySymbol });
           }
         }
 
-        const best = pickBestAmountCandidate(pool);
+        const best = pickBestAmountCandidate(pool, i);
         if (best) {
           amountPaise = best.paise;
           amountConfidence = 0.99;
@@ -615,10 +643,13 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   if (!amountPaise) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (/(?:upi|utr|txn|ref|order|inv|tax|fssai|phone|tel)\b/i.test(line)) {
+      if (
+        line.includes('@') ||
+        /\b(?:upi|utr|txn|ref|reference|order|inv|tax|fssai|phone|tel|bank|a\/c|acc|account|card|ending)\b/i.test(line)
+      ) {
         continue;
       }
-      if (/(?:[₹\u20B9✓✔]|Rs\.?|INR|[?*#TFzrt>])\s*[0-9]+/i.test(line)) {
+      if (isCurrencyLine(line)) {
         const candidates = extractAmountCandidatesFromSlice(line);
         if (candidates.length > 0) {
           const chosen = candidates.find(c => c.hasDecimals) || candidates.find(c => c.raw.includes(',')) || candidates[0];
@@ -642,7 +673,10 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   ) {
     for (let i = 0; i < Math.min(lines.length, 8); i++) {
       const line = lines[i];
-      if (/(?:upi|utr|txn|ref|phone|tel|id|no|date|time)\b/i.test(line) || line.includes('@')) {
+      if (
+        line.includes('@') ||
+        /\b(?:upi|utr|txn|ref|reference|phone|tel|id|no|date|time|bank|a\/c|acc|account|card|ending)\b/i.test(line)
+      ) {
         continue;
       }
       const candidates = extractAmountCandidatesFromSlice(line);

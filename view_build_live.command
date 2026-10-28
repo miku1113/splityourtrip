@@ -40,7 +40,7 @@ fi
 
 # Dynamically find the latest build log across Antigravity tasks
 LATEST_LOG=""
-for b_dir in $(ls -dt /Users/mihir/.gemini/antigravity-ide/brain/*/ 2>/dev/null); do
+for b_dir in $(ls -dt /Users/mihir/.gemini/antigravity/brain/*/ /Users/mihir/.gemini/antigravity-ide/brain/*/ 2>/dev/null); do
   TASK_DIR="${b_dir}.system_generated/tasks"
   if [ -d "$TASK_DIR" ]; then
     for file in $(ls -t "$TASK_DIR"/task-*.log 2>/dev/null); do
@@ -54,7 +54,7 @@ done
 
 # Fallback: most recently created task log in latest brain directory
 if [ -z "$LATEST_LOG" ]; then
-  for b_dir in $(ls -dt /Users/mihir/.gemini/antigravity-ide/brain/*/ 2>/dev/null); do
+  for b_dir in $(ls -dt /Users/mihir/.gemini/antigravity/brain/*/ /Users/mihir/.gemini/antigravity-ide/brain/*/ 2>/dev/null); do
     TASK_DIR="${b_dir}.system_generated/tasks"
     if [ -d "$TASK_DIR" ]; then
       LATEST_LOG=$(ls -t "$TASK_DIR"/task-*.log 2>/dev/null | head -n 1)

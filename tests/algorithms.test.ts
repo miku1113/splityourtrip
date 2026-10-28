@@ -454,6 +454,69 @@ describe('UPI Parser', () => {
     expect(parsed.amountPaise).toBe(2500000);
     expect(parsed.receiverName).toBe('Jainam Shah');
   });
+
+  test('extracts super.money receipt with ₹55 and From: Axis Bank - 3732 to Dilip Dabeli', () => {
+    const receiptOcr = `WhatsApp
+File
+Edit Chat Call View Window Help
+super.
+money
+Payment Successful
+·55
+• October 22 at 7:59 PM
+To: DILIP DABELI
+mab.037327026400016@axisbank
+Axis Bank
+From: MIHIR ASHOKKUMAR JAR
+xxxxxx0802@superyes
+UPI reference ID: 666122015608
+YES BANK
+Get assured cashback on UPI spends`;
+    const parsed = parseUpiReceipt(receiptOcr);
+    expect(parsed.app).toBe('super.money');
+    expect(parsed.amountPaise).toBe(5500); // ₹55
+    expect(parsed.receiverName).toBe('Dilip Dabeli');
+    expect(parsed.upiTxnId).toBe('666122015608');
+  });
+
+  test('extracts super.money receipt with ₹20 and From: Axis Bank - 3732 to Dilip Dabeli', () => {
+    const receiptOcr = `WhatsApp
+File
+Edit Chat Call View Window Help
+super.
+money
+Payment Successful
+·20
+• October 22 at 7:59 PM
+To: DILIP DABELI
+mab.037327026400016@axisbank
+Axis Bank
+From: MIHIR ASHOKKUMAR JAR
+xxxxxx0802@superyes
+UPI reference ID: 666121865990
+YES BANK
+Get assured cashback on UPI spends`;
+    const parsed = parseUpiReceipt(receiptOcr);
+    expect(parsed.app).toBe('super.money');
+    expect(parsed.amountPaise).toBe(2000); // ₹20
+    expect(parsed.receiverName).toBe('Dilip Dabeli');
+    expect(parsed.upiTxnId).toBe('666121865990');
+  });
+
+  test('extracts super.money receipt when rupee symbol is omitted by OCR or read as integer', () => {
+    const receiptOcr = `
+      super.money
+      Payment Successful
+      55
+      TO DILIP DABELI
+      From: Axis Bank - 3732
+      UPI Ref: 666122015608
+    `;
+    const parsed = parseUpiReceipt(receiptOcr);
+    expect(parsed.app).toBe('super.money');
+    expect(parsed.amountPaise).toBe(5500); // ₹55
+    expect(parsed.receiverName).toBe('Dilip Dabeli');
+  });
 });
 
 describe('WhatsApp Summary Message Generator', () => {
@@ -481,5 +544,160 @@ describe('WhatsApp Summary Message Generator', () => {
     expect(message).toContain('Total spent: ₹ 42,300');
     expect(message).toContain('Amit -> Rahul: ₹ 3,500');
     expect(message).toContain('Priya -> Rahul: ₹ 1,200');
+  });
+});
+
+describe('Voice Expense Parser', () => {
+  const { parseVoiceExpense } = require('../src/services/voiceExpenseParser');
+
+  const mockTrips = [
+    { id: 'trip-goa', name: 'Goa 2026', currency: 'INR' },
+    { id: 'trip-ubhrat', name: 'Ubhrat', currency: 'INR' },
+  ];
+
+  const mockMembers = {
+    'trip-goa': [
+      { id: 'm-you', display_name: 'Jariwala mihir (You)' },
+      { id: 'm-khushi', display_name: 'Khushi ❤️' },
+      { id: 'm-isha', display_name: 'Isha' },
+      { id: 'm-jigar', display_name: 'Jigar' },
+      { id: 'm-aditya', display_name: 'Aditya' },
+    ],
+  };
+
+  test('parses exact user prompt 1: all members', () => {
+    const prompt = 'Add an expense in Goa trip and this bill is paid by me of 45 rupees and it is splitted within all the members.';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.matchedTrip?.id).toBe('trip-goa');
+    expect(res.amountRupees).toBe('45');
+    expect(res.amountPaise).toBe(4500);
+    expect(res.paidByMemberName).toBe('You');
+    expect(res.splitAll).toBe(true);
+    expect(res.selectedParticipantIds.length).toBe(5);
+  });
+
+  test('parses exact user prompt 2: specific members Khushi, Isha, Jigar', () => {
+    const prompt = 'Add an expense in Goa trip and this bill is paid by me of 45 rupees and it is splitted with Khushi and Isha and Jigar';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.matchedTrip?.id).toBe('trip-goa');
+    expect(res.amountRupees).toBe('45');
+    expect(res.amountPaise).toBe(4500);
+    expect(res.paidByMemberName).toBe('You');
+    expect(res.splitAll).toBe(false);
+    expect(res.selectedParticipantIds).toContain('m-khushi');
+    expect(res.selectedParticipantIds).toContain('m-isha');
+    expect(res.selectedParticipantIds).toContain('m-jigar');
+    expect(res.selectedParticipantIds).not.toContain('m-aditya');
+  });
+
+  test('parses Hindi / Hinglish voice expense commands', () => {
+    const prompt = 'Goa trip me 45 rupaye ka kharcha add karo jo maine pay kiya aur sabhi members me baant do';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.matchedTrip?.id).toBe('trip-goa');
+    expect(res.amountRupees).toBe('45');
+    expect(res.amountPaise).toBe(4500);
+    expect(res.paidByMemberName).toBe('You');
+    expect(res.splitAll).toBe(true);
+    expect(res.selectedParticipantIds.length).toBe(5);
+  });
+
+  test('parses Gujarati voice expense commands with specific members', () => {
+    const prompt = 'Goa trip ma 45 rupiya no kharch add kar jena paisa me chukvya che ane Khushi ane Isha ane Jigar vache split thase';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.matchedTrip?.id).toBe('trip-goa');
+    expect(res.amountRupees).toBe('45');
+    expect(res.amountPaise).toBe(4500);
+    expect(res.paidByMemberName).toBe('You');
+    expect(res.splitAll).toBe(false);
+    expect(res.selectedParticipantIds).toContain('m-khushi');
+    expect(res.selectedParticipantIds).toContain('m-isha');
+    expect(res.selectedParticipantIds).toContain('m-jigar');
+  });
+
+  test('parses spoken Hindi/Gujarati number words like do sau (200)', () => {
+    const prompt = 'Goa trip me petrol ka kharcha do sau rupaye maine bhara sabme baant do';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.matchedTrip?.id).toBe('trip-goa');
+    expect(res.amountRupees).toBe('200');
+    expect(res.amountPaise).toBe(20000);
+    expect(res.category).toBe('Fuel');
+    expect(res.splitAll).toBe(true);
+  });
+
+  test('analyzeVoiceExpense validates useful expense information vs useless conversation', () => {
+    const { analyzeVoiceExpense } = require('../src/services/voiceExpenseParser');
+
+    // 1. Valid expense
+    const validRes = analyzeVoiceExpense(
+      'Coffee of 120 rupees in Goa trip paid by me',
+      mockTrips,
+      undefined,
+      undefined,
+      mockMembers
+    );
+    expect(validRes.isValid).toBe(true);
+    expect(validRes.status).toBe('valid');
+    expect(validRes.parsed.amountRupees).toBe('120');
+
+    // 2. Greeting / useless conversation
+    const greetingRes = analyzeVoiceExpense(
+      'Hello how are you doing today',
+      mockTrips,
+      undefined,
+      undefined,
+      mockMembers
+    );
+    expect(greetingRes.isValid).toBe(false);
+    expect(greetingRes.status).toBe('no_expense_intent');
+    expect(greetingRes.errorMessage).toContain('conversation');
+
+    // 3. Statement missing amount
+    const noAmountRes = analyzeVoiceExpense(
+      'Goa trip me hum sab ghumne gaye the',
+      mockTrips,
+      undefined,
+      undefined,
+      mockMembers
+    );
+    expect(noAmountRes.isValid).toBe(false);
+    expect(noAmountRes.status).toBe('no_amount');
+    expect(noAmountRes.errorMessage).toContain('amount');
+  });
+
+  test('parses k abbreviation like 2.5k (2500)', () => {
+    const prompt = 'Goa trip me 2.5k ka stay expense paid by me split with all';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.amountRupees).toBe('2500');
+    expect(res.amountPaise).toBe(250000);
+    expect(res.category).toBe('Stay');
+    expect(res.splitAll).toBe(true);
+  });
+
+  test('disambiguates trip year from amount (Goa 2026 with 750 rupees)', () => {
+    const prompt = 'In Goa 2026 trip spent 750 for dinner paid by me';
+    const res = parseVoiceExpense(prompt, mockTrips, undefined, undefined, mockMembers);
+
+    expect(res.matchedTrip?.id).toBe('trip-goa');
+    expect(res.amountRupees).toBe('750');
+    expect(res.amountPaise).toBe(75000);
+    expect(res.category).toBe('Food');
+  });
+
+  test('parses Hindi dedh sau (150) and Gujarati dodh hajar (1500)', () => {
+    const hindiRes = parseVoiceExpense('Goa trip me dedh sau rupaye ka nashta paid by me', mockTrips, undefined, undefined, mockMembers);
+    expect(hindiRes.amountRupees).toBe('150');
+    expect(hindiRes.amountPaise).toBe(15000);
+    expect(hindiRes.category).toBe('Food');
+
+    const gujRes = parseVoiceExpense('Goa trip ma dodh hajar no room stay kharch me apya', mockTrips, undefined, undefined, mockMembers);
+    expect(gujRes.amountRupees).toBe('1500');
+    expect(gujRes.amountPaise).toBe(150000);
+    expect(gujRes.category).toBe('Stay');
   });
 });

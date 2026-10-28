@@ -138,6 +138,101 @@ export async function markExpenseDeleted(expenseId: string) {
   } catch {}
 }
 
+// Deleted trip IDs tombstone set to prevent zombie resurrection across syncs and devices
+export const deletedTripIdsSet = new Set<string>();
+
+// Hydrate deleted trips blacklist from local storage
+(async () => {
+  try {
+    const raw = await AppStorage.getItem('@splityourtrip_deleted_trip_ids');
+    if (raw) {
+      const ids: string[] = JSON.parse(raw);
+      ids.forEach(id => {
+        if (id) deletedTripIdsSet.add(id);
+      });
+    }
+  } catch {}
+})();
+
+export async function markTripDeleted(tripId: string) {
+  if (!tripId) return;
+  deletedTripIdsSet.add(tripId);
+  try {
+    const list = Array.from(deletedTripIdsSet).slice(-500);
+    await AppStorage.setItem('@splityourtrip_deleted_trip_ids', JSON.stringify(list));
+  } catch {}
+}
+
+export async function handleRemoteTripDeleted(tripId: string) {
+  if (!tripId) return;
+  await markTripDeleted(tripId);
+
+  const authUser = useAuthStore.getState().user;
+  const currentTrips = useTripStore.getState().trips;
+  const newTrips = currentTrips.filter(t => t.id !== tripId);
+  const activeTrip = useTripStore.getState().activeTrip;
+
+  useTripStore.setState({
+    trips: newTrips,
+    activeTrip: activeTrip?.id === tripId ? null : activeTrip,
+  });
+
+  try {
+    const storageKey = getUserTripsStorageKey(authUser?.id);
+    await AppStorage.setItem(storageKey, JSON.stringify(newTrips));
+    await AppStorage.removeItem(`@splityourtrip_local_details_${tripId}`);
+    if (authUser?.id) {
+      await AppStorage.removeItem(`@splityourtrip_friends_summary_${authUser.id}`);
+    }
+  } catch {}
+
+  try {
+    const { useContactsStore } = require('../contacts/useContactsStore');
+    useContactsStore.getState().fetchFriendsSummary(authUser?.id);
+  } catch {}
+}
+
+let globalTripsChannel: any = null;
+
+export function subscribeGlobalTripsRealtime(): () => void {
+  if (!isSupabaseConfigured) return () => {};
+  if (globalTripsChannel) return () => {};
+
+  globalTripsChannel = supabase
+    .channel('realtime:global_trips_events')
+    .on('broadcast', { event: 'trip_deleted' }, (payload: any) => {
+      const tripId = payload?.payload?.tripId || payload?.tripId;
+      if (tripId) {
+        handleRemoteTripDeleted(tripId);
+      }
+    })
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'trips' },
+      (payload: any) => {
+        const tripId = payload?.old?.id;
+        if (tripId) {
+          handleRemoteTripDeleted(tripId);
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'trip_members' },
+      () => {
+        useTripStore.getState().fetchTrips(undefined, true);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    if (globalTripsChannel) {
+      supabase.removeChannel(globalTripsChannel);
+      globalTripsChannel = null;
+    }
+  };
+}
+
 interface TripStoreState {
   trips: Trip[];
   activeTrip: Trip | null;
@@ -148,8 +243,10 @@ interface TripStoreState {
   isLoading: boolean;
   isHydrated: boolean;
   error: string | null;
+  isVoiceModalOpen: boolean;
 
   // Actions
+  setVoiceModalOpen: (open: boolean) => void;
   clearTripStore: () => void;
   initTrips: () => Promise<void>;
   fetchTrips: (userId?: string, forceRefresh?: boolean) => Promise<void>;
@@ -157,7 +254,7 @@ interface TripStoreState {
     name: string,
     userId?: string,
     userName?: string,
-    tripType?: 'group' | 'friend_split',
+    tripType?: 'group' | 'friend_split' | 'personal',
     friendId?: string,
     imageUrl?: string | null,
     description?: string | null,
@@ -286,6 +383,8 @@ interface TripStoreState {
   }) => Promise<Trip | null>;
   subscribeTripRealtime: (tripId: string) => () => void;
   syncTripMessages: (tripId: string, forceRefresh?: boolean) => Promise<void>;
+  getOrCreatePersonalTrip: () => Promise<Trip | null>;
+  getPersonalExpensesTotalPaise: () => number;
 }
 
 // Helper to prevent any network or native call from hanging indefinitely
@@ -595,6 +694,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   isLoading: false,
   isHydrated: false,
   error: null,
+  isVoiceModalOpen: false,
+
+  setVoiceModalOpen: (open: boolean) => set({ isVoiceModalOpen: open }),
 
   clearTripStore: () => {
     activeStoreUserId = null;
@@ -612,6 +714,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   },
 
   initTrips: async () => {
+    subscribeGlobalTripsRealtime();
     try {
       const authUser = useAuthStore.getState().user;
       const profileId = useAuthStore.getState().profile?.id;
@@ -627,7 +730,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (localTripsRaw) {
         const localTrips: Trip[] = JSON.parse(localTripsRaw);
         if (Array.isArray(localTrips) && localTrips.length > 0) {
-          set({ trips: deduplicateTrips(localTrips), isHydrated: true });
+          const cleanTrips = deduplicateTrips(localTrips);
+          set({ trips: cleanTrips, isHydrated: true });
         } else {
           set({ isHydrated: true });
         }
@@ -816,11 +920,31 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           ...(memberTrips || []),
           ...((friendTrips as Trip[]) || []),
         ]);
+
+        // CRITICAL: Any trip that exists in Supabase is alive and active on the server.
+        // It must NEVER be suppressed by a client-side deleted tombstone.
+        // If it was mistakenly tombstoned, clear it immediately from memory and storage.
+        let tombstonesCleared = false;
+        remoteTrips.forEach(rt => {
+          if (deletedTripIdsSet.has(rt.id)) {
+            deletedTripIdsSet.delete(rt.id);
+            tombstonesCleared = true;
+          }
+        });
+        if (tombstonesCleared) {
+          AppStorage.setItem(
+            '@splityourtrip_deleted_trip_ids',
+            JSON.stringify(Array.from(deletedTripIdsSet))
+          ).catch(() => {});
+        }
+
         const mergedTripsMap = new Map<string, Trip>();
 
         // Build a quick lookup for local trips by id
         const localTripById = new Map<string, Trip>();
-        localTrips.forEach(t => localTripById.set(t.id, t));
+        localTrips.forEach(t => {
+          localTripById.set(t.id, t);
+        });
 
         // For every remote trip, merge with local data to preserve local-only fields
         remoteTrips.forEach(remoteTrip => {
@@ -832,29 +956,40 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
               trip_type: remoteTrip.trip_type || localVersion.trip_type,
               friend_id: remoteTrip.friend_id || localVersion.friend_id,
               currency: remoteTrip.currency || localVersion.currency,
-            });
+              _synced: true,
+              _pendingSync: false,
+            } as any);
           } else {
-            mergedTripsMap.set(remoteTrip.id, remoteTrip);
+            mergedTripsMap.set(remoteTrip.id, {
+              ...remoteTrip,
+              _synced: true,
+              _pendingSync: false,
+            } as any);
           }
         });
 
-        // Retain local trips that were cached for this user, and prepare locally created trips for sync
+        // Reconcile local trips:
+        // Any trip in localTrips that was already synced, but is NO LONGER present in remoteTrips,
+        // was deleted on the server or on another device.
+        // We prune it cleanly without resurrecting it into mergedTripsMap.
+        // ONLY trips explicitly created offline (_pendingSync === true) are retained and queued for upload.
         const localOnlyTripsToSync: Trip[] = [];
         localTrips.forEach(t => {
-          if (!mergedTripsMap.has(t.id)) {
-            mergedTripsMap.set(t.id, t);
+          if (mergedTripsMap.has(t.id)) {
+            return;
           }
 
-          const isLocallyCreatedByMe =
-            (!t.created_by || t.created_by === targetUserId || t.created_by === 'local_user') &&
-            !remoteTrips.some(rt => rt.id === t.id);
-
-          if (isLocallyCreatedByMe) {
+          const isPendingOffline = (t as any)._pendingSync === true || (t as any)._isOfflinePending === true;
+          if (isPendingOffline) {
+            mergedTripsMap.set(t.id, t);
             const syncedTrip: Trip = {
               ...t,
               created_by: targetUserId || t.created_by || '',
             };
             localOnlyTripsToSync.push(syncedTrip);
+          } else {
+            // Remote queries returned active trips, and this trip was not among them -> prune local cached details
+            AppStorage.removeItem(`@splityourtrip_local_details_${t.id}`).catch(() => {});
           }
         });
 
@@ -966,7 +1101,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     name: string,
     userId?: string,
     userName?: string,
-    tripType: 'group' | 'friend_split' = 'group',
+    tripType: 'group' | 'friend_split' | 'personal' = 'group',
     friendId?: string,
     imageUrl?: string | null,
     description?: string | null,
@@ -1019,7 +1154,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       invite_code: inviteCode,
       created_by: effectiveUserId,
       created_at: new Date().toISOString(),
-    };
+      _pendingSync: true,
+    } as any;
 
     const authState = useAuthStore.getState();
     const effectiveUserPhone =
@@ -1148,6 +1284,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             5000
           );
           tripError = res.error;
+        }
+
+        if (!tripError) {
+          (tripData as any)._pendingSync = false;
+          (tripData as any)._synced = true;
+          const userTripsKey = getUserTripsStorageKey(authenticatedUserId);
+          const updated = get().trips.map(t => t.id === newTripId ? { ...t, _pendingSync: false, _synced: true } : t);
+          set({ trips: updated });
+          AppStorage.setItem(userTripsKey, JSON.stringify(updated)).catch(() => {});
         }
 
         // Insert admin member + all added members into trip_members
@@ -1288,6 +1433,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
   deleteTrip: async (tripId: string) => {
     const authUser = useAuthStore.getState().user;
+
+    // 1. Mark in tombstone set immediately
+    await markTripDeleted(tripId);
+
+    // 2. Remove locally from memory & storage
     const currentTrips = get().trips;
     const newTrips = currentTrips.filter(t => t.id !== tripId);
 
@@ -1300,38 +1450,65 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       const userTripsKey = getUserTripsStorageKey(authUser?.id);
       await AppStorage.setItem(userTripsKey, JSON.stringify(newTrips));
       await AppStorage.removeItem(`@splityourtrip_local_details_${tripId}`);
+      if (authUser?.id) {
+        await AppStorage.removeItem(`@splityourtrip_friends_summary_${authUser.id}`);
+      }
     } catch (e) {
       console.warn('Failed to delete trip from storage:', e);
     }
 
+    // 3. Cascade delete from Supabase
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
         const client = supabaseAdmin || supabase;
-        // Cascade delete child entities first
-        await withTimeout(client.from('trip_messages').delete().eq('trip_id', tripId), 3000).catch(() => null);
+
+        // Broadcast delete event over realtime so other active devices remove it instantly
+        try {
+          const broadcastChannel = supabase.channel('realtime:global_trips_events');
+          await broadcastChannel.send({
+            type: 'broadcast',
+            event: 'trip_deleted',
+            payload: { tripId },
+          });
+        } catch {}
+
+        // Cascade delete child entities
+        await withTimeout(client.from('trip_messages').delete().eq('trip_id', tripId), 4000).catch(() => null);
         
         // Find expenses to delete expense_splits by expense_id
         try {
           const { data: expRows } = await client.from('expenses').select('id').eq('trip_id', tripId);
           if (expRows && expRows.length > 0) {
             const expIds = expRows.map(e => e.id);
-            await withTimeout(client.from('expense_splits').delete().in('expense_id', expIds), 3000).catch(() => null);
+            await withTimeout(client.from('expense_splits').delete().in('expense_id', expIds), 4000).catch(() => null);
           }
         } catch {}
 
-        await withTimeout(client.from('expenses').delete().eq('trip_id', tripId), 3000).catch(() => null);
-        await withTimeout(client.from('trip_members').delete().eq('trip_id', tripId), 3000).catch(() => null);
-        await withTimeout(client.from('invites').delete().eq('trip_id', tripId), 3000).catch(() => null);
+        await withTimeout(client.from('settlement_payments').delete().eq('trip_id', tripId), 4000).catch(() => null);
+        await withTimeout(client.from('settlement_snapshots').delete().eq('trip_id', tripId), 4000).catch(() => null);
+        await withTimeout(client.from('expenses').delete().eq('trip_id', tripId), 4000).catch(() => null);
+        await withTimeout(client.from('trip_members').delete().eq('trip_id', tripId), 4000).catch(() => null);
+        await withTimeout(client.from('invites').delete().eq('trip_id', tripId), 4000).catch(() => null);
 
-        // Delete trip record
+        // Delete trip record itself
         const adminRes = await withTimeout(
           client.from('trips').delete().eq('id', tripId),
-          3500
+          5000
         ).catch(() => null);
+
+        if (adminRes?.error) {
+          console.error('Supabase delete trips record notice:', adminRes.error);
+        }
       } catch (e) {
         console.warn('Supabase deleteTrip notice:', e);
       }
     }
+
+    // 4. Refresh friends balance
+    try {
+      const { useContactsStore } = require('../contacts/useContactsStore');
+      useContactsStore.getState().fetchFriendsSummary(authUser?.id);
+    } catch {}
 
     return true;
   },
@@ -1437,28 +1614,36 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             .select('*')
             .eq('id', tripId)
             .maybeSingle(),
-          3500
-        ).catch(() => ({ data: null, error: null })),
+          5000
+        ).catch((err) => ({ data: null, error: err || new Error('Timeout') })),
         withTimeout(
           supabaseAdmin
             .from('trip_members')
             .select('*')
             .eq('trip_id', tripId),
-          3500
-        ).catch(() => ({ data: [] as any[], error: null })),
+          5000
+        ).catch((err) => ({ data: [] as any[], error: err || new Error('Timeout') })),
         withTimeout(
           supabaseAdmin
             .from('expenses')
             .select('*')
             .eq('trip_id', tripId)
             .order('created_at', { ascending: false }),
-          3500
-        ).catch(() => ({ data: [] as any[], error: null })),
+          5000
+        ).catch((err) => ({ data: [] as any[], error: err || new Error('Timeout') })),
       ]);
 
       const tripData = tripRes.data;
       const membersRaw: any[] = membersRes.data || [];
       const expensesRaw: any[] = expensesRes.data || [];
+
+      // If remote query succeeded without error and trip does not exist in Supabase,
+      // it was deleted on another device
+      if (!tripData && membersRaw.length === 0 && !tripRes.error && !membersRes.error) {
+        await handleRemoteTripDeleted(tripId);
+        set({ isLoading: false });
+        return;
+      }
 
       let mergedActiveTrip: Trip | null = localTrip || null;
       if (tripData) {
@@ -4637,6 +4822,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       .channel(`realtime:trip:${cleanTripId}`)
       .on(
         'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'trips', filter: `id=eq.${cleanTripId}` },
+        () => {
+          handleRemoteTripDeleted(tripId);
+        }
+      )
+      .on('broadcast', { event: 'trip_deleted' }, (payload: any) => {
+        const delId = payload?.payload?.tripId || payload?.tripId;
+        if (delId === cleanTripId || delId === tripId) {
+          handleRemoteTripDeleted(tripId);
+        }
+      })
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'expenses', filter: `trip_id=eq.${cleanTripId}` },
         () => {
           get().loadTripDetails(tripId);
@@ -4695,6 +4893,68 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     return () => {
       supabase.removeChannel(channel);
     };
+  },
+
+  getOrCreatePersonalTrip: async (): Promise<Trip | null> => {
+    const authUser = useAuthStore.getState().user;
+    const profile = useAuthStore.getState().profile;
+    const effectiveUserId = authUser?.id || profile?.id || 'local_user';
+    const effectiveUserName = profile?.name || (authUser as any)?.user_metadata?.full_name || 'You';
+
+    // 1. Look for existing personal trip in store
+    const existing = get().trips.find(
+      t =>
+        t.trip_type === 'personal' ||
+        t.name.toLowerCase() === 'personal (you)' ||
+        t.name.toLowerCase() === 'you (personal)' ||
+        t.name.toLowerCase() === 'personal expenses'
+    );
+    if (existing) {
+      return existing;
+    }
+
+    // 2. Check cached personal trip id in AppStorage
+    try {
+      const cachedId = await AppStorage.getItem(`@splityourtrip_personal_trip_${effectiveUserId}`);
+      if (cachedId) {
+        const found = get().trips.find(t => t.id === cachedId);
+        if (found) return found;
+      }
+    } catch {}
+
+    // 3. Create personal trip
+    try {
+      const personalTrip = await get().createTrip(
+        'Personal (You)',
+        effectiveUserId,
+        effectiveUserName,
+        'personal',
+        undefined,
+        null,
+        'Personal self-expenses and private spending'
+      );
+
+      if (personalTrip) {
+        await AppStorage.setItem(`@splityourtrip_personal_trip_${effectiveUserId}`, personalTrip.id);
+        return personalTrip;
+      }
+    } catch (e) {
+      console.warn('Error creating personal trip:', e);
+    }
+    return null;
+  },
+
+  getPersonalExpensesTotalPaise: (): number => {
+    const personalTrip = get().trips.find(
+      t =>
+        t.trip_type === 'personal' ||
+        t.name.toLowerCase() === 'personal (you)' ||
+        t.name.toLowerCase() === 'you (personal)' ||
+        t.name.toLowerCase() === 'personal expenses'
+    );
+    if (!personalTrip) return 0;
+    const personalExpenses = get().expenses.filter(e => e.trip_id === personalTrip.id);
+    return personalExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
   },
 }));
 

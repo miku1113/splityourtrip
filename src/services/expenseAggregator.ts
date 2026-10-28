@@ -1,5 +1,10 @@
 import { AppStorage } from '../lib/storage';
-import { useTripStore, normalizeExpensesForTrip, findMyMember } from '../features/trips/useTripStore';
+import {
+  useTripStore,
+  normalizeExpensesForTrip,
+  findMyMember,
+  normalizePhone,
+} from '../features/trips/useTripStore';
 import { TripMember } from '../types/database';
 
 export interface AnalyzedExpenseItem {
@@ -17,6 +22,9 @@ export interface AnalyzedExpenseItem {
   isMyExpense: boolean;
   currency: string;
   mySharePaise: number;
+  splits?: any[];
+  involvedMemberKeys?: string[];
+  involvedMemberNames?: string[];
 }
 
 export const CATEGORY_ICONS: Record<string, { icon: any; color: string; bg: string }> = {
@@ -107,6 +115,32 @@ export async function fetchAllTripsExpenses(
         mySharePaise = Math.round((Number(exp.amount) || 0) / tMembers.length);
       }
 
+      const involvedMemberKeys = new Set<string>();
+      const involvedMemberNames = new Set<string>();
+
+      if (exp.paid_by) involvedMemberKeys.add(exp.paid_by);
+      if (pMember?.profile_id) involvedMemberKeys.add(pMember.profile_id);
+      if (pMember?.phone_number) involvedMemberKeys.add(normalizePhone(pMember.phone_number));
+      if (payerName) involvedMemberNames.add(payerName.toLowerCase());
+      if (isMyExpense) {
+        involvedMemberKeys.add('__current_user__');
+        involvedMemberNames.add('you');
+      }
+
+      if (Array.isArray(exp.splits)) {
+        for (const s of exp.splits) {
+          if (s.member_id) involvedMemberKeys.add(s.member_id);
+          if (s.profile_id) involvedMemberKeys.add(s.profile_id);
+          const sm = tMembers.find(m => m.id === s.member_id || (m.profile_id && m.profile_id === s.profile_id));
+          if (sm?.display_name) involvedMemberNames.add(sm.display_name.toLowerCase());
+          if (sm?.phone_number) involvedMemberKeys.add(normalizePhone(sm.phone_number));
+          if (myMember && (s.member_id === myMember.id || (myMember.profile_id && s.profile_id === myMember.profile_id))) {
+            involvedMemberKeys.add('__current_user__');
+            involvedMemberNames.add('you');
+          }
+        }
+      }
+
       items.push({
         id: exp.id || `${t.id}-${Math.random()}`,
         trip_id: t.id,
@@ -122,6 +156,9 @@ export async function fetchAllTripsExpenses(
         isMyExpense,
         currency: t.currency || userCurrency,
         mySharePaise,
+        splits: exp.splits || [],
+        involvedMemberKeys: Array.from(involvedMemberKeys),
+        involvedMemberNames: Array.from(involvedMemberNames),
       });
     }
   }

@@ -1,4 +1,4 @@
-import { Dimensions, PixelRatio, Platform } from 'react-native';
+import { Dimensions, PixelRatio, Platform, useWindowDimensions } from 'react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -77,6 +77,58 @@ export const Device = {
   isAndroid: Platform.OS === 'android',
 };
 
+/**
+ * Hook to provide dynamically responsive dimensions and scaling functions
+ * that update automatically on rotation, foldable unfolding, tablet split screen, or window resizing.
+ */
+export const useResponsive = () => {
+  const { width, height } = useWindowDimensions();
+  const isSmall = width < 375;
+  const isMedium = width >= 375 && width < 420;
+  const isLarge = width >= 420 && width < 768;
+  const isTabletDevice = width >= 768 || (height / width < 1.45 && width >= 600);
+
+  const fontScale = PixelRatio.getFontScale() || 1.0;
+  const widthRatio = width / BASE_WIDTH;
+
+  const sf = (size: number, factor = 0.45): number => {
+    const widthScaled = size * (1 + (widthRatio - 1) * factor);
+    const compensated = fontScale > 1.0 ? widthScaled / fontScale : widthScaled;
+    const clamped = Math.max(size * 0.78, Math.min(size * 1.15, compensated));
+    return Math.round(PixelRatio.roundToNearestPixel(clamped));
+  };
+
+  const ms = (size: number, factor = 0.5): number => {
+    return Math.round(size + ((width / BASE_WIDTH) * size - size) * factor);
+  };
+
+  const sc = (size: number): number => {
+    return (width / BASE_WIDTH) * size;
+  };
+
+  const wpDyn = (percentage: number): number => {
+    return Math.round((percentage * width) / 100);
+  };
+
+  const hpDyn = (percentage: number): number => {
+    return Math.round((percentage * height) / 100);
+  };
+
+  return {
+    width,
+    height,
+    isSmall,
+    isMedium,
+    isLarge,
+    isTablet: isTabletDevice,
+    scale: sc,
+    moderateScale: ms,
+    scaleFont: sf,
+    wp: wpDyn,
+    hp: hpDyn,
+  };
+};
+
 export default {
   scale,
   verticalScale,
@@ -87,4 +139,5 @@ export default {
   Device,
   isSmallDevice,
   isTablet,
+  useResponsive,
 };

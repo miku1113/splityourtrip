@@ -12,9 +12,11 @@ import { subscribeToSharedData } from '../src/services/receiptOcr';
 import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native';
 import * as Linking from 'expo-linking';
 
-// Suppress known Supabase auth crypto fallback notice in development
+// Suppress known development network and crypto notices
 LogBox.ignoreLogs([
   'WebCrypto API is not supported',
+  'Network request failed',
+  'Failed to fetch',
 ]);
 
 
@@ -69,6 +71,15 @@ export default function RootLayout() {
 
       console.log('[RootLayout] Deep link received:', url);
 
+      // 0. Voice expense shortcut from iOS Home Screen Widget
+      if (url.includes('voice-expense') || url.includes('openVoice=true')) {
+        router.replace('/(tabs)');
+        setTimeout(() => {
+          useTripStore.getState().setVoiceModalOpen(true);
+        }, 250);
+        return;
+      }
+
       // 1. Join trip links (e.g. splityourtrip://join/CODE or .../join/CODE)
       if (url.includes('/join/')) {
         const parts = url.split('/join/');
@@ -79,10 +90,29 @@ export default function RootLayout() {
         }
       }
 
-      // 2. Direct trip links (e.g. splityourtrip://trip/ID)
+      // 2. Direct trip links (e.g. splityourtrip://trip/ID or splityourtrip://trip/ID/add)
       if (url.includes('/trip/')) {
-        const parts = url.split('/trip/');
-        const tripId = parts[1]?.split(/[?#/]/)[0]?.trim();
+        const parts = url.split('/trip/')[1] || '';
+        const [tripPath, queryString] = parts.split('?');
+        const queryParams: Record<string, string> = {};
+        if (queryString) {
+          const searchParams = new URLSearchParams(queryString);
+          searchParams.forEach((v, k) => {
+            queryParams[k] = v;
+          });
+        }
+        if (tripPath.includes('/add')) {
+          const tripId = tripPath.split('/add')[0].trim();
+          if (tripId) {
+            useTripStore.getState().setVoiceModalOpen(false);
+            router.push({
+              pathname: `/trip/${tripId}/add` as any,
+              params: queryParams,
+            });
+            return;
+          }
+        }
+        const tripId = tripPath.split(/[?#/]/)[0]?.trim();
         if (tripId) {
           router.push(`/trip/${tripId}`);
           return;
@@ -181,6 +211,8 @@ export default function RootLayout() {
             animation: 'default',
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
+            headerBackTitleVisible: false,
+            headerBackButtonMenuEnabled: false,
             headerStyle: {
               backgroundColor: colors.card,
             },
@@ -199,9 +231,9 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
           <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
-          <Stack.Screen name="trip/[id]/index" options={{ headerShown: false }} />
-          <Stack.Screen name="trip/[id]/info" options={{ headerShown: false }} />
-          <Stack.Screen name="trip/[id]/add" options={{ title: 'Add Expense' }} />
+          <Stack.Screen name="trip/[id]/index" options={{ headerShown: false, title: 'Trip' }} />
+          <Stack.Screen name="trip/[id]/info" options={{ headerShown: false, title: 'Trip Info' }} />
+          <Stack.Screen name="trip/[id]/add" options={{ title: 'Add Expense', headerBackTitle: 'Back', headerBackTitleVisible: false }} />
           <Stack.Screen name="trip/[id]/expense/[expenseId]" options={{ headerShown: false }} />
           <Stack.Screen name="join/[code]" options={{ title: 'Join Trip' }} />
           <Stack.Screen name="shared-payment" options={{ title: 'Shared Payment' }} />

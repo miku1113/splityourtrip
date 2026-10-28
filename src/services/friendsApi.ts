@@ -3,7 +3,7 @@ import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
 import { FriendContact, normalizePhone, normalizeNameForMatch, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
-import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload } from '../features/trips/useTripStore';
+import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload, deletedTripIdsSet } from '../features/trips/useTripStore';
 
 export interface FriendsApiResult {
   totalOwedToYouPaise: number;
@@ -99,7 +99,7 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
         ...(messageTripsRes.data || []).map((r: any) => r.trip_id),
         ...localTrips.map(t => t.id),
       ])
-    ).filter(Boolean);
+    ).filter(id => Boolean(id) && !deletedTripIdsSet.has(id));
 
     if (tripIds.length === 0) {
       const emptyResult: FriendsApiResult = {
