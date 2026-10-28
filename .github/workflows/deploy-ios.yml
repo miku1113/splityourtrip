@@ -164,15 +164,8 @@ jobs:
             -configuration Release \
             -archivePath $RUNNER_TEMP/SplitYourTrip.xcarchive \
             -destination "generic/platform=iOS" \
-            CODE_SIGN_STYLE="Manual" \
             DEVELOPMENT_TEAM="GBSNS2SUWV" \
-            PROVISIONING_PROFILE_SPECIFIER="$MAIN_PROFILE_UUID" \
-            | xcpretty || xcodebuild archive \
-            -workspace ios/SplitYourTrip.xcworkspace \
-            -scheme SplitYourTrip \
-            -configuration Release \
-            -archivePath $RUNNER_TEMP/SplitYourTrip.xcarchive \
-            -destination "generic/platform=iOS"
+            CODE_SIGN_IDENTITY="Apple Distribution"
 
       - name: 12. Export IPA
         run: |
