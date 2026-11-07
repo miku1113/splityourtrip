@@ -1101,7 +1101,7 @@ export default function TripSettingsScreen() {
                           styles.memberTypeBadge,
                           {
                             backgroundColor: isAppUser
-                              ? (isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF')
+                              ? colors.primaryLight
                               : !isUnlinked
                               ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5')
                               : (isDark ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7'),

@@ -20,6 +20,7 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact, getEffectiveContactName, normalizeNameForMatch, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AppStorage } from '../../src/lib/storage';
 import FriendsListSkeleton from '../../src/components/FriendsListSkeleton';
 
@@ -92,18 +93,10 @@ const FriendRowItem = React.memo(function FriendRowItem({
   return (
     <View
       style={[
-        styles.friendRowContainer,
+        styles.friendCardItem,
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
-          borderTopLeftRadius: isFirst ? 14 : 0,
-          borderTopRightRadius: isFirst ? 14 : 0,
-          borderBottomLeftRadius: isLast ? 14 : 0,
-          borderBottomRightRadius: isLast ? 14 : 0,
-          borderTopWidth: isFirst ? 1 : 0,
-          borderBottomWidth: isLast ? 1 : 0,
-          borderLeftWidth: 1,
-          borderRightWidth: 1,
         },
       ]}
     >
@@ -126,9 +119,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
               {
                 backgroundColor: item.isRegistered
                   ? colors.primaryLight
-                  : isDark
-                  ? '#334155'
-                  : '#E2E8F0',
+                  : colors.cardSecondary,
                 overflow: 'hidden',
               },
             ]}
@@ -143,7 +134,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
               <Text
                 style={[
                   styles.avatarText,
-                  { color: item.isRegistered ? colors.primaryDark : colors.text },
+                  { color: item.isRegistered ? colors.primary : colors.text },
                 ]}
               >
                 {displayName ? displayName.charAt(0).toUpperCase() : '?'}
@@ -151,13 +142,13 @@ const FriendRowItem = React.memo(function FriendRowItem({
             )}
           </View>
           {Boolean(item.unseenMessagesCount && item.unseenMessagesCount > 0) ? (
-            <View style={[styles.avatarStatusDot, { backgroundColor: '#10B981', borderColor: colors.card }]} />
+            <View style={[styles.avatarStatusDot, { backgroundColor: colors.success, borderColor: colors.card }]} />
           ) : toGet > 0 && toGive === 0 ? (
             <View style={[styles.avatarStatusDot, { backgroundColor: colors.success, borderColor: colors.card }]} />
           ) : toGive > 0 && toGet === 0 ? (
             <View style={[styles.avatarStatusDot, { backgroundColor: colors.danger, borderColor: colors.card }]} />
           ) : toGet > 0 && toGive > 0 ? (
-            <View style={[styles.avatarStatusDot, { backgroundColor: '#8B5CF6', borderColor: colors.card }]} />
+            <View style={[styles.avatarStatusDot, { backgroundColor: colors.primary, borderColor: colors.card }]} />
           ) : null}
         </View>
 
@@ -178,13 +169,13 @@ const FriendRowItem = React.memo(function FriendRowItem({
               <View
                 style={[
                   styles.appBadge,
-                  { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7' },
+                  { backgroundColor: colors.warningBg },
                 ]}
               >
                 <Text
                   style={[
                     styles.appBadgeText,
-                    { color: isDark ? '#FBBF24' : '#D97706' },
+                    { color: colors.warning },
                   ]}
                 >
                   Guest
@@ -200,11 +191,11 @@ const FriendRowItem = React.memo(function FriendRowItem({
             ]}
             numberOfLines={1}
           >
-            {item.phoneNumber || 'Tap to chat & link contact'}
+            {item.phoneNumber || 'Tap to split & chat'}
           </Text>
         </View>
 
-        {/* Right Side: Aligned Balance showing BOTH amounts + Chevron */}
+        {/* Right Side: Clean Progressive Disclosure of Balances */}
         <View style={styles.rightActionCol}>
           {isOpeningThisFriend ? (
             <ActivityIndicator size="small" color={colors.primary} />
@@ -212,87 +203,44 @@ const FriendRowItem = React.memo(function FriendRowItem({
             <View style={styles.balanceChevronRow}>
               <View style={styles.balancePillCol}>
                 {isSettled ? (
-                  <View style={{ alignItems: 'flex-end' }}>
+                  <View style={styles.settledBadge}>
                     <Text style={[styles.balSettledText, { color: colors.textMuted }]}>
                       Settled
                     </Text>
-                    <Text style={[styles.balZeroSub, { color: colors.textMuted }]}>
-                      ₹0 pending
+                  </View>
+                ) : toGet > 0 && toGive > 0 ? (
+                  /* Dual split: prominent net with subtle breakdown */
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text
+                      style={[
+                        styles.heroAmountText,
+                        { color: net >= 0 ? colors.success : colors.danger },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {net >= 0 ? '+' : '-'} {formatCurrencyAmount(Math.abs(net), userCurrency)}
+                    </Text>
+                    <Text style={[styles.dualSubText, { color: colors.textMuted }]} numberOfLines={1}>
+                      +{formatCurrencyAmount(toGet, userCurrency)} · -{formatCurrencyAmount(toGive, userCurrency)}
                     </Text>
                   </View>
                 ) : (
-                  <View style={styles.dualBalanceWrapper}>
-                    {/* Amount we will get from that friend */}
-                    <View style={styles.amountLineItem}>
-                      <Text
-                        style={[
-                          styles.amountTypeTag,
-                          { color: toGet > 0 ? colors.success : colors.textMuted },
-                        ]}
-                      >
-                        You'll get:
-                      </Text>
-                      <Text
-                        style={[
-                          styles.amountValText,
-                          { color: toGet > 0 ? colors.success : colors.textMuted },
-                        ]}
-                      >
-                        {toGet > 0
-                          ? `+${formatCurrencyAmount(toGet, userCurrency)}`
-                          : formatCurrencyAmount(0, userCurrency)}
-                      </Text>
-                    </View>
-
-                    {/* Amount we need to give to friend */}
-                    <View style={[styles.amountLineItem, { marginTop: 2 }]}>
-                      <Text
-                        style={[
-                          styles.amountTypeTag,
-                          { color: toGive > 0 ? colors.danger : colors.textMuted },
-                        ]}
-                      >
-                        You'll give:
-                      </Text>
-                      <Text
-                        style={[
-                          styles.amountValText,
-                          { color: toGive > 0 ? colors.danger : colors.textMuted },
-                        ]}
-                      >
-                        {toGive > 0
-                          ? `-${formatCurrencyAmount(toGive, userCurrency)}`
-                          : formatCurrencyAmount(0, userCurrency)}
-                      </Text>
-                    </View>
-
-                    {/* Net badge when both toGet and toGive are present */}
-                    {toGet > 0 && toGive > 0 && (
-                      <View
-                        style={[
-                          styles.netMiniPill,
-                          {
-                            backgroundColor:
-                              net >= 0
-                                ? isDark
-                                  ? 'rgba(34, 197, 94, 0.15)'
-                                  : '#DCFCE7'
-                                : isDark
-                                ? 'rgba(239, 68, 68, 0.15)'
-                                : '#FEE2E2',
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.netMiniPillText,
-                            { color: net >= 0 ? colors.success : colors.danger },
-                          ]}
-                        >
-                          Net: {net >= 0 ? '+' : '-'} {formatCurrencyAmount(Math.abs(net), userCurrency)}
-                        </Text>
-                      </View>
-                    )}
+                  /* Single directional balance */
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text
+                      style={[
+                        styles.heroAmountText,
+                        { color: toGet > 0 ? colors.success : colors.danger },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {toGet > 0
+                        ? `+${formatCurrencyAmount(toGet, userCurrency)}`
+                        : `-${formatCurrencyAmount(toGive, userCurrency)}`}
+                    </Text>
+                    <Text style={[styles.dualSubText, { color: colors.textSecondary }]}>
+                      {toGet > 0 ? "owes you" : "you owe"}
+                    </Text>
                   </View>
                 )}
               </View>
@@ -301,8 +249,8 @@ const FriendRowItem = React.memo(function FriendRowItem({
                 style={[
                   styles.quickAddBtn,
                   {
-                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF',
-                    borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+                    backgroundColor: colors.primaryLight,
+                    borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
                     marginRight: 6,
                   },
                 ]}
@@ -313,7 +261,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="add" size={16} color={colors.primary} />
+                <Ionicons name="add" size={17} color={colors.primary} />
               </TouchableOpacity>
 
               {!item.isRegistered && item.phoneNumber ? (
@@ -330,9 +278,6 @@ const FriendRowItem = React.memo(function FriendRowItem({
           )}
         </View>
       </TouchableOpacity>
-      {!isLast && (
-        <View style={[styles.rowDivider, { backgroundColor: colors.borderLight }]} />
-      )}
     </View>
   );
 });
@@ -629,47 +574,66 @@ export default function FriendsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Top Balances Summary Header */}
-      <View
-        style={[
-          styles.summaryHeader,
-          {
-            backgroundColor: colors.card,
-            borderBottomColor: colors.border,
-          },
-        ]}
-      >
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryCol}>
-            <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
-              You are owed
-            </Text>
-            <Text style={[styles.summaryAmount, { color: colors.success }]}>
-              {formatCurrencyAmount(totalOwedToYou, userCurrency)}
-            </Text>
+      {/* Top Balances Summary Header Card */}
+      <View style={styles.summaryContainer}>
+        <View
+          style={[
+            styles.summaryCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryCol}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
+                YOU ARE OWED
+              </Text>
+              <Text
+                style={[styles.summaryAmount, { color: colors.success }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.72}
+              >
+                {formatCurrencyAmount(totalOwedToYou, userCurrency)}
+              </Text>
+            </View>
+
+            <View style={[styles.summaryDivider, { backgroundColor: colors.borderLight }]} />
+
+            <View style={styles.summaryCol}>
+              <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
+                YOU OWE
+              </Text>
+              <Text
+                style={[styles.summaryAmount, { color: colors.danger }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.72}
+              >
+                {formatCurrencyAmount(totalYouOwe, userCurrency)}
+              </Text>
+            </View>
           </View>
 
-          <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
-
-          <View style={styles.summaryCol}>
-            <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>
-              You owe
-            </Text>
-            <Text style={[styles.summaryAmount, { color: colors.danger }]}>
-              {formatCurrencyAmount(totalYouOwe, userCurrency)}
+          <View style={[styles.netPill, { backgroundColor: netOverall >= 0 ? colors.successBg : colors.dangerBg }]}>
+            <Ionicons
+              name={netOverall >= 0 ? "trending-up-outline" : "trending-down-outline"}
+              size={13}
+              color={netOverall >= 0 ? colors.success : colors.danger}
+              style={{ marginRight: 4 }}
+            />
+            <Text
+              style={[
+                styles.netPillText,
+                { color: netOverall >= 0 ? colors.success : colors.danger },
+              ]}
+              numberOfLines={1}
+            >
+              Net: {netOverall >= 0 ? '+' : '-'} {formatCurrencyAmount(Math.abs(netOverall), userCurrency)}
             </Text>
           </View>
-        </View>
-
-        <View style={[styles.netPill, { backgroundColor: netOverall >= 0 ? colors.successBg : colors.dangerBg }]}>
-          <Text
-            style={[
-              styles.netPillText,
-              { color: netOverall >= 0 ? colors.success : colors.danger },
-            ]}
-          >
-            Net: {netOverall >= 0 ? '+' : '-'} {formatCurrencyAmount(Math.abs(netOverall), userCurrency)}
-          </Text>
         </View>
       </View>
 
@@ -684,7 +648,7 @@ export default function FriendsScreen() {
             },
           ]}
         >
-          <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
+          <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search friends or chats..."
@@ -705,7 +669,9 @@ export default function FriendsScreen() {
         <TouchableOpacity
           style={[
             styles.filterPill,
-            activeFilter === 'all' && [styles.filterPillActive, { backgroundColor: colors.primary }],
+            activeFilter === 'all'
+              ? [styles.filterPillActive, { backgroundColor: colors.primary }]
+              : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
           ]}
           onPress={() => setActiveFilter('all')}
         >
@@ -722,7 +688,9 @@ export default function FriendsScreen() {
         <TouchableOpacity
           style={[
             styles.filterPill,
-            activeFilter === 'owes_you' && [styles.filterPillActive, { backgroundColor: colors.success }],
+            activeFilter === 'owes_you'
+              ? [styles.filterPillActive, { backgroundColor: colors.success }]
+              : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
           ]}
           onPress={() => setActiveFilter('owes_you')}
         >
@@ -739,7 +707,9 @@ export default function FriendsScreen() {
         <TouchableOpacity
           style={[
             styles.filterPill,
-            activeFilter === 'you_owe' && [styles.filterPillActive, { backgroundColor: colors.danger }],
+            activeFilter === 'you_owe'
+              ? [styles.filterPillActive, { backgroundColor: colors.danger }]
+              : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
           ]}
           onPress={() => setActiveFilter('you_owe')}
         >
@@ -773,7 +743,7 @@ export default function FriendsScreen() {
                 styles.youCardContainer,
                 {
                   backgroundColor: colors.card,
-                  borderColor: isDark ? 'rgba(99, 102, 241, 0.35)' : '#E0E7FF',
+                  borderColor: colors.border,
                 },
               ]}
             >
@@ -805,16 +775,16 @@ export default function FriendsScreen() {
                 <View style={styles.youInfo}>
                   <View style={styles.youTitleRow}>
                     <Text style={[styles.youTitle, { color: colors.text }]} numberOfLines={1}>
-                      You (Personal Expenses)
+                      Personal Expenses
                     </Text>
                     <View style={[styles.youBadge, { backgroundColor: colors.primaryLight }]}>
-                      <Text style={[styles.youBadgeText, { color: colors.primary }]}>Self</Text>
+                      <Text style={[styles.youBadgeText, { color: colors.primary }]}>Private</Text>
                     </View>
                   </View>
                   <Text style={[styles.youSub, { color: colors.textSecondary }]} numberOfLines={1}>
                     {personalTotalSpent > 0
-                      ? `${formatCurrencyAmount(personalTotalSpent, userCurrency)} spent on yourself`
-                      : 'Track self-expenses & personal spending'}
+                      ? `${formatCurrencyAmount(personalTotalSpent, userCurrency)} recorded`
+                      : 'Private log · Only you see this'}
                   </Text>
                 </View>
 
@@ -823,8 +793,8 @@ export default function FriendsScreen() {
                     style={[
                       styles.quickAddBtn,
                       {
-                        backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF',
-                        borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+                        backgroundColor: colors.primaryLight,
+                        borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
                         marginRight: 6,
                       },
                     ]}
@@ -851,10 +821,12 @@ export default function FriendsScreen() {
             <FriendsListSkeleton colors={colors} isDark={isDark} count={5} />
           ) : (
             <View style={styles.emptyView}>
-              <Text style={{ fontSize: 44, marginBottom: 8 }}>👥</Text>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Chats or Transactions Yet</Text>
+              <View style={[styles.emptyIconCircle, { backgroundColor: colors.primaryLight }]}>
+                <Ionicons name="people-outline" size={32} color={colors.primary} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No balances yet</Text>
               <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-                Friends you share trips, chats, or split expenses with will appear here. Tap the + button to start a split or chat!
+                Split an expense or chat with a friend to track 1-on-1 settlements.
               </Text>
             </View>
           )
@@ -892,6 +864,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  summaryContainer: {
+    paddingHorizontal: moderateScale(16),
+    paddingTop: moderateScale(12),
+    paddingBottom: moderateScale(2),
+  },
+  summaryCard: {
+    borderRadius: 18,
+    borderWidth: 1.2,
+    padding: moderateScale(16),
+  },
   summaryHeader: {
     padding: moderateScale(16),
     borderBottomWidth: 1,
@@ -900,7 +882,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: moderateScale(10),
+    marginBottom: moderateScale(12),
   },
   summaryCol: {
     flex: 1,
@@ -911,15 +893,19 @@ const styles = StyleSheet.create({
     height: moderateScale(36),
   },
   summaryLabel: {
-    fontSize: scaleFont(12),
-    fontWeight: '600',
+    fontSize: scaleFont(10.5),
+    fontWeight: '800',
+    letterSpacing: 0.8,
     marginBottom: 4,
   },
   summaryAmount: {
-    fontSize: scaleFont(18),
+    fontSize: scaleFont(22),
     fontWeight: '800',
+    letterSpacing: -0.4,
   },
   netPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'center',
     paddingHorizontal: moderateScale(12),
     paddingVertical: moderateScale(5),
@@ -931,13 +917,13 @@ const styles = StyleSheet.create({
   },
   searchSection: {
     paddingHorizontal: moderateScale(16),
-    paddingTop: moderateScale(12),
+    paddingTop: moderateScale(10),
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 25,
+    borderWidth: 1.2,
+    borderRadius: 14,
     paddingHorizontal: moderateScale(14),
     paddingVertical: moderateScale(9),
   },
@@ -948,14 +934,13 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     paddingHorizontal: moderateScale(16),
-    paddingVertical: moderateScale(10),
+    paddingVertical: moderateScale(8),
     gap: moderateScale(8),
   },
   filterPill: {
     paddingHorizontal: moderateScale(12),
     paddingVertical: moderateScale(6),
-    borderRadius: 20,
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
+    borderRadius: 10,
   },
   filterPillActive: {
     backgroundColor: '#6366F1',
@@ -976,9 +961,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   listContent: {
-    padding: moderateScale(16),
+    paddingHorizontal: moderateScale(16),
     paddingTop: 4,
     paddingBottom: moderateScale(100),
+  },
+  friendCardItem: {
+    borderRadius: 16,
+    borderWidth: 1.2,
+    marginBottom: 8,
+    overflow: 'hidden',
   },
   friendRowContainer: {
     overflow: 'hidden',
@@ -1102,6 +1093,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 1,
   },
+  heroAmountText: {
+    fontSize: scaleFont(15),
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  dualSubText: {
+    fontSize: scaleFont(10.5),
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  settledBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
   balSettledText: {
     fontSize: scaleFont(12),
     fontWeight: '600',
@@ -1121,8 +1127,16 @@ const styles = StyleSheet.create({
   emptyView: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: moderateScale(60),
+    paddingVertical: moderateScale(48),
     paddingHorizontal: moderateScale(20),
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
   },
   emptyTitle: {
     fontSize: scaleFont(17),
@@ -1159,17 +1173,17 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   quickAddBtn: {
-    width: moderateScale(26),
-    height: moderateScale(26),
-    borderRadius: moderateScale(13),
+    width: moderateScale(28),
+    height: moderateScale(28),
+    borderRadius: moderateScale(14),
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
   },
   youCardContainer: {
     marginBottom: moderateScale(12),
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderWidth: 1.2,
     overflow: 'hidden',
   },
   youCard: {
@@ -1184,7 +1198,7 @@ const styles = StyleSheet.create({
   youAvatar: {
     width: moderateScale(42),
     height: moderateScale(42),
-    borderRadius: moderateScale(21),
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },

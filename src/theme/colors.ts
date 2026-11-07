@@ -1,60 +1,64 @@
+// ─────────────────────────────────────────────────────
+// SplitYourTrip — Vibrant Indigo + Warm Amber Palette
+// ─────────────────────────────────────────────────────
+
 export const lightColors = {
-  primary: '#5B789A', // Muted Cobalt (deepened for light mode contrast)
-  primaryLight: 'rgba(120, 149, 183, 0.15)',
-  primaryDark: '#445D78',
-  secondary: '#789B80', // Supporting accent sage green
-  success: '#689272',
-  successBg: 'rgba(104, 146, 114, 0.15)',
-  danger: '#D9534F',
-  dangerBg: 'rgba(217, 83, 79, 0.12)',
-  warning: '#D99B43',
-  warningBg: 'rgba(217, 155, 67, 0.12)',
-  background: '#F4F6F8',
+  primary: '#6366F1',           // Indigo 500 — signature brand
+  primaryLight: 'rgba(99, 102, 241, 0.10)',
+  primaryDark: '#4F46E5',       // Indigo 600 — pressed / emphasis
+  secondary: '#F59E0B',         // Amber 500 — warm accent
+  success: '#10B981',           // Emerald 500 — crisp, confident green
+  successBg: 'rgba(16, 185, 129, 0.10)',
+  danger: '#EF4444',            // Red 500 — clear, unambiguous
+  dangerBg: 'rgba(239, 68, 68, 0.08)',
+  warning: '#F59E0B',           // Amber 500
+  warningBg: 'rgba(245, 158, 11, 0.10)',
+  background: '#F5F6FA',        // Cool off-white with faint indigo tint
   card: '#FFFFFF',
-  cardSecondary: '#EAEFF5',
-  text: '#151B25',
-  textSecondary: '#556274',
-  textMuted: '#8492A6',
-  border: '#D7DEE8',
-  borderLight: '#EBF0F6',
-  surfaceDark: '#151B25',
-  inputBackground: '#FFFFFF',
+  cardSecondary: '#EEEEF6',     // Subtle indigo-tinted secondary surface
+  text: '#111827',              // Gray 900 — near-black for contrast
+  textSecondary: '#6B7280',     // Gray 500
+  textMuted: '#9CA3AF',         // Gray 400
+  border: '#E5E7EB',            // Gray 200
+  borderLight: '#F3F4F6',       // Gray 100
+  surfaceDark: '#111827',
+  inputBackground: '#F9FAFB',   // Gray 50 — barely-there tint
 };
 
 export const darkColors = {
-  primary: '#7895B7', // Muted Cobalt Primary
-  primaryLight: 'rgba(120, 149, 183, 0.20)',
-  primaryDark: '#5B789A',
-  secondary: '#9BB4A1', // Supporting Accent Sage Green
-  success: '#9BB4A1', // Harmonious supporting accent
-  successBg: 'rgba(155, 180, 161, 0.18)',
-  danger: '#E07A7A', // Muted soft coral red
-  dangerBg: 'rgba(224, 122, 122, 0.18)',
-  warning: '#E5B887', // Muted warm sand amber
-  warningBg: 'rgba(229, 184, 135, 0.18)',
-  background: '#151B25', // Muted Cobalt Deep Background
-  card: '#242D3B', // Muted Cobalt Card Surface
-  cardSecondary: '#1D2431', // Subtle inset surface
-  text: '#F0F2E9', // Crisp light mist text
-  textSecondary: '#A3AFC2', // Soft cobalt secondary text
-  textMuted: '#6C7A8E', // Dimmed cobalt text
-  border: '#2E3A4B', // Subtle slate-cobalt border
-  borderLight: '#242D3B',
-  surfaceDark: '#0F141C',
-  inputBackground: '#1B2330', // Elegant input surface
+  primary: '#818CF8',           // Indigo 400 — brighter on dark
+  primaryLight: 'rgba(129, 140, 248, 0.14)',
+  primaryDark: '#6366F1',       // Indigo 500
+  secondary: '#FBBF24',         // Amber 400 — warm pop on dark
+  success: '#34D399',           // Emerald 400
+  successBg: 'rgba(52, 211, 153, 0.14)',
+  danger: '#F87171',            // Red 400
+  dangerBg: 'rgba(248, 113, 113, 0.14)',
+  warning: '#FBBF24',           // Amber 400
+  warningBg: 'rgba(251, 191, 36, 0.14)',
+  background: '#0B0F1A',       // Deep midnight — richer than generic #151B25
+  card: '#151926',              // Indigo-tinted card — NOT gray
+  cardSecondary: '#111528',     // Even deeper inset surface
+  text: '#F3F4F6',              // Gray 100 — clean white
+  textSecondary: '#9CA3AF',     // Gray 400
+  textMuted: '#6B7280',         // Gray 500
+  border: '#1E2235',            // Indigo-tinted border — not slate
+  borderLight: '#181C2E',
+  surfaceDark: '#070A14',
+  inputBackground: '#121629',   // Deep indigo input field
 };
 
 export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device, useResponsive } from './responsive';
 import { scaleFont, moderateScale } from './responsive';
 
 export const typography = {
-  h1: scaleFont(26),
-  h2: scaleFont(20),
-  h3: scaleFont(18),
-  title: scaleFont(16),
-  body: scaleFont(14),
-  caption: scaleFont(12),
-  tiny: scaleFont(10),
+  h1: scaleFont(28),      // Hero headings — bigger, bolder
+  h2: scaleFont(22),      // Section headers
+  h3: scaleFont(18),      // Card titles
+  title: scaleFont(16),   // List item names
+  body: scaleFont(14),    // Default body
+  caption: scaleFont(12), // Supporting text
+  tiny: scaleFont(10),    // Badges, timestamps
 };
 
 export const theme = {
@@ -68,10 +72,11 @@ export const theme = {
     xl: moderateScale(32),
   },
   borderRadius: {
-    sm: 6,
-    md: 12,
-    lg: 16,
-    xl: 24,
-    full: 9999,
+    xs: 6,        // Tiny badges, status dots
+    sm: 8,        // Pills, chips, small tags
+    md: 12,       // Inputs, small buttons
+    lg: 16,       // Main buttons, action cards
+    xl: 22,       // Container cards, modals
+    full: 9999,   // Avatars, circular buttons
   },
 };

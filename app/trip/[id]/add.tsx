@@ -678,22 +678,19 @@ export default function AddExpenseScreen() {
           style={[
             styles.voiceBannerCard,
             {
-              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
-              borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+              backgroundColor: colors.primaryLight,
+              borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
             },
           ]}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <Ionicons name="mic" size={16} color={colors.primary} />
             <Text style={[styles.voiceBannerTitle, { color: colors.primary }]}>
-              Voice Auto-filled: Review Details Below
+              Voice Logged — Review Details
             </Text>
           </View>
           <Text style={[styles.voiceBannerPrompt, { color: colors.textSecondary }]} numberOfLines={2}>
             "{voicePrompt}"
-          </Text>
-          <Text style={[styles.voiceBannerHint, { color: colors.textMuted }]}>
-            Review the amount, payer, and split members below, then tap Save Expense.
           </Text>
         </View>
       )}
@@ -704,8 +701,8 @@ export default function AddExpenseScreen() {
           style={[
             styles.ocrBannerCard,
             {
-              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
-              borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+              backgroundColor: colors.primaryLight,
+              borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
             },
           ]}
         >
@@ -1266,7 +1263,7 @@ export default function AddExpenseScreen() {
                   styles.participantRow,
                   { borderBottomColor: colors.borderLight },
                   isSelected && {
-                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#FAFBFF',
+                    backgroundColor: colors.primaryLight,
                   },
                 ]}
               >

@@ -26,6 +26,7 @@ import { useTripStore, Trip } from '../../src/features/trips/useTripStore';
 import { useContactsStore, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
+import { LinearGradient } from 'expo-linear-gradient';
 import TripCoverBadge from '../../src/components/TripCoverBadge';
 import TripsListSkeleton from '../../src/components/TripsListSkeleton';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
@@ -75,21 +76,29 @@ export default function MyTripsScreen() {
 
   useEffect(() => {
     if (openVoice === 'true') {
-      setVoiceModalOpen(true);
+      setTimeout(() => {
+        setVoiceModalOpen(true);
+      }, 100);
     }
   }, [openVoice, setVoiceModalOpen]);
 
   // Direct deep link listener for widget voice shortcut
   useEffect(() => {
     const handleVoiceUrl = (event: { url: string }) => {
-      if (event?.url && (event.url.includes('voice-expense') || event.url.includes('openVoice=true'))) {
-        setVoiceModalOpen(true);
+      const u = (event?.url || '').toLowerCase();
+      if (u.includes('voice-expense') || u.includes('openvoice') || u.includes('fromwidget') || u.includes('copilot')) {
+        setTimeout(() => {
+          setVoiceModalOpen(true);
+        }, 100);
       }
     };
     const sub = Linking.addEventListener('url', handleVoiceUrl);
     Linking.getInitialURL().then(url => {
-      if (url && (url.includes('voice-expense') || url.includes('openVoice=true'))) {
-        setVoiceModalOpen(true);
+      const u = (url || '').toLowerCase();
+      if (u.includes('voice-expense') || u.includes('openvoice') || u.includes('fromwidget') || u.includes('copilot')) {
+        setTimeout(() => {
+          setVoiceModalOpen(true);
+        }, 150);
       }
     }).catch(() => {});
     return () => sub.remove();
@@ -388,9 +397,9 @@ export default function MyTripsScreen() {
       {/* User Greeting Header */}
       <View style={styles.userGreetingHeader}>
         <View>
-          <Text style={[styles.greetingSub, { color: colors.textSecondary }]}>Welcome back,</Text>
-          <Text style={[styles.greetingName, { color: colors.text }]}>
-            {profile?.full_name || profile?.name || user?.email?.split('@')[0] || 'Traveler'} 👋
+          <Text style={[styles.greetingSub, { color: colors.textSecondary }]}>YOUR TRIPS</Text>
+          <Text style={[styles.greetingName, { color: colors.text }]} numberOfLines={1}>
+            {profile?.full_name?.split(' ')[0] || profile?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'Traveler'}
           </Text>
         </View>
         <TouchableOpacity
@@ -414,7 +423,8 @@ export default function MyTripsScreen() {
       {/* Top Banner / Actions */}
       <View style={styles.topActions}>
         <TouchableOpacity
-          style={[styles.createBtn, { backgroundColor: colors.primary }]}
+          style={styles.createBtnWrapper}
+          activeOpacity={0.88}
           onPress={() => {
             setCreateStep('details');
             setCreatedTrip(null);
@@ -429,57 +439,70 @@ export default function MyTripsScreen() {
             setCreateModalVisible(true);
           }}
         >
-          <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-          <Text style={styles.createBtnText}>New Trip</Text>
+          <LinearGradient
+            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#6366F1', '#4F46E5']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.createBtnGradient}
+          >
+            <Ionicons name="add-circle" size={19} color="#FFFFFF" />
+            <Text style={styles.createBtnText}>New Trip</Text>
+          </LinearGradient>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[
             styles.joinBtn,
-            { backgroundColor: colors.card, borderColor: colors.primary },
+            { backgroundColor: colors.card, borderColor: colors.border },
           ]}
+          activeOpacity={0.8}
           onPress={() => {
             setInviteCode('');
             setJoinErrorMsg(null);
             setJoinModalVisible(true);
           }}
         >
-          <Ionicons name="link" size={18} color={colors.primary} />
-          <Text style={[styles.joinBtnText, { color: colors.primary }]}>Join via Code</Text>
+          <Ionicons name="key-outline" size={17} color={colors.primary} />
+          <Text style={[styles.joinBtnText, { color: colors.text }]}>Join via Code</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Voice Detection Expense Assistant Widget */}
+      {/* Voice Detection Expense Assistant Widget - Refined Brand Tone */}
       <TouchableOpacity
         style={[
           styles.voiceWidgetCard,
           {
-            backgroundColor: isDark ? colors.card : '#FFFFFF',
-            borderColor: isDark ? colors.border : colors.borderLight,
+            backgroundColor: colors.card,
+            borderColor: colors.border,
           },
         ]}
         onPress={() => setVoiceModalOpen(true)}
-        activeOpacity={0.85}
+        activeOpacity={0.88}
       >
         <View style={styles.voiceWidgetLeft}>
-          <View style={[styles.voiceMicCircle, { backgroundColor: colors.primary }]}>
+          <LinearGradient
+            colors={['#F59E0B', '#D97706']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.voiceMicCircle}
+          >
             <Ionicons name="mic" size={18} color="#FFFFFF" />
-          </View>
+          </LinearGradient>
           <View style={styles.voiceWidgetTextCol}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={[styles.voiceWidgetTitle, { color: colors.text }]}>
-                Add Expense with Voice
+                Quick Voice Log
               </Text>
-              <View style={[styles.aiBadge, { backgroundColor: colors.primaryLight }]}>
-                <Text style={[styles.aiBadgeText, { color: colors.primary }]}>AI</Text>
+              <View style={[styles.voicePill, { backgroundColor: colors.primaryLight }]}>
+                <Text style={[styles.voicePillText, { color: colors.primary }]}>Instant</Text>
               </View>
             </View>
             <Text style={[styles.voiceWidgetSub, { color: colors.textSecondary }]} numberOfLines={1}>
-              "Add an expense in Goa trip of ₹45 paid by me..."
+              "Dinner in Goa ₹1,200 paid by Rahul"
             </Text>
           </View>
         </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </TouchableOpacity>
 
       {!user && (
@@ -523,10 +546,12 @@ export default function MyTripsScreen() {
             <TripsListSkeleton colors={colors} isDark={isDark} count={4} />
           ) : (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>🏖️</Text>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No trips created yet</Text>
+              <View style={[styles.emptyIconCircle, { backgroundColor: colors.primaryLight }]}>
+                <Ionicons name="compass-outline" size={32} color={colors.primary} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No trips yet</Text>
               <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                Tap "New Trip" to start tracking group expenses and splitting UPI bills.
+                Create a trip to split expenses and track balances effortlessly.
               </Text>
             </View>
           )
@@ -563,26 +588,16 @@ export default function MyTripsScreen() {
             </View>
           ) : null
         }
-        renderItem={({ item, index }) => {
+        renderItem={({ item }) => {
           const isOpeningThisTrip = openingTripId === item.id;
-          const isFirst = index === 0;
-          const isLast = index === paginatedTrips.length - 1;
 
           return (
             <View
               style={[
-                styles.tripRowContainer,
+                styles.tripCardItem,
                 {
                   backgroundColor: colors.card,
                   borderColor: colors.border,
-                  borderTopLeftRadius: isFirst ? 14 : 0,
-                  borderTopRightRadius: isFirst ? 14 : 0,
-                  borderBottomLeftRadius: isLast ? 14 : 0,
-                  borderBottomRightRadius: isLast ? 14 : 0,
-                  borderTopWidth: isFirst ? 1 : 0,
-                  borderBottomWidth: isLast ? 1 : 0,
-                  borderLeftWidth: 1,
-                  borderRightWidth: 1,
                 },
               ]}
             >
@@ -599,7 +614,7 @@ export default function MyTripsScreen() {
               >
                 <TripCoverBadge
                   imageUrl={item.image_url}
-                  size={44}
+                  size={46}
                   style={styles.tripBadge}
                   fallbackEmoji="🌴"
                 />
@@ -609,9 +624,9 @@ export default function MyTripsScreen() {
                     {item.name}
                   </Text>
                   <View style={styles.tripSubRow}>
-                    <Ionicons name="calendar-outline" size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
+                    <Ionicons name="calendar-outline" size={12} color={colors.textMuted} style={{ marginRight: 4 }} />
                     <Text style={[styles.tripDates, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {item.start_date ? `${item.start_date}${item.end_date ? ` • ${item.end_date}` : ''}` : 'Ongoing Group Trip'}
+                      {item.start_date ? `${item.start_date}${item.end_date ? ` • ${item.end_date}` : ''}` : 'Ongoing trip'}
                     </Text>
                   </View>
                 </View>
@@ -626,8 +641,8 @@ export default function MyTripsScreen() {
                           style={[
                             styles.quickAddBtn,
                             {
-                              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.18)' : '#EEF2FF',
-                              borderColor: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+                              backgroundColor: colors.primaryLight,
+                              borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
                             },
                           ]}
                           onPress={(e) => {
@@ -640,17 +655,14 @@ export default function MyTripsScreen() {
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="add" size={18} color={colors.primary} />
+                          <Ionicons name="add" size={17} color={colors.primary} />
                         </TouchableOpacity>
                       )}
-                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
+                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 4 }} />
                     </View>
                   )}
                 </View>
               </TouchableOpacity>
-              {!isLast && (
-                <View style={[styles.rowDivider, { backgroundColor: colors.borderLight }]} />
-              )}
             </View>
           );
         }}
@@ -1348,13 +1360,15 @@ const styles = StyleSheet.create({
     paddingBottom: moderateScale(4),
   },
   greetingSub: {
-    fontSize: scaleFont(13),
-    fontWeight: '500',
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginBottom: 2,
   },
   greetingName: {
-    fontSize: scaleFont(22),
+    fontSize: scaleFont(24),
     fontWeight: '800',
-    letterSpacing: -0.3,
+    letterSpacing: -0.5,
   },
   profileAvatarMini: {
     width: moderateScale(40),
@@ -1375,16 +1389,22 @@ const styles = StyleSheet.create({
   },
   topActions: {
     flexDirection: 'row',
-    padding: moderateScale(16),
-    gap: moderateScale(12),
+    paddingHorizontal: moderateScale(16),
+    paddingTop: moderateScale(14),
+    paddingBottom: moderateScale(10),
+    gap: moderateScale(10),
   },
-  createBtn: {
+  createBtnWrapper: {
     flex: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  createBtnGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: moderateScale(12),
-    borderRadius: 12,
+    paddingVertical: moderateScale(13),
+    borderRadius: 14,
     gap: 6,
   },
   createBtnText: {
@@ -1397,9 +1417,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 1.2,
     paddingVertical: moderateScale(12),
-    borderRadius: 12,
+    borderRadius: 14,
     gap: 6,
   },
   joinBtnText: {
@@ -1411,11 +1431,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginHorizontal: moderateScale(16),
-    marginBottom: moderateScale(10),
+    marginBottom: moderateScale(12),
     paddingHorizontal: moderateScale(14),
     paddingVertical: moderateScale(12),
-    borderRadius: 14,
-    borderWidth: 1.5,
+    borderRadius: 16,
+    borderWidth: 1.2,
   },
   voiceWidgetLeft: {
     flexDirection: 'row',
@@ -1441,12 +1461,12 @@ const styles = StyleSheet.create({
     fontSize: scaleFont(14),
     fontWeight: '700',
   },
-  aiBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
+  voicePill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
     borderRadius: 6,
   },
-  aiBadgeText: {
+  voicePillText: {
     fontSize: scaleFont(10),
     fontWeight: '800',
   },
@@ -1469,8 +1489,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   listContent: {
-    padding: moderateScale(16),
+    paddingHorizontal: moderateScale(16),
+    paddingTop: moderateScale(4),
     paddingBottom: moderateScale(100),
+  },
+  tripCardItem: {
+    borderRadius: 18,
+    borderWidth: 1.2,
+    marginBottom: 10,
+    overflow: 'hidden',
   },
   tripRowContainer: {
     overflow: 'hidden',
@@ -1482,9 +1509,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: moderateScale(14),
   },
   tripBadge: {
-    width: moderateScale(44),
-    height: moderateScale(44),
-    borderRadius: 12,
+    width: moderateScale(46),
+    height: moderateScale(46),
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -1502,8 +1529,9 @@ const styles = StyleSheet.create({
     marginRight: moderateScale(8),
   },
   tripName: {
-    fontSize: scaleFont(15),
+    fontSize: scaleFont(16),
     fontWeight: '700',
+    letterSpacing: -0.2,
   },
   tripSubRow: {
     flexDirection: 'row',
@@ -1522,9 +1550,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickAddBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -1577,10 +1605,14 @@ const styles = StyleSheet.create({
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: moderateScale(60),
+    paddingVertical: moderateScale(48),
   },
-  emptyIcon: {
-    fontSize: scaleFont(48),
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 16,
   },
   emptyTitle: {

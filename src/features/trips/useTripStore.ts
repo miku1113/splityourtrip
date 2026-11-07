@@ -299,6 +299,7 @@ interface TripStoreState {
     splitType: SplitType;
     participantMemberIds: string[];
     customSplits?: Array<{ memberId: string; shareAmount: number }>;
+    expenseId?: string;
     upiTxnId?: string;
     location?: string | null;
     latitude?: number | null;
@@ -2858,7 +2859,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const payerName = payerMember?.display_name || 'Member';
     const payerProfileId = payerMember?.profile_id || userId;
 
-    const newExpenseId = generateUUID();
+    const newExpenseId = data.expenseId || generateUUID();
     const creatorId = userId || payerProfileId || payerMember?.id || 'local_user';
 
     // Persist local file to documentDirectory so it is never purged by OS cache cleaners

@@ -22,6 +22,7 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { SUPPORTED_CURRENCIES, CurrencyItem } from '../../src/services/currency';
 import { AppLogo } from '../../src/components/AppLogo';
+import { LinearGradient } from 'expo-linear-gradient';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
 
 export default function LoginScreen() {
@@ -320,10 +321,10 @@ export default function LoginScreen() {
       >
         {/* Brand Header */}
         <View style={styles.header}>
-          <AppLogo size={80} showGlow style={{ marginBottom: 16 }} />
+          <AppLogo size={80} showGlow style={{ marginBottom: 14 }} />
           <Text style={[styles.title, { color: colors.text }]}>Split Your Trip</Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Smarter group expenses, instant UPI share & automated settlements.
+            Split expenses. Settle up. Stay friends.
           </Text>
         </View>
 
@@ -696,20 +697,27 @@ export default function LoginScreen() {
 
               <TouchableOpacity
                 style={[
-                  styles.primaryBtn,
-                  { backgroundColor: colors.primary },
+                  styles.primaryBtnWrapper,
                   (loading || googleLoading) && styles.btnDisabled,
                 ]}
+                activeOpacity={0.88}
                 onPress={activeTab === 'signin' ? handleSignIn : handleSignUp}
                 disabled={loading || googleLoading}
               >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryBtnText}>
-                    {activeTab === 'signin' ? 'Sign In' : 'Create Account'}
-                  </Text>
-                )}
+                <LinearGradient
+                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#6366F1', '#4F46E5']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.primaryBtnGradient}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>
+                      {activeTab === 'signin' ? 'Sign In' : 'Create Account'}
+                    </Text>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
 
               {/* Divider */}
@@ -1187,6 +1195,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 8,
     textAlign: 'center',
+  },
+  primaryBtnWrapper: {
+    borderRadius: 14,
+    marginTop: 20,
+    overflow: 'hidden',
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  primaryBtnGradient: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
   },
   primaryBtn: {
     borderRadius: 14,

@@ -442,11 +442,20 @@ export function parseVoiceExpense(
   let category = 'General';
   let description = '';
 
+  const matchesKeyword = (text: string, textLower: string, kw: string): boolean => {
+    const kwLower = kw.toLowerCase();
+    if (/^[a-z0-9\s]+$/i.test(kw)) {
+      const escaped = kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+      return regex.test(textLower);
+    }
+    return text.includes(kw) || textLower.includes(kwLower);
+  };
+
   let matchedSpecificCategory = false;
   for (const [catName, keywords] of Object.entries(SPECIFIC_CATEGORIES)) {
     for (const kw of keywords) {
-      const kwLower = kw.toLowerCase();
-      if (cleanLower.includes(kwLower) || clean.includes(kw)) {
+      if (matchesKeyword(clean, cleanLower, kw)) {
         category = catName;
         matchedSpecificCategory = true;
         if (!description) {
@@ -460,7 +469,7 @@ export function parseVoiceExpense(
 
   if (!matchedSpecificCategory) {
     for (const kw of GENERAL_KEYWORDS) {
-      if (cleanLower.includes(kw.toLowerCase()) || clean.includes(kw)) {
+      if (matchesKeyword(clean, cleanLower, kw)) {
         category = 'General';
         break;
       }

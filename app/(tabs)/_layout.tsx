@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
@@ -49,10 +50,16 @@ export default function TabLayout() {
       if (!url || url === lastProcessedUrl) return;
       lastProcessedUrl = url;
       const lower = url.toLowerCase();
-      if (lower.includes('voice-expense') || lower.includes('openvoice=true')) {
+      if (
+        lower.includes('voice-expense') ||
+        lower.includes('openvoice') ||
+        lower.includes('fromwidget') ||
+        lower.includes('copilot')
+      ) {
         setTimeout(() => {
           useTripStore.getState().setVoiceModalOpen(true);
         }, 150);
+        return;
       } else if (lower.includes('add-expense') || lower.includes('add-trip') || lower.includes('add-contact')) {
         if (lower.includes('new-trip') || lower.includes('add-trip')) {
           router.push('/add-expense?action=new-trip' as any);
@@ -71,6 +78,9 @@ export default function TabLayout() {
     };
 
     const sub = Linking.addEventListener('url', event => handleUrl(event.url));
+    Linking.getInitialURL().then(initUrl => {
+      if (initUrl) handleUrl(initUrl);
+    }).catch(() => {});
     return () => sub.remove();
   }, []);
 
@@ -187,19 +197,21 @@ export default function TabLayout() {
                 <TouchableOpacity
                   style={styles.centerFab}
                   onPress={() => setExpenseModalVisible(true)}
-                  activeOpacity={0.85}
+                  activeOpacity={0.88}
                 >
-                  <View
+                  <LinearGradient
+                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#6366F1', '#4F46E5']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
                     style={[
                       styles.centerFabInner,
                       {
-                        backgroundColor: colors.primary,
                         shadowColor: colors.primary,
                       },
                     ]}
                   >
-                    <Ionicons name="add" size={30} color="#FFFFFF" />
-                  </View>
+                    <Ionicons name="add" size={28} color="#FFFFFF" />
+                  </LinearGradient>
                 </TouchableOpacity>
               </View>
             ),
@@ -346,7 +358,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   centerFab: {
-    top: -14,
+    top: -12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -356,9 +368,9 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
     elevation: 8,
   },
 });

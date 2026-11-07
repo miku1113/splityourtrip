@@ -80,10 +80,8 @@ export default function TripDetailScreen() {
         title={cleanTitle}
         subtitle={
           isSingleSplit
-            ? otherMember?.phone_number
-              ? `${otherMember.phone_number} • Split Your Trip`
-              : '✨ Split Your Trip'
-            : `${members.length} members • ${expenses.length} expenses`
+            ? (otherMember?.phone_number || 'Direct split & chat')
+            : `${members.length} members · ${expenses.length} expenses`
         }
         avatarText={isSingleSplit ? cleanTitle.charAt(0).toUpperCase() : undefined}
         friendId={isSingleSplit ? (otherMember?.id || trip.friend_id) : undefined}

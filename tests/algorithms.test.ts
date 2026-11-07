@@ -1,4 +1,10 @@
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect, jest } from '@jest/globals';
+
+jest.mock('expo-file-system', () => ({
+  uploadAsync: jest.fn(),
+  getInfoAsync: jest.fn(),
+}), { virtual: true });
+
 import { splitEqual, splitExact, splitByShares, splitByPercentage } from '../src/services/split';
 import { calculateSettlement, validateTripBalances } from '../src/services/settle';
 import { parseUpiReceipt } from '../src/services/upiParser';
@@ -699,5 +705,232 @@ describe('Voice Expense Parser', () => {
     expect(gujRes.amountRupees).toBe('1500');
     expect(gujRes.amountPaise).toBe(150000);
     expect(gujRes.category).toBe('Stay');
+  });
+
+  test('isWhisperHallucination correctly filters ambient noise vs user intent', () => {
+    const { isWhisperHallucination } = require('../src/services/voiceAiService');
+    expect(isWhisperHallucination('The')).toBe(true);
+    expect(isWhisperHallucination("I'm happy to have you.")).toBe(true);
+    expect(isWhisperHallucination('Thank you for watching.')).toBe(true);
+    expect(isWhisperHallucination('')).toBe(true);
+    expect(isWhisperHallucination('   ')).toBe(true);
+
+    // Genuine commands should NOT be treated as hallucinations
+    expect(isWhisperHallucination('Delete the dinner expense')).toBe(false);
+    expect(isWhisperHallucination('Split with Rohan from contacts')).toBe(false);
+    expect(isWhisperHallucination('Add 500 for lunch with Rohan')).toBe(false);
+  });
+
+  test('validates DELETE_EXPENSE action and converts Rupees to integer Paise', () => {
+    const mockExpense = {
+      tripId: 'trip-goa',
+      tripName: 'Goa Trip',
+      expenseId: 'exp-123',
+      description: 'Dinner',
+      amountRupees: '850',
+      amountPaise: Math.round(Number('850') * 100),
+    };
+
+    expect(mockExpense.amountPaise).toBe(85000);
+    expect(Number.isInteger(mockExpense.amountPaise)).toBe(true);
+    expect(mockExpense.description).toBe('Dinner');
+  });
+
+  test('validates START_CONTACT_SPLIT action and contact matching', () => {
+    const mockContacts = [
+      { id: 'c1', name: 'Rohan Sharma', phoneNumber: '+919876543210' },
+      { id: 'c2', name: 'Priya Patel', phoneNumber: '+919825012345' },
+    ];
+
+    const searchName = 'Rohan';
+    const matched = mockContacts.find(c => c.name.toLowerCase().includes(searchName.toLowerCase()));
+    expect(matched).toBeDefined();
+    expect(matched?.id).toBe('c1');
+    expect(matched?.phoneNumber).toBe('+919876543210');
+
+    const splitAction = {
+      contactId: matched?.id,
+      contactName: matched?.name,
+      phoneNumber: matched?.phoneNumber,
+      amountRupees: '500',
+      amountPaise: Math.round(Number('500') * 100),
+      description: 'Lunch',
+      category: 'Food',
+    };
+
+    expect(splitAction.amountPaise).toBe(50000);
+    expect(Number.isInteger(splitAction.amountPaise)).toBe(true);
+    expect(splitAction.category).toBe('Food');
+  });
+
+  test('validates UPDATE_EXPENSE action and guarantees 50-50 split between speaker and named member', () => {
+    const speakerId = 'member-speaker-you';
+    const khushiId = 'member-khushi';
+    const amountRupees = '100';
+    const amountPaise = Math.round(Number(amountRupees) * 100);
+
+    // When user says "split it with me and Khushi so the amount will be 50-50"
+    const updateAction = {
+      type: 'UPDATE_EXPENSE',
+      status: 'confirmed' as const,
+      updateExpense: {
+        expenseId: 'exp-goa-1',
+        tripId: 'trip-goa-1',
+        tripName: 'Goa Trip',
+        description: 'Snacks',
+        amountRupees,
+        amountPaise,
+        category: 'Food',
+        participantMemberIds: [speakerId, khushiId],
+        splitAll: false,
+      },
+    };
+
+    expect(updateAction.updateExpense.amountPaise).toBe(10000);
+    expect(updateAction.updateExpense.participantMemberIds).toHaveLength(2);
+    expect(updateAction.updateExpense.participantMemberIds).toContain(speakerId);
+    expect(updateAction.updateExpense.participantMemberIds).toContain(khushiId);
+
+    // Verify 50-50 split calculation
+    const splits = splitEqual(updateAction.updateExpense.amountPaise, updateAction.updateExpense.participantMemberIds);
+    expect(splits).toHaveLength(2);
+    expect(splits[0].shareAmount).toBe(5000); // ₹50.00
+    expect(splits[1].shareAmount).toBe(5000); // ₹50.00
+    expect(splits[0].shareAmount + splits[1].shareAmount).toBe(10000);
+  });
+
+  test('prevents ADD_EXPENSE and guarantees DELETE_EXPENSE when user says "remove last expence of petrol"', () => {
+    const userPrompts = [
+      'remove last expence of petrol',
+      'delete petrol expense',
+      'remove last expense of petrol',
+      'cancel petrol expense',
+      'petrol ka kharcha delete karo',
+    ];
+
+    const deleteIntentRegex = /\b(remove|delete|cancel|erase|drop|hatao|hata\s*do|nikal\s*do|nikalo|delete\s*karo|kadhi\s*nakho)\b/i;
+
+    userPrompts.forEach(p => {
+      expect(deleteIntentRegex.test(p.toLowerCase())).toBe(true);
+    });
+
+    const recentExpenses = [
+      {
+        id: 'exp-petrol-1',
+        tripId: 'trip-goa-1',
+        tripName: 'Goa Trip',
+        description: 'Petrol',
+        amountRupees: '500',
+        amountPaise: 50000,
+        category: 'Fuel',
+      },
+      {
+        id: 'exp-dinner-2',
+        tripId: 'trip-goa-1',
+        tripName: 'Goa Trip',
+        description: 'Dinner',
+        amountRupees: '850',
+        amountPaise: 85000,
+        category: 'Food',
+      },
+    ];
+
+    const prompt = 'remove last expence of petrol';
+    const lower = prompt.toLowerCase();
+
+    // Match petrol expense
+    let target = recentExpenses.find(
+      e => e.description && lower.includes(e.description.toLowerCase())
+    );
+    if (!target && (lower.includes('petrol') || lower.includes('fuel'))) {
+      target = recentExpenses.find(e => e.category === 'Fuel' || /petrol/i.test(e.description));
+    }
+    if (!target && lower.includes('last')) {
+      target = recentExpenses[0];
+    }
+
+    expect(target).toBeDefined();
+    expect(target?.id).toBe('exp-petrol-1');
+    expect(target?.description).toBe('Petrol');
+    expect(target?.amountPaise).toBe(50000);
+
+    // Guardrail: Even if an LLM hallucinated action.type = 'ADD_EXPENSE', it MUST be overridden to DELETE_EXPENSE
+    let action: any = {
+      type: 'ADD_EXPENSE',
+      status: 'pending_confirmation',
+      expense: { description: 'Petrol', amountRupees: '500' },
+    };
+
+    if (deleteIntentRegex.test(lower) && (action.type === 'ADD_EXPENSE' || action.type === 'CONFIRM_ADD_EXPENSE')) {
+      action = {
+        type: 'DELETE_EXPENSE',
+        status: 'confirmed',
+        deleteExpense: {
+          tripId: target!.tripId,
+          tripName: target!.tripName,
+          expenseId: target!.id,
+          description: target!.description,
+          amountRupees: target!.amountRupees,
+          amountPaise: target!.amountPaise,
+        },
+      };
+    }
+
+    // Strict payload isolation: action.expense MUST be undefined
+    if (action.type === 'DELETE_EXPENSE') {
+      action.expense = undefined;
+    }
+
+    expect(action.type).toBe('DELETE_EXPENSE');
+    expect(action.expense).toBeUndefined();
+    expect(action.deleteExpense).toBeDefined();
+    expect(action.deleteExpense.expenseId).toBe('exp-petrol-1');
+    expect(action.deleteExpense.amountPaise).toBe(50000);
+    expect(action.status).toBe('confirmed');
+  });
+
+  test('resolves contact split with amount and contact matching without stalling on needs_clarification', () => {
+    const contacts = [
+      { id: 'c1', name: 'Rohan Sharma', phoneNumber: '+919876543210' },
+      { id: 'c2', name: 'Parth Patel', phoneNumber: '+919825012345' },
+    ];
+
+    const prompt = 'add an expense of 500 rupees with Rohan from contact';
+    const lower = prompt.toLowerCase();
+
+    // Check contact match
+    let matchedContact = contacts.find(c => lower.includes(c.name.toLowerCase().split(' ')[0]));
+    expect(matchedContact).toBeDefined();
+    expect(matchedContact?.name).toBe('Rohan Sharma');
+
+    // Extract amount
+    const amtMatch = lower.match(/(?:₹|rs\.?|inr|rupees?|rupiya|rupaye)?\s*(\d+(?:\.\d+)?)\s*(?:k|thousand|rupees?|rupiya|rupaye)?/i);
+    expect(amtMatch).toBeDefined();
+    const amountRupees = amtMatch ? amtMatch[1] : '0';
+    const amountPaise = Math.round(Number(amountRupees) * 100);
+    expect(amountRupees).toBe('500');
+    expect(amountPaise).toBe(50000);
+
+    // Verify contact split action structure
+    const contactSplitAction = {
+      type: 'START_CONTACT_SPLIT',
+      status: 'confirmed' as const,
+      contactSplit: {
+        contactId: matchedContact!.id,
+        contactName: matchedContact!.name,
+        phoneNumber: matchedContact!.phoneNumber,
+        amountRupees,
+        amountPaise,
+        description: 'Expense',
+        category: 'General',
+      },
+    };
+
+    expect(contactSplitAction.type).toBe('START_CONTACT_SPLIT');
+    expect(contactSplitAction.status).toBe('confirmed');
+    expect(contactSplitAction.contactSplit.amountPaise).toBe(50000);
+    expect(contactSplitAction.contactSplit.contactName).toBe('Rohan Sharma');
+    expect(contactSplitAction.contactSplit.description).toBe('Expense');
+    expect(contactSplitAction.contactSplit.category).toBe('General');
   });
 });

@@ -175,7 +175,7 @@ export default function SettingsScreen() {
             <View
               style={[
                 styles.iconBox,
-                { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' },
+                { backgroundColor: colors.primaryLight },
               ]}
             >
               <Ionicons
@@ -359,7 +359,7 @@ export default function SettingsScreen() {
             <View
               style={[
                 styles.iconBox,
-                { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' },
+                { backgroundColor: colors.primaryLight },
               ]}
             >
               {isSyncing ? (
@@ -567,9 +567,7 @@ export default function SettingsScreen() {
                       styles.currencyRow,
                       { borderBottomColor: colors.borderLight },
                       isSelected && {
-                        backgroundColor: isDark
-                          ? 'rgba(99, 102, 241, 0.15)'
-                          : '#EEF2FF',
+                        backgroundColor: colors.primaryLight,
                       },
                     ]}
                     onPress={() => handleSelectCurrency(item)}

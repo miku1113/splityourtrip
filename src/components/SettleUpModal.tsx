@@ -99,12 +99,31 @@ export default function SettleUpModal({
   // Reset or pre-fill state on open
   useEffect(() => {
     if (visible) {
+      if (initialFriendId) {
+        const friend = contacts.find(c => c.id === initialFriendId || c.profileId === initialFriendId);
+        if (friend) {
+          handleSelectFriend(friend);
+          return;
+        }
+      }
       if (initialTripId) {
         const t = trips.find(trip => trip.id === initialTripId);
         if (t) {
           setSelectedTrip(t);
           setSettleType('trip');
-          loadMembersForTrip(t.id);
+          const curUserId = user?.id || '';
+          const mems = allMembers.filter(m => m.trip_id === t.id);
+          const otherMembers = mems.filter(
+            m => m.profile_id !== curUserId && m.user_id !== curUserId && m.display_name.toLowerCase() !== 'you'
+          );
+          if (otherMembers.length === 1 || t.trip_type === 'friend_split' || (t as any).is_friend_split) {
+            const targetMem = otherMembers[0] || mems[0];
+            if (targetMem) {
+              handleSelectTripMember(targetMem);
+              return;
+            }
+          }
+          setTripMembersList(otherMembers.length > 0 ? otherMembers : mems);
           setStep('select_member');
           return;
         }
@@ -118,7 +137,7 @@ export default function SettleUpModal({
       setPaymentMethod('cash');
       setSearchQuery('');
     }
-  }, [visible, initialTripId]);
+  }, [visible, initialTripId, initialFriendId]);
 
   const loadMembersForTrip = async (tripId: string) => {
     const curUserId = user?.id || '';

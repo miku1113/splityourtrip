@@ -648,7 +648,7 @@ export default function BillDetailScreen() {
           {
             backgroundColor: canEdit
               ? isDark
-                ? 'rgba(99, 102, 241, 0.16)'
+                ? colors.primaryLight
                 : '#EEF2FF'
               : isDark
               ? '#1E293B'

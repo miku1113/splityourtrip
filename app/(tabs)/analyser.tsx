@@ -35,6 +35,7 @@ import { Trip, TripMember, TripBalanceRow } from '../../src/types/database';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import AnalyserSkeleton from '../../src/components/AnalyserSkeleton';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
+import { LinearGradient } from 'expo-linear-gradient';
 import SpendingLineChart from '../../src/components/SpendingLineChart';
 
 const PAGE_SIZE = 10;
@@ -1618,8 +1619,8 @@ export default function AnalyserScreen() {
         style={[
           styles.heroCard,
           {
-            backgroundColor: isDark ? '#1E2738' : '#F0F4FF',
-            borderColor: isDark ? 'rgba(120, 149, 183, 0.3)' : '#DDE5F8',
+            backgroundColor: colors.card,
+            borderColor: colors.border,
           },
         ]}
       >
@@ -2068,8 +2069,8 @@ export default function AnalyserScreen() {
               style={[
                 styles.viewMoreCardBtn,
                 {
-                  backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
-                  borderColor: isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)',
+                  backgroundColor: colors.primaryLight,
+                  borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
                   borderWidth: 1,
                   marginTop: 4,
                   marginBottom: 16,
@@ -2142,9 +2143,7 @@ export default function AnalyserScreen() {
                       {
                         borderBottomColor: colors.borderLight,
                         backgroundColor: isSelected
-                          ? isDark
-                            ? 'rgba(99, 102, 241, 0.15)'
-                            : '#EEF2FF'
+                          ? colors.primaryLight
                           : 'transparent',
                         paddingHorizontal: isSelected ? 8 : 0,
                         borderRadius: isSelected ? 8 : 0,
@@ -2532,7 +2531,7 @@ export default function AnalyserScreen() {
                   style={[
                     styles.viewMoreCardBtn,
                     {
-                      backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
+                      backgroundColor: colors.primaryLight,
                       borderTopWidth: 1,
                       borderTopColor: colors.borderLight,
                       marginTop: 6,
@@ -2666,7 +2665,7 @@ export default function AnalyserScreen() {
 
             {uniqueGroupTrips.length > INLINE_TRIPS_LIMIT && (
               <TouchableOpacity
-                style={[styles.viewMoreCardBtn, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF' }]}
+                style={[styles.viewMoreCardBtn, { backgroundColor: colors.primaryLight }]}
                 onPress={() => {
                   setModalVisibleCount(PAGE_SIZE);
                   setTripSearchQuery('');
@@ -3281,7 +3280,7 @@ export default function AnalyserScreen() {
                     style={[
                       styles.sortOptionRow,
                       {
-                        backgroundColor: isSelected ? (isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF') : 'transparent',
+                        backgroundColor: isSelected ? colors.primaryLight : 'transparent',
                         borderColor: isSelected ? colors.primary : colors.borderLight,
                       },
                     ]}

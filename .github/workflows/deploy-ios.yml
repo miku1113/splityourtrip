@@ -1,4 +1,4 @@
-name: Build & Deploy iOS to Apple App Store Connect
+name: Build & Deploy iOS (IPA Distribution & App Store Connect)
 
 on:
   workflow_dispatch:
@@ -7,10 +7,17 @@ on:
         description: 'Custom iOS Build Number (leave blank to auto-increment from GitHub run number)'
         required: false
         default: ''
+      create_release:
+        description: 'Create a downloadable GitHub Release'
+        required: false
+        type: boolean
+        default: true
 
   push:
     branches:
       - main
+    tags:
+      - 'v*'
     paths:
       - 'app/**'
       - 'src/**'
@@ -18,14 +25,18 @@ on:
       - 'ios/**'
       - 'package.json'
       - 'app.json'
+      - '.github/workflows/deploy-ios.yml'
 
 concurrency:
   group: ios-deploy-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build-and-deploy:
-    name: Build & Upload to App Store Connect
+    name: Build & Distribute iOS IPA
     runs-on: macos-14
     timeout-minutes: 60
 
@@ -60,7 +71,7 @@ jobs:
           cd ios
           pod install --repo-update
 
-      - name: 7. Configure iOS Build Number
+      - name: 7. Configure iOS Build Number & Marketing Version
         run: |
           BUILD_NUM="${{ github.event.inputs.build_number }}"
           if [ -z "$BUILD_NUM" ]; then
@@ -69,6 +80,9 @@ jobs:
           echo "Setting iOS build number to: $BUILD_NUM"
           cd ios
           xcrun agvtool new-version -all "$BUILD_NUM"
+          APP_VERSION=$(node -p "require('../app.json').expo.version")
+          echo "Setting iOS marketing version to: $APP_VERSION"
+          xcrun agvtool new-marketing-version "$APP_VERSION"
 
       - name: 8. Install Apple Certificates and Provisioning Profiles
         env:
@@ -174,7 +188,27 @@ jobs:
             -exportPath $RUNNER_TEMP/build \
             -exportOptionsPlist ios/ExportOptions.plist
 
-      - name: 13. Upload IPA to App Store Connect (TestFlight)
+      - name: 13. Upload IPA to GitHub Artifacts (Direct Download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SplitYourTrip-iOS-IPA
+          path: ${{ runner.temp }}/build/*.ipa
+          retention-days: 30
+
+      - name: 14. Publish GitHub Release (Distribution from GitHub)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true' || github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/build/*.ipa
+          name: SplitYourTrip iOS ${{ github.ref_name || format('v1.0.57 (Build {0})', github.event.inputs.build_number || github.run_number) }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.57-ios-{0}', github.event.inputs.build_number || github.run_number) }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 15. Upload IPA to App Store Connect (TestFlight)
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -195,7 +229,7 @@ jobs:
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
             --show-progress
 
-      - name: 14. Clean up Keychain & Sensitive Files
+      - name: 16. Clean up Keychain & Sensitive Files
         if: always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true

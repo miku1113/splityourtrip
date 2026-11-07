@@ -23,7 +23,6 @@ import { useContactsStore, FriendContact } from '../features/contacts/useContact
 import { useAuthStore } from '../features/auth/useAuthStore';
 import { scaleFont, moderateScale } from '../theme/responsive';
 import BillScannerModal from './BillScannerModal';
-import VoiceExpenseModal from './VoiceExpenseModal';
 import { DraggableBottomSheet } from './DraggableBottomSheet';
 
 const PAGE_SIZE = 10;
@@ -49,7 +48,6 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showBillScanner, setShowBillScanner] = useState(false);
-  const [showVoiceModal, setShowVoiceModal] = useState(false);
 
   // Inline Add Contact State
   const [showInlineAddContact, setShowInlineAddContact] = useState(false);
@@ -238,11 +236,11 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
   const handleOpenVoiceExpense = () => {
     handleClose();
     setTimeout(() => {
-      setShowVoiceModal(true);
+      useTripStore.getState().setVoiceModalOpen(true);
     }, 120);
   };
 
-  if (!visible && !showBillScanner && !showVoiceModal) return null;
+  if (!visible && !showBillScanner) return null;
 
   return (
     <>
@@ -902,10 +900,6 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
     <BillScannerModal
       visible={showBillScanner}
       onClose={() => setShowBillScanner(false)}
-    />
-    <VoiceExpenseModal
-      visible={showVoiceModal}
-      onClose={() => setShowVoiceModal(false)}
     />
     </>
   );

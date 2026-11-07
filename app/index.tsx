@@ -53,7 +53,10 @@ export default function SplashScreen() {
       clean.includes('chat/') ||
       clean.includes('add-expense') ||
       clean.includes('friends') ||
-      clean.includes('settings')
+      clean.includes('settings') ||
+      clean.includes('voice') ||
+      clean.includes('copilot') ||
+      clean.includes('widget')
     );
   };
 
@@ -121,27 +124,27 @@ export default function SplashScreen() {
 
   const glowTopBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(99, 102, 241, 0.12)', 'rgba(91, 120, 154, 0.15)'],
+    outputRange: ['rgba(129, 140, 248, 0.15)', 'rgba(99, 102, 241, 0.12)'],
   });
 
   const glowBottomBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(56, 189, 248, 0.08)', 'rgba(120, 155, 128, 0.15)'],
+    outputRange: ['rgba(245, 158, 11, 0.10)', 'rgba(245, 158, 11, 0.08)'],
   });
 
   const badgeBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(99, 102, 241, 0.15)', 'rgba(91, 120, 154, 0.08)'],
+    outputRange: ['rgba(129, 140, 248, 0.15)', 'rgba(99, 102, 241, 0.10)'],
   });
 
   const badgeBorder = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(99, 102, 241, 0.30)', 'rgba(91, 120, 154, 0.20)'],
+    outputRange: ['rgba(129, 140, 248, 0.40)', 'rgba(99, 102, 241, 0.30)'],
   });
 
   const continueBtnBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#7895B7', '#5B789A'],
+    outputRange: ['#818CF8', '#6366F1'],
   });
 
   useEffect(() => {
@@ -370,7 +373,13 @@ export default function SplashScreen() {
         }
 
         const clean = (initialUrl || '').toLowerCase();
-        if (clean.includes('add-expense') || clean.includes('add-trip') || clean.includes('add-contact')) {
+        if (clean.includes('voice') || clean.includes('copilot') || clean.includes('widget')) {
+          router.replace('/(tabs)?openVoice=true' as any);
+          setTimeout(() => {
+            useTripStore.getState().setVoiceModalOpen(true);
+          }, 200);
+          return;
+        } else if (clean.includes('add-expense') || clean.includes('add-trip') || clean.includes('add-contact')) {
           if (clean.includes('new-trip') || clean.includes('add-trip')) {
             router.replace('/add-expense?action=new-trip' as any);
           } else if (clean.includes('new-contact') || clean.includes('add-contact')) {
@@ -762,19 +771,19 @@ export default function SplashScreen() {
                 style={[
                   styles.themeOptionBtn,
                   {
-                    backgroundColor: '#151B25',
-                    borderColor: selectedMode === 'dark' ? '#7895B7' : '#2E3A4B',
+                    backgroundColor: '#151926',
+                    borderColor: selectedMode === 'dark' ? '#818CF8' : '#1E2235',
                   },
                   selectedMode === 'dark' && [
                     styles.themeOptionActive,
-                    { borderColor: '#7895B7', shadowColor: '#7895B7' },
+                    { borderColor: '#818CF8', shadowColor: '#818CF8' },
                   ],
                 ]}
                 onPress={() => handleSelectMode('dark')}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>🌙</Text>
-                <Text style={[styles.themeOptionTitle, { color: '#F0F2E9' }]}>Dark Theme</Text>
+                <Text style={[styles.themeOptionTitle, { color: '#F3F4F6' }]}>Dark Theme</Text>
                 <Text style={[styles.themeOptionBadge, selectedMode === 'dark' ? { color: '#34D399', fontWeight: '700' } : { color: '#94A3B8' }]}>
                   {selectedMode === 'dark' ? '✓ Active' : 'Default'}
                 </Text>
@@ -788,19 +797,19 @@ export default function SplashScreen() {
                   styles.themeOptionBtn,
                   {
                     backgroundColor: '#FFFFFF',
-                    borderColor: selectedMode === 'light' ? '#5B789A' : '#D7DEE8',
+                    borderColor: selectedMode === 'light' ? '#6366F1' : '#E5E7EB',
                   },
                   selectedMode === 'light' && [
                     styles.themeOptionActive,
-                    { borderColor: '#5B789A', shadowColor: '#5B789A' },
+                    { borderColor: '#6366F1', shadowColor: '#6366F1' },
                   ],
                 ]}
                 onPress={() => handleSelectMode('light')}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>☀️</Text>
-                <Text style={[styles.themeOptionTitle, { color: '#0F172A' }]}>Light Theme</Text>
-                <Text style={[styles.themeOptionSub, selectedMode === 'light' ? { color: '#5B789A', fontWeight: '700' } : { color: '#64748B' }]}>
+                <Text style={[styles.themeOptionTitle, { color: '#111827' }]}>Light Theme</Text>
+                <Text style={[styles.themeOptionSub, selectedMode === 'light' ? { color: '#6366F1', fontWeight: '700' } : { color: '#64748B' }]}>
                   {selectedMode === 'light' ? '✓ Active' : 'Classic'}
                 </Text>
               </TouchableOpacity>

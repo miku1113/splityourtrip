@@ -627,7 +627,7 @@ export default function SharedPaymentScreen() {
                       style={[
                         styles.itemRow,
                         idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-                        isSelected && { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' },
+                        isSelected && { backgroundColor: colors.primaryLight },
                       ]}
                       onPress={() => handleSelectFriend(contact)}
                       disabled={isNavigating}
@@ -698,7 +698,7 @@ export default function SharedPaymentScreen() {
                       style={[
                         styles.itemRow,
                         idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-                        isSelected && { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' },
+                        isSelected && { backgroundColor: colors.primaryLight },
                       ]}
                       onPress={() => handleSelectTrip(trip.id)}
                       disabled={isNavigating}

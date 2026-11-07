@@ -332,6 +332,8 @@ export default function ChatView({
   const [payScreenshotBase64, setPayScreenshotBase64] = useState<string | null>(null);
   const [payNote, setPayNote] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [payPaymentMode, setPayPaymentMode] = useState<'upi' | 'cash'>('upi');
+  const [payMemberSearch, setPayMemberSearch] = useState('');
 
   // Request Money / Select Amount to Receive flow
   const [requestMoneyModalVisible, setRequestMoneyModalVisible] = useState(false);
@@ -1413,6 +1415,67 @@ export default function ChatView({
     return displayTitle;
   }, [isGroup, tripMembers, balances, tripId, user?.id, displayTitle]);
 
+  // Selectable members for payment in this trip (excluding current active user)
+  const selectableMembers = useMemo(() => {
+    const curUserId = user?.id || '';
+    return tripMembers.filter(
+      m =>
+        m.id !== myMember?.id &&
+        m.profile_id !== curUserId &&
+        (m as any).user_id !== curUserId &&
+        m.display_name.toLowerCase() !== 'you'
+    );
+  }, [tripMembers, myMember?.id, user?.id]);
+
+  // Pairwise debt map: how much current user owes each member in this trip (in paise)
+  const memberDebtMap = useMemo(() => {
+    const debtMap: Record<string, number> = {};
+    if (!myMember?.id) return debtMap;
+    const netRecord: Record<string, number> = {};
+    balances
+      .filter(b => !b.trip_id || b.trip_id === tripId)
+      .forEach(b => {
+        netRecord[b.member_id] = b.net_balance;
+      });
+    const settlements = calculateSettlement(netRecord);
+    for (const s of settlements) {
+      if (s.from === myMember.id) {
+        debtMap[s.to] = s.amount;
+      }
+    }
+    return debtMap;
+  }, [balances, tripId, myMember?.id]);
+
+  // Filtered members for payment picker in groups
+  const filteredSelectableMembers = useMemo(() => {
+    if (!payMemberSearch.trim()) return selectableMembers;
+    const q = payMemberSearch.trim().toLowerCase();
+    return selectableMembers.filter(m => m.display_name.toLowerCase().includes(q));
+  }, [selectableMembers, payMemberSearch]);
+
+  // Currently selected target receiver member
+  const activePayTargetMember = useMemo(() => {
+    if (!isGroup) return otherMember || selectableMembers[0];
+    return tripMembers.find(m => m.id === payTargetMemberId) || selectableMembers[0];
+  }, [isGroup, otherMember, selectableMembers, tripMembers, payTargetMemberId]);
+
+  // Debt owed to currently selected target receiver (in paise)
+  const activeTargetDebtPaise = useMemo(() => {
+    if (!isGroup) {
+      return friendNetPaise < 0 ? Math.abs(friendNetPaise) : 0;
+    }
+    if (!activePayTargetMember) return 0;
+    return memberDebtMap[activePayTargetMember.id] || 0;
+  }, [isGroup, friendNetPaise, activePayTargetMember, memberDebtMap]);
+
+  // Display name of active receiver
+  const activeReceiverName = useMemo(() => {
+    if (!isGroup) {
+      return otherMember?.display_name || 'Friend';
+    }
+    return activePayTargetMember?.display_name || 'Friend';
+  }, [isGroup, otherMember, activePayTargetMember]);
+
   const activeBannerNetPaise = isGroup ? groupMyNetPaise : friendNetPaise;
   const isChatContentReady = isGroup
     ? isTripDataLoaded && !isChatLoading
@@ -1862,21 +1925,67 @@ export default function ChatView({
     }
   };
 
-  // Open Pay Modal (with optional prefill amount)
-  const handleOpenPayModal = (prefillAmt?: number) => {
+  // Open Pay Modal (with optional prefill amount and preselected target member)
+  const handleOpenPayModal = (prefillAmt?: number, targetMemberId?: string) => {
     setAttachmentModalVisible(false);
-    let defaultAmount = '';
-    if (prefillAmt !== undefined && prefillAmt > 0) {
-      defaultAmount = (prefillAmt / 100).toString();
-    } else if (friendNetPaise < 0) {
-      defaultAmount = (Math.abs(friendNetPaise) / 100).toString();
-    }
-    setPayAmountText(defaultAmount);
-    const defaultTargetId = otherMember?.id || tripMembers.find(m => m.id !== myMember?.id)?.id || '';
-    setPayTargetMemberId(defaultTargetId);
+    setPayMemberSearch('');
+    setPayPaymentMode('upi');
     setPayScreenshotUri(null);
     setPayScreenshotBase64(null);
     setPayNote('');
+
+    const curUserId = user?.id || '';
+    const otherMembers = tripMembers.filter(
+      m =>
+        m.id !== myMember?.id &&
+        m.profile_id !== curUserId &&
+        (m as any).user_id !== curUserId &&
+        m.display_name.toLowerCase() !== 'you'
+    );
+
+    let chosenTargetId = targetMemberId || '';
+    if (!chosenTargetId) {
+      if (!isGroup) {
+        chosenTargetId = otherMember?.id || otherMembers[0]?.id || '';
+      } else {
+        // If in group, prioritize member whom current user owes money
+        const netRecord: Record<string, number> = {};
+        balances
+          .filter(b => !b.trip_id || b.trip_id === tripId)
+          .forEach(b => {
+            netRecord[b.member_id] = b.net_balance;
+          });
+        const settlements = calculateSettlement(netRecord);
+        const myDebt = settlements.find(s => s.from === myMember?.id);
+        if (myDebt && otherMembers.some(m => m.id === myDebt.to)) {
+          chosenTargetId = myDebt.to;
+        } else {
+          chosenTargetId = otherMembers[0]?.id || '';
+        }
+      }
+    }
+    setPayTargetMemberId(chosenTargetId);
+
+    // Prefill amount: either explicit prefillAmt, or debt owed
+    let defaultAmount = '';
+    if (prefillAmt !== undefined && prefillAmt > 0) {
+      defaultAmount = (prefillAmt / 100).toString();
+    } else if (!isGroup && friendNetPaise < 0) {
+      defaultAmount = (Math.abs(friendNetPaise) / 100).toString();
+    } else if (isGroup && chosenTargetId) {
+      const netRecord: Record<string, number> = {};
+      balances
+        .filter(b => !b.trip_id || b.trip_id === tripId)
+        .forEach(b => {
+          netRecord[b.member_id] = b.net_balance;
+        });
+      const settlements = calculateSettlement(netRecord);
+      const specificDebt = settlements.find(s => s.from === myMember?.id && s.to === chosenTargetId);
+      if (specificDebt && specificDebt.amount > 0) {
+        defaultAmount = (specificDebt.amount / 100).toString();
+      }
+    }
+    setPayAmountText(defaultAmount);
     setPayModalVisible(true);
   };
 
@@ -1943,20 +2052,21 @@ export default function ChatView({
   const handleSubmitPayment = async () => {
     const numAmt = parseFloat(payAmountText);
     if (!numAmt || numAmt <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount.');
+      Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
       return;
     }
-    if (!payScreenshotUri) {
-      Alert.alert('Screenshot Required', 'Please attach your payment confirmation screenshot.');
+    if (isGroup && selectableMembers.length > 0 && !payTargetMemberId) {
+      Alert.alert('Select Friend', 'Please select which friend you are paying.');
       return;
     }
 
     setIsSubmittingPayment(true);
     try {
       const amountPaise = Math.round(numAmt * 100);
-      let remoteUrl = payScreenshotUri;
+      let remoteUrl: string | undefined = undefined;
 
-      if (payScreenshotBase64) {
+      // Screenshot is NOT compulsory! Only upload if provided
+      if (payScreenshotBase64 && payScreenshotUri) {
         try {
           const client = supabaseAdmin || supabase;
           const storagePath = `settlements/${tripId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
@@ -1972,25 +2082,36 @@ export default function ChatView({
           }
         } catch (uploadErr) {
           console.warn('Screenshot upload fallback to local URI:', uploadErr);
+          remoteUrl = payScreenshotUri;
         }
+      } else if (payScreenshotUri) {
+        remoteUrl = payScreenshotUri;
       }
 
-      const targetMem = tripMembers.find(m => m.id === payTargetMemberId) || otherMember || tripMembers[0];
+      const targetMem = tripMembers.find(m => m.id === payTargetMemberId) || otherMember || selectableMembers[0] || tripMembers[0];
       const targetName = targetMem?.display_name || 'Member';
+      const claimId = `claim_${Date.now()}`;
 
       const payload = {
         type: 'payment_settlement',
+        claimId,
         amountPaise,
         payerId: currentUserId,
         payerMemberId: myMember?.id,
         payerName: resolvedSenderName,
+        payerPhone: (user as any)?.phone || (profile as any)?.phone_number || null,
         receiverId: targetMem?.profile_id || targetMem?.id,
         receiverMemberId: targetMem?.id,
         receiverName: targetName,
-        mediaUrl: remoteUrl,
-        screenshotUrl: remoteUrl,
+        receiverPhone: targetMem?.phone_number || null,
+        mediaUrl: remoteUrl || undefined,
+        screenshotUrl: remoteUrl || undefined,
+        paymentMode: payPaymentMode,
         note: payNote.trim() || undefined,
         status: 'pending',
+        isTripRelated: isGroup,
+        tripId,
+        tripName: currentTrip?.name || undefined,
       };
 
       await sendMessage(
@@ -1998,27 +2119,36 @@ export default function ChatView({
         currentUserId,
         resolvedSenderName,
         JSON.stringify(payload),
-        {
-          type: 'image',
-          url: remoteUrl,
-          name: 'Payment_Screenshot.jpg',
-        },
+        remoteUrl
+          ? {
+              type: 'image',
+              url: remoteUrl,
+              name: 'Payment_Screenshot.jpg',
+            }
+          : undefined,
         isGroup ? 'group' : 'individual'
       );
 
       // Trigger high-priority notification to receiver
       useNotificationStore.getState().addNotification({
         type: 'payment_claim',
-        title: `💰 Payment Claim: ₹${(amountPaise / 100).toFixed(0)}`,
-        message: `${resolvedSenderName} paid ${formatCurrencyAmount(amountPaise, userCurrency)} to your account. Tap to verify screenshot and accept.`,
+        title: `💸 ${payPaymentMode === 'cash' ? '💵 Cash' : '📱 UPI'} Payment: ${formatCurrencyAmount(amountPaise, userCurrency)}`,
+        message: `${resolvedSenderName} recorded a payment of ${formatCurrencyAmount(amountPaise, userCurrency)} to ${targetName}. Tap to verify and accept.`,
         tripId,
         amountPaise,
         senderId: currentUserId,
         senderName: resolvedSenderName,
-        screenshotUrl: remoteUrl,
+        screenshotUrl: remoteUrl || undefined,
       });
 
       setPayModalVisible(false);
+
+      Alert.alert(
+        'Payment Sent! 🎉',
+        `A pending ${payPaymentMode.toUpperCase()} payment of ${formatCurrencyAmount(amountPaise, userCurrency)} has been sent to ${targetName}.\n\nWhen they accept, it will be automatically deducted from your balances.`,
+        [{ text: 'OK' }]
+      );
+
       setTimeout(() => {
         scrollToBottom(true);
       }, 100);
@@ -2532,18 +2662,10 @@ export default function ChatView({
             <TouchableOpacity
               style={[styles.payNowMiniBtn, { backgroundColor: colors.danger, minWidth: 74, justifyContent: 'center' }]}
               onPress={() => {
-                const payeeName = isGroup ? groupPrimaryCreditorName : displayTitle;
-                const rupees = (Math.abs(activeBannerNetPaise) / 100).toFixed(2);
-                const upiUrl = `upi://pay?pn=${encodeURIComponent(payeeName)}&am=${rupees}&cu=INR`;
-                Linking.openURL(upiUrl).catch(() => {
-                  router.push({
-                    pathname: '/trip/[id]/info',
-                    params: { id: tripId, tab: 'settle' },
-                  });
-                });
+                handleOpenPayModal(Math.abs(activeBannerNetPaise));
               }}
             >
-              <Ionicons name="flash" size={14} color="#FFFFFF" />
+              <Ionicons name="card" size={14} color="#FFFFFF" />
               <Text style={styles.payNowMiniText}>Pay</Text>
             </TouchableOpacity>
           ) : (
@@ -3535,10 +3657,10 @@ export default function ChatView({
                   {isTargetMe ? (
                     <TouchableOpacity
                       style={[styles.payNowActionBtn, { backgroundColor: colors.primary }]}
-                      onPress={() => handleOpenPayModal(amountPaise)}
+                      onPress={() => handleOpenPayModal(amountPaise, pData.requesterMemberId || pData.requesterId)}
                     >
                       <Ionicons name="card" size={17} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.payNowActionBtnText}>Pay & Upload Screenshot</Text>
+                      <Text style={styles.payNowActionBtnText}>Pay / Settle Up</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={[styles.settlePendingNotice, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
@@ -4116,169 +4238,434 @@ export default function ChatView({
       <StandardBottomSheet
         visible={payModalVisible}
         onClose={() => setPayModalVisible(false)}
-        maxHeight="90%"
+        maxHeight="92%"
         scrollable={true}
         showHandle={true}
-        sheetStyle={{ paddingHorizontal: 20, paddingTop: 4 }}
+        sheetStyle={{
+          paddingHorizontal: 20,
+          paddingTop: 4,
+          maxWidth: 640,
+          alignSelf: 'center',
+          width: '100%',
+        }}
       >
-            <View style={styles.payModalHeader}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={[styles.payModalTitle, { color: colors.text }]}>Pay / Settle Up</Text>
-                <Text style={[styles.payModalSubtitle, { color: colors.textSecondary }]}>
-                  Attach payment screenshot for receiver to accept
+        <View style={styles.payModalHeader}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={[styles.payModalTitle, { color: colors.text }]}>Pay / Settle Up</Text>
+            <Text style={[styles.payModalSubtitle, { color: colors.textSecondary }]}>
+              {isGroup
+                ? 'Select friend and payment mode to record settlement'
+                : `Record payment to ${activeReceiverName}`}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setPayModalVisible(false)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={styles.modalCloseCircle}
+          >
+            <Ionicons name="close" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* STEP 1: Pay To / Friend Selection at the beginning */}
+        {!isGroup ? (
+          <View style={styles.payInputGroup}>
+            <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Paying To</Text>
+            <View
+              style={[
+                styles.payingToSingleCard,
+                {
+                  backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={[styles.memberAvatarCircle, { backgroundColor: colors.primaryLight }]}>
+                <Text style={[styles.memberAvatarText, { color: colors.primary }]}>
+                  {(otherMember?.display_name || 'F').charAt(0).toUpperCase()}
                 </Text>
               </View>
-              <TouchableOpacity
-                onPress={() => setPayModalVisible(false)}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                style={styles.modalCloseCircle}
-              >
-                <Ionicons name="close" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.payingToName, { color: colors.text }]} numberOfLines={1}>
+                  {otherMember?.display_name || 'Friend'}
+                </Text>
+                <Text style={[styles.payingToSubtitle, { color: colors.textSecondary }]}>
+                  1-on-1 Direct Split Partner
+                </Text>
+              </View>
+              <View style={[styles.singleDirectBadge, { backgroundColor: colors.primaryLight }]}>
+                <Ionicons name="person" size={12} color={colors.primary} style={{ marginRight: 3 }} />
+                <Text style={[styles.singleDirectBadgeText, { color: colors.primary }]}>Direct</Text>
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.payInputGroup}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text style={[styles.payInputLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
+                Pay To (Select Friend)
+              </Text>
+              <Text style={{ fontSize: scaleFont(12), color: colors.primary, fontWeight: '600' }}>
+                {selectableMembers.length} {selectableMembers.length === 1 ? 'member' : 'members'}
+              </Text>
             </View>
 
-            {/* Amount Input */}
-            <View style={styles.payInputGroup}>
-              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Amount Paid (₹)</Text>
-              <View style={[styles.payAmountInputWrapper, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}>
-                <Text style={[styles.payCurrencySymbol, { color: colors.primary }]}>₹</Text>
+            {/* Member search if more than 4 members */}
+            {selectableMembers.length > 4 && (
+              <View style={[styles.payMemberSearchBox, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.border }]}>
+                <Ionicons name="search" size={16} color={colors.textMuted} />
                 <TextInput
-                  style={[styles.payAmountTextInput, { color: colors.text }]}
-                  placeholder="0.00"
+                  style={[styles.payMemberSearchInput, { color: colors.text }]}
+                  placeholder="Search group friend..."
                   placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                  value={payAmountText}
-                  onChangeText={setPayAmountText}
+                  value={payMemberSearch}
+                  onChangeText={setPayMemberSearch}
                 />
-              </View>
-
-              {/* Quick Suggestion Chips */}
-              <View style={styles.quickChipsRow}>
-                {friendNetPaise < 0 && (
-                  <TouchableOpacity
-                    style={[styles.quickChip, { backgroundColor: colors.primaryLight }]}
-                    onPress={() => setPayAmountText((Math.abs(friendNetPaise) / 100).toString())}
-                  >
-                    <Text style={[styles.quickChipText, { color: colors.primary }]}>
-                      Full Debt: ₹{(Math.abs(friendNetPaise) / 100).toFixed(0)}
-                    </Text>
+                {payMemberSearch ? (
+                  <TouchableOpacity onPress={() => setPayMemberSearch('')}>
+                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
                   </TouchableOpacity>
-                )}
-                {friendNetPaise < 0 && Math.abs(friendNetPaise) > 1000 && (
-                  <TouchableOpacity
-                    style={[styles.quickChip, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}
-                    onPress={() => setPayAmountText((Math.abs(friendNetPaise) / 200).toFixed(0))}
-                  >
-                    <Text style={[styles.quickChipText, { color: colors.text }]}>
-                      Half: ₹{(Math.abs(friendNetPaise) / 200).toFixed(0)}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {/* If Group Trip: Member Picker */}
-            {isGroup && tripMembers.length > 2 && (
-              <View style={styles.payInputGroup}>
-                <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Paid To Member</Text>
-                <View style={styles.memberPickerRow}>
-                  {tripMembers.filter(m => m.id !== myMember?.id).map(m => {
-                    const isSelected = payTargetMemberId === m.id;
-                    return (
-                      <TouchableOpacity
-                        key={m.id}
-                        onPress={() => setPayTargetMemberId(m.id)}
-                        style={[
-                          styles.memberChip,
-                          {
-                            backgroundColor: isSelected ? colors.primary : isDark ? '#1E293B' : '#F1F5F9',
-                            borderColor: isSelected ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.memberChipText, { color: isSelected ? '#FFFFFF' : colors.text }]}>
-                          {m.display_name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                ) : null}
               </View>
             )}
 
-            {/* Screenshot Attachment Area */}
-            <View style={styles.payInputGroup}>
-              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Payment Proof / Screenshot</Text>
-              {payScreenshotUri ? (
-                <View style={styles.screenshotPreviewBox}>
-                  <Image source={{ uri: payScreenshotUri }} style={styles.screenshotThumb} resizeMode="cover" />
-                  <View style={styles.screenshotOverlayActions}>
-                    <TouchableOpacity
-                      style={styles.changeScreenshotBtn}
-                      onPress={handlePickPaymentScreenshot}
-                    >
-                      <Ionicons name="images" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
-                      <Text style={styles.changeScreenshotText}>Change</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.removeScreenshotBtn}
-                      onPress={() => {
-                        setPayScreenshotUri(null);
-                        setPayScreenshotBase64(null);
-                      }}
-                    >
-                      <Ionicons name="trash" size={16} color="#EF4444" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.attachScreenshotButtonsRow}>
+            {/* Selectable Friend Cards */}
+            <View style={styles.membersGrid}>
+              {filteredSelectableMembers.map(m => {
+                const isSelected = payTargetMemberId === m.id;
+                const debtPaise = memberDebtMap[m.id] || 0;
+                return (
                   <TouchableOpacity
-                    style={[styles.attachScreenshotBtn, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}
-                    onPress={handlePickPaymentScreenshot}
+                    key={m.id}
+                    onPress={() => {
+                      setPayTargetMemberId(m.id);
+                      if (debtPaise > 0) {
+                        setPayAmountText((debtPaise / 100).toString());
+                      }
+                    }}
+                    style={[
+                      styles.memberSelectCard,
+                      {
+                        backgroundColor: isSelected
+                          ? isDark
+                            ? 'rgba(99, 102, 241, 0.2)'
+                            : '#EEF2FF'
+                          : isDark
+                          ? '#1E293B'
+                          : '#F8FAFC',
+                        borderColor: isSelected ? colors.primary : colors.border,
+                        borderWidth: isSelected ? 1.8 : 1,
+                      },
+                    ]}
+                    activeOpacity={0.7}
                   >
-                    <Ionicons name="images-outline" size={22} color={colors.primary} />
-                    <Text style={[styles.attachScreenshotText, { color: colors.text }]}>From Gallery</Text>
+                    <View style={styles.memberCardTop}>
+                      <View
+                        style={[
+                          styles.memberAvatarCircle,
+                          { backgroundColor: isSelected ? colors.primary : colors.primaryLight },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.memberAvatarText,
+                            { color: isSelected ? '#FFFFFF' : colors.primary },
+                          ]}
+                        >
+                          {m.display_name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      {isSelected ? (
+                        <View style={[styles.memberCheckmarkCircle, { backgroundColor: colors.primary }]}>
+                          <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.memberSelectName,
+                        { color: colors.text, fontWeight: isSelected ? '700' : '600' },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {m.display_name}
+                    </Text>
+
+                    {debtPaise > 0 ? (
+                      <View style={[styles.debtPill, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEE2E2' }]}>
+                        <Text
+                          style={[styles.debtPillText, { color: colors.danger }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit={true}
+                          minimumFontScale={0.72}
+                        >
+                          Owe ₹{(debtPaise / 100).toFixed(0)}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.memberSelectSub, { color: colors.textMuted }]} numberOfLines={1}>
+                        {m.role === 'admin' ? 'Admin' : 'Member'}
+                      </Text>
+                    )}
                   </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.attachScreenshotBtn, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}
-                    onPress={handleTakePaymentScreenshotPhoto}
-                  >
-                    <Ionicons name="camera-outline" size={22} color={colors.secondary} />
-                    <Text style={[styles.attachScreenshotText, { color: colors.text }]}>Take Photo</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+                );
+              })}
             </View>
+          </View>
+        )}
 
-            {/* Optional Note */}
-            <View style={styles.payInputGroup}>
-              <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Note (Optional)</Text>
-              <TextInput
-                style={[styles.payNoteInput, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border, color: colors.text }]}
-                placeholder="UPI Ref ID, GPay, Bank..."
-                placeholderTextColor={colors.textMuted}
-                value={payNote}
-                onChangeText={setPayNote}
-              />
-            </View>
-
-            {/* Submit Button */}
+        {/* STEP 2: Payment Mode Selection (Cash vs UPI) */}
+        <View style={styles.payInputGroup}>
+          <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Payment Method</Text>
+          <View style={styles.paymentMethodCardsRow}>
+            {/* UPI Card */}
             <TouchableOpacity
-              style={[styles.submitPayBtn, { backgroundColor: colors.success, opacity: isSubmittingPayment ? 0.7 : 1 }]}
-              onPress={handleSubmitPayment}
-              disabled={isSubmittingPayment}
+              style={[
+                styles.paymentMethodCard,
+                {
+                  backgroundColor:
+                    payPaymentMode === 'upi'
+                      ? isDark
+                        ? 'rgba(99, 102, 241, 0.18)'
+                        : '#EEF2FF'
+                      : isDark
+                      ? '#1E293B'
+                      : '#F8FAFC',
+                  borderColor: payPaymentMode === 'upi' ? colors.primary : colors.border,
+                  borderWidth: payPaymentMode === 'upi' ? 1.8 : 1,
+                },
+              ]}
+              onPress={() => setPayPaymentMode('upi')}
+              activeOpacity={0.8}
             >
-              {isSubmittingPayment ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.submitPayBtnText}>Submit Payment Proof</Text>
-                </>
-              )}
+              <View style={styles.methodCardHeader}>
+                <View style={[styles.methodIconBadge, { backgroundColor: colors.primary }]}>
+                  <Ionicons name="card" size={18} color="#FFFFFF" />
+                </View>
+                {payPaymentMode === 'upi' && (
+                  <View style={[styles.methodCheckBadge, { backgroundColor: colors.primary }]}>
+                    <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.methodCardTitle, { color: colors.text }]}>UPI / Online</Text>
+              <Text style={[styles.methodCardSubtitle, { color: colors.textSecondary }]}>
+                GPay, PhonePe, Paytm
+              </Text>
             </TouchableOpacity>
+
+            {/* Cash Card */}
+            <TouchableOpacity
+              style={[
+                styles.paymentMethodCard,
+                {
+                  backgroundColor:
+                    payPaymentMode === 'cash'
+                      ? isDark
+                        ? 'rgba(16, 185, 129, 0.18)'
+                        : '#ECFDF5'
+                      : isDark
+                      ? '#1E293B'
+                      : '#F8FAFC',
+                  borderColor: payPaymentMode === 'cash' ? colors.success : colors.border,
+                  borderWidth: payPaymentMode === 'cash' ? 1.8 : 1,
+                },
+              ]}
+              onPress={() => setPayPaymentMode('cash')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.methodCardHeader}>
+                <View style={[styles.methodIconBadge, { backgroundColor: colors.success }]}>
+                  <Ionicons name="cash" size={18} color="#FFFFFF" />
+                </View>
+                {payPaymentMode === 'cash' && (
+                  <View style={[styles.methodCheckBadge, { backgroundColor: colors.success }]}>
+                    <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.methodCardTitle, { color: colors.text }]}>Cash</Text>
+              <Text style={[styles.methodCardSubtitle, { color: colors.textSecondary }]}>
+                Hand-to-hand settlement
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* STEP 3: Amount Input */}
+        <View style={styles.payInputGroup}>
+          <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Amount Paid (₹)</Text>
+          <View
+            style={[
+              styles.payAmountInputWrapper,
+              { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.payCurrencySymbol, { color: colors.primary }]}>₹</Text>
+            <TextInput
+              style={[styles.payAmountTextInput, { color: colors.text }]}
+              placeholder="0.00"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+              value={payAmountText}
+              onChangeText={setPayAmountText}
+            />
+            {payAmountText ? (
+              <TouchableOpacity onPress={() => setPayAmountText('')} style={{ padding: 4 }}>
+                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* Quick Suggestion Chips */}
+          <View style={[styles.quickChipsRow, { flexWrap: 'wrap', gap: 6 }]}>
+            {activeTargetDebtPaise > 0 && (
+              <TouchableOpacity
+                style={[styles.quickChip, { backgroundColor: colors.primaryLight }]}
+                onPress={() => setPayAmountText((activeTargetDebtPaise / 100).toString())}
+              >
+                <Text style={[styles.quickChipText, { color: colors.primary }]}>
+                  Full Debt: ₹{(activeTargetDebtPaise / 100).toFixed(0)}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {activeTargetDebtPaise > 1000 && (
+              <TouchableOpacity
+                style={[styles.quickChip, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}
+                onPress={() => setPayAmountText((activeTargetDebtPaise / 200).toFixed(0))}
+              >
+                <Text style={[styles.quickChipText, { color: colors.text }]}>
+                  Half: ₹{(activeTargetDebtPaise / 200).toFixed(0)}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {['100', '500', '1000', '2000'].map(val => (
+              <TouchableOpacity
+                key={val}
+                style={[styles.quickChip, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}
+                onPress={() => setPayAmountText(val)}
+              >
+                <Text style={[styles.quickChipText, { color: colors.text }]}>₹{val}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* STEP 4: Payment Proof / Screenshot (Optional) */}
+        <View style={styles.payInputGroup}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <Text style={[styles.payInputLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
+              Payment Proof / Screenshot
+            </Text>
+            <View style={[styles.optionalBadge, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
+              <Text style={[styles.optionalBadgeText, { color: colors.textMuted }]}>Optional</Text>
+            </View>
+          </View>
+
+          {payScreenshotUri ? (
+            <View style={styles.screenshotPreviewBox}>
+              <Image source={{ uri: payScreenshotUri }} style={styles.screenshotThumb} resizeMode="cover" />
+              <View style={styles.screenshotOverlayActions}>
+                <TouchableOpacity
+                  style={styles.changeScreenshotBtn}
+                  onPress={handlePickPaymentScreenshot}
+                >
+                  <Ionicons name="images" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
+                  <Text style={styles.changeScreenshotText}>Change</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.removeScreenshotBtn}
+                  onPress={() => {
+                    setPayScreenshotUri(null);
+                    setPayScreenshotBase64(null);
+                  }}
+                >
+                  <Ionicons name="trash" size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.attachScreenshotButtonsRow}>
+              <TouchableOpacity
+                style={[styles.attachScreenshotBtn, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}
+                onPress={handlePickPaymentScreenshot}
+              >
+                <Ionicons name="images-outline" size={20} color={colors.primary} />
+                <Text style={[styles.attachScreenshotText, { color: colors.text }]}>From Gallery</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.attachScreenshotBtn, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}
+                onPress={handleTakePaymentScreenshotPhoto}
+              >
+                <Ionicons name="camera-outline" size={20} color={colors.secondary} />
+                <Text style={[styles.attachScreenshotText, { color: colors.text }]}>Take Photo</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* STEP 5: Note (Optional) */}
+        <View style={styles.payInputGroup}>
+          <Text style={[styles.payInputLabel, { color: colors.textSecondary }]}>Note (Optional)</Text>
+          <TextInput
+            style={[
+              styles.payNoteInput,
+              {
+                backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            placeholder={
+              payPaymentMode === 'cash'
+                ? 'e.g. Handed cash in person'
+                : 'e.g. UPI Ref ID, GPay note'
+            }
+            placeholderTextColor={colors.textMuted}
+            value={payNote}
+            onChangeText={setPayNote}
+          />
+        </View>
+
+        {/* STEP 6: Notice & Submit */}
+        <View
+          style={[
+            styles.payNoticeBanner,
+            {
+              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.1)' : '#EEF2FF',
+              borderColor: colors.borderLight,
+            },
+          ]}
+        >
+          <Ionicons name="information-circle-outline" size={18} color={colors.primary} style={{ marginRight: 8, marginTop: 1 }} />
+          <Text style={[styles.payNoticeText, { color: colors.textSecondary }]}>
+            {activeReceiverName} will receive a notification to verify and accept this payment. The amount will be deducted from balances once accepted.
+          </Text>
+        </View>
+
+        {/* Submit Button */}
+        <TouchableOpacity
+          style={[
+            styles.submitPayBtn,
+            {
+              backgroundColor: payPaymentMode === 'cash' ? colors.success : colors.primary,
+              opacity: isSubmittingPayment ? 0.7 : 1,
+            },
+          ]}
+          onPress={handleSubmitPayment}
+          disabled={isSubmittingPayment}
+        >
+          {isSubmittingPayment ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <>
+              <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.submitPayBtnText}>Send Payment for Acceptance</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </StandardBottomSheet>
 
       {/* 2. Request Money / Select Amount to Receive Modal */}
@@ -6107,6 +6494,166 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: scaleFont(15),
     fontWeight: '700',
+  },
+  // Paying To Single (1-on-1) Card
+  payingToSingleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  payingToName: {
+    fontSize: scaleFont(15),
+    fontWeight: '700',
+  },
+  payingToSubtitle: {
+    fontSize: scaleFont(12),
+    marginTop: 2,
+  },
+  singleDirectBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  singleDirectBadgeText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  // Member Search Box
+  payMemberSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    height: 38,
+    marginBottom: 10,
+    gap: 6,
+  },
+  payMemberSearchInput: {
+    flex: 1,
+    fontSize: scaleFont(13),
+    paddingVertical: 0,
+  },
+  // Members Grid / Cards
+  membersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  memberSelectCard: {
+    minWidth: '47%',
+    flex: 1,
+    padding: 10,
+    borderRadius: 14,
+  },
+  memberCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  memberAvatarCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarText: {
+    fontSize: scaleFont(13),
+    fontWeight: '700',
+  },
+  memberCheckmarkCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberSelectName: {
+    fontSize: scaleFont(13),
+    marginBottom: 4,
+  },
+  memberSelectSub: {
+    fontSize: scaleFont(11),
+  },
+  debtPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginTop: 2,
+  },
+  debtPillText: {
+    fontSize: scaleFont(10.5),
+    fontWeight: '700',
+  },
+  // Payment Method Selection
+  paymentMethodCardsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  paymentMethodCard: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 14,
+  },
+  methodCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  methodIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  methodCheckBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  methodCardTitle: {
+    fontSize: scaleFont(14),
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  methodCardSubtitle: {
+    fontSize: scaleFont(11),
+  },
+  // Optional Badge
+  optionalBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  optionalBadgeText: {
+    fontSize: scaleFont(10.5),
+    fontWeight: '600',
+  },
+  // Pay Notice Banner
+  payNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  payNoticeText: {
+    flex: 1,
+    fontSize: scaleFont(11.5),
+    lineHeight: scaleFont(16),
   },
   recordingComposerRow: {
     flex: 1,

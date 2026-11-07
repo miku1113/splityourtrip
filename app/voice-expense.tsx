@@ -7,10 +7,11 @@ export default function VoiceExpenseRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    // Open the Voice Assistant Drawer on the home screen
-    useTripStore.getState().setVoiceModalOpen(true);
-    // Replace route with the main tabs screen
-    router.replace('/(tabs)');
+    // Open the Voice Assistant Drawer on the home screen immediately
+    router.replace('/(tabs)?openVoice=true' as any);
+    setTimeout(() => {
+      useTripStore.getState().setVoiceModalOpen(true);
+    }, 120);
   }, [router]);
 
   return (
