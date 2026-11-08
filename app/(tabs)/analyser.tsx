@@ -292,7 +292,7 @@ export default function AnalyserScreen() {
       if (!t || !t.id || seenIds.has(t.id)) continue;
       seenIds.add(t.id);
 
-      const cleanName = t.name.trim().toLowerCase();
+      const cleanName = (t.name || 'Trip').trim().toLowerCase();
       const existing = byNameMap.get(cleanName);
       if (!existing) {
         byNameMap.set(cleanName, t);
@@ -363,14 +363,14 @@ export default function AnalyserScreen() {
       const data = allTripsData[t.id];
       if (!data) continue;
 
-      const myMember = findMyMember(data.members, user?.id, currentUserPhone) || data.members[0];
+      const myMember = findMyMember(data.members || [], user?.id, currentUserPhone) || (data.members && data.members[0]);
 
-      for (const exp of data.expenses) {
+      for (const exp of data.expenses || []) {
         const rawDate = exp.date || exp.expense_date || exp.created_at || new Date().toISOString();
         const dObj = new Date(rawDate);
         const validDateObj = isNaN(dObj.getTime()) ? new Date() : dObj;
 
-        const pMember = data.members.find(
+        const pMember = (data.members || []).find(
           m => m.id === exp.paid_by || (m.profile_id && m.profile_id === exp.paid_by)
         );
         const payerName = exp.payerName || pMember?.display_name || 'Member';
@@ -460,9 +460,9 @@ export default function AnalyserScreen() {
       const data = allTripsData[t.id];
       if (!data) continue;
 
-      const myMember = findMyMember(data.members, user?.id, currentUserPhone);
+      const myMember = findMyMember(data.members || [], user?.id, currentUserPhone);
 
-      for (const m of data.members) {
+      for (const m of data.members || []) {
         const isCurrent = Boolean(
           (myMember && m.id === myMember.id) ||
             (currentUserId && (m.profile_id === currentUserId || m.user_id === currentUserId)) ||
@@ -477,17 +477,17 @@ export default function AnalyserScreen() {
           ? m.profile_id
           : m.phone_number
           ? normalizePhone(m.phone_number)
-          : m.display_name.trim().toLowerCase();
+          : (m.display_name || 'Member').trim().toLowerCase();
 
         let existing = peopleMap.get(key);
         if (!existing) {
           existing = {
             id: key,
-            name: isCurrent ? 'You' : m.display_name || 'Member',
+            name: isCurrent ? 'You' : (m.display_name || 'Member').trim(),
             isCurrentUser: isCurrent,
             phone: m.phone_number || null,
             tripIds: [t.id],
-            tripNames: [t.name],
+            tripNames: [t.name || 'Trip'],
             expenseCount: 0,
             avatarUrl: null,
             isFriend: false,
@@ -496,7 +496,7 @@ export default function AnalyserScreen() {
         } else {
           if (!existing.tripIds.includes(t.id)) {
             existing.tripIds.push(t.id);
-            existing.tripNames.push(t.name);
+            existing.tripNames.push(t.name || 'Trip');
           }
         }
       }
@@ -517,13 +517,13 @@ export default function AnalyserScreen() {
           ? c.profileId
           : cleanPhone
           ? cleanPhone
-          : c.name.trim().toLowerCase();
+          : (c.name || 'Friend').trim().toLowerCase();
 
         let existing = peopleMap.get(key);
         if (!existing) {
-          const lowerName = c.name.trim().toLowerCase();
+          const lowerName = (c.name || 'Friend').trim().toLowerCase();
           for (const [_, val] of peopleMap.entries()) {
-            if (val.name.trim().toLowerCase() === lowerName) {
+            if ((val.name || '').trim().toLowerCase() === lowerName) {
               existing = val;
               break;
             }
@@ -537,7 +537,7 @@ export default function AnalyserScreen() {
         } else {
           peopleMap.set(key, {
             id: key,
-            name: c.name.trim(),
+            name: (c.name || 'Friend').trim(),
             isCurrentUser: false,
             phone: c.phoneNumber || null,
             tripIds: c.defaultTripId ? [c.defaultTripId] : [],
@@ -553,10 +553,10 @@ export default function AnalyserScreen() {
     // Add any explicit payers from raw expenses who are not yet in the map
     for (const exp of allRawExpenseItems) {
       if (exp.payerName && exp.payerName !== 'Member' && exp.payerName !== 'You') {
-        const lowerName = exp.payerName.trim().toLowerCase();
+        const lowerName = (exp.payerName || '').trim().toLowerCase();
         let found = false;
         for (const [_, val] of peopleMap.entries()) {
-          if (val.name.trim().toLowerCase() === lowerName) {
+          if ((val.name || '').trim().toLowerCase() === lowerName) {
             found = true;
             break;
           }
@@ -564,11 +564,11 @@ export default function AnalyserScreen() {
         if (!found) {
           peopleMap.set(lowerName, {
             id: exp.paid_by || lowerName,
-            name: exp.payerName.trim(),
+            name: (exp.payerName || 'Member').trim(),
             isCurrentUser: false,
             phone: null,
             tripIds: [exp.trip_id],
-            tripNames: [exp.trip_name],
+            tripNames: [exp.trip_name || 'Trip'],
             expenseCount: 0,
             avatarUrl: null,
             isFriend: false,
@@ -580,20 +580,20 @@ export default function AnalyserScreen() {
     // Tally matching expenses for each person
     for (const exp of allRawExpenseItems) {
       for (const person of peopleMap.values()) {
-        const pLower = person.name.toLowerCase().trim();
+        const pLower = (person.name || '').toLowerCase().trim();
         const matchesKey =
           exp.involvedMemberKeys &&
           (exp.involvedMemberKeys.includes(person.id) ||
             (person.phone && exp.involvedMemberKeys.includes(normalizePhone(person.phone))));
         const matchesName =
-          (exp.payerName && exp.payerName.toLowerCase().trim() === pLower) ||
+          (exp.payerName && (exp.payerName || '').toLowerCase().trim() === pLower) ||
           (exp.involvedMemberNames &&
             exp.involvedMemberNames.some(
               n => n === pLower || n.includes(pLower) || pLower.includes(n)
             ));
         const isPayer =
           exp.paid_by === person.id ||
-          (exp.payerName && exp.payerName.toLowerCase().trim() === pLower);
+          (exp.payerName && (exp.payerName || '').toLowerCase().trim() === pLower);
 
         if (matchesKey || matchesName || isPayer) {
           person.expenseCount += 1;
@@ -608,7 +608,7 @@ export default function AnalyserScreen() {
       if (b.expenseCount !== a.expenseCount) return b.expenseCount - a.expenseCount;
       if (a.isFriend && !b.isFriend) return -1;
       if (!a.isFriend && b.isFriend) return 1;
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
 
     return list;
@@ -664,10 +664,10 @@ export default function AnalyserScreen() {
     if (appliedExpenseSearch.trim()) {
       const q = appliedExpenseSearch.toLowerCase().trim();
       result = result.filter(exp => {
-        const descMatch = exp.description.toLowerCase().includes(q);
-        const tripMatch = exp.trip_name.toLowerCase().includes(q);
-        const payerMatch = exp.payerName.toLowerCase().includes(q);
-        const catMatch = exp.category.toLowerCase().includes(q);
+        const descMatch = (exp.description || '').toLowerCase().includes(q);
+        const tripMatch = (exp.trip_name || '').toLowerCase().includes(q);
+        const payerMatch = (exp.payerName || '').toLowerCase().includes(q);
+        const catMatch = (exp.category || '').toLowerCase().includes(q);
         const memberMatch =
           exp.involvedMemberNames && exp.involvedMemberNames.some(n => n.includes(q));
         const amtStr = (exp.amount / 100).toString();
@@ -679,7 +679,7 @@ export default function AnalyserScreen() {
     // 3. Category filter
     if (selectedCategoryFilter !== 'all') {
       result = result.filter(
-        exp => exp.category.toLowerCase() === selectedCategoryFilter.toLowerCase()
+        exp => (exp.category || '').toLowerCase() === selectedCategoryFilter.toLowerCase()
       );
     }
 
@@ -732,7 +732,7 @@ export default function AnalyserScreen() {
         case 'amount_asc':
           return a.amount - b.amount;
         case 'name_asc':
-          return a.description.localeCompare(b.description);
+          return (a.description || '').localeCompare(b.description || '');
         default:
           return b.dateObj.getTime() - a.dateObj.getTime();
       }

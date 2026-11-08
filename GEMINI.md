@@ -35,3 +35,7 @@
 - **Mandatory Response Metrics**: At the end of every response or completed task, always provide a concise summary footer detailing:
   - **Total Time Taken**: Total duration / elapsed time to execute and respond to the request (e.g. `Time Elapsed: Xm Ys`).
   - **Token Usage**: Tokens consumed for the turn/answer including input, output, and total token count (e.g. `Tokens Used: ~X (Input: Y, Output: Z)`).
+
+## 7. Stop Confirmation Rule
+- **Mandatory Confirmation on Stop**: Whenever the user asks to stop a conversation, task, or process, always ask for confirmation first: *"Are you sure?"* before stopping or terminating.
+
