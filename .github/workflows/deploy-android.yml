@@ -58,10 +58,8 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: 4. Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.7'
+      - name: 4. Make Gradle Wrapper Executable
+        run: chmod +x android/gradlew
 
       - name: 5. Install Node dependencies
         run: npm ci
