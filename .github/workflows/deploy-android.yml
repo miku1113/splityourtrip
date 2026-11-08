@@ -72,8 +72,21 @@ jobs:
 
       - name: 5b. Patch expo-modules-core for SDK 36 Compatibility
         run: |
-          sed -i.bak 's/requestedPermissions\.contains/requestedPermissions\?\.contains/g' node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt
-          rm -f node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt.bak
+          node -e '
+            const fs = require("fs");
+            const file = "node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt";
+            let content = fs.readFileSync(file, "utf8");
+            content = content.replace(
+              /override fun isPermissionPresentInManifest\(permission: String\): Boolean \{[\s\S]*?catch \(e: PackageManager\.NameNotFoundException\)/,
+              `override fun isPermissionPresentInManifest(permission: String): Boolean {
+    try {
+      val packageInfo = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+      return packageInfo?.requestedPermissions?.contains(permission) == true
+    } catch (e: PackageManager.NameNotFoundException)`
+            );
+            fs.writeFileSync(file, content, "utf8");
+            console.log("Successfully patched PermissionsService.kt for SDK 36");
+          '
 
       - name: 6. Generate .env Configuration
         run: |
