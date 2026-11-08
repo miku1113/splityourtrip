@@ -58,8 +58,13 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: 4. Make Gradle Wrapper Executable
-        run: chmod +x android/gradlew
+      - name: 4. Install Gradle 8.7 with Retries
+        run: |
+          sudo mkdir -p /opt/gradle
+          curl -fSL --retry 5 --retry-delay 3 -A "Mozilla/5.0 (X11; Linux x86_64)" -o /tmp/gradle-8.7-bin.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          sudo unzip -q -o /tmp/gradle-8.7-bin.zip -d /opt/gradle
+          echo "/opt/gradle/gradle-8.7/bin" >> $GITHUB_PATH
+          chmod +x android/gradlew
 
       - name: 5. Install Node dependencies
         run: npm ci
@@ -87,8 +92,7 @@ jobs:
       - name: 8. Build Android Production App Bundle (AAB) & APK
         run: |
           cd android
-          chmod +x gradlew
-          ./gradlew bundleRelease assembleRelease --no-daemon -Dorg.gradle.internal.http.socketTimeout=60000 -Dorg.gradle.internal.http.connectionTimeout=60000
+          gradle bundleRelease assembleRelease --no-daemon -Dorg.gradle.internal.http.socketTimeout=60000 -Dorg.gradle.internal.http.connectionTimeout=60000
 
       - name: 9. Upload Artifacts (AAB & APK)
         uses: actions/upload-artifact@v4
