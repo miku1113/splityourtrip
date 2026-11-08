@@ -37,12 +37,11 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
-/android
-
 # binary artifacts
 *.apk
 *.aab
 *.keystore
+!android/app/release.keystore
+!android/app/debug.keystore
 mapping.txt
 *.command

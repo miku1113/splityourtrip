@@ -84,24 +84,28 @@ jobs:
           sed -i.bak "s/versionName \".*\"/versionName \"$APP_VERSION\"/g" android/app/build.gradle
           rm -f android/app/build.gradle.bak
 
-      - name: 8. Build Android App Bundle (AAB)
+      - name: 8. Build Android Production App Bundle (AAB) & APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease assembleRelease --no-daemon
 
-      - name: 9. Upload AAB to GitHub Artifacts (Direct Download)
+      - name: 9. Upload Artifacts (AAB & APK)
         uses: actions/upload-artifact@v4
         with:
-          name: SplitYourTrip-Android-AAB
-          path: android/app/build/outputs/bundle/release/*.aab
+          name: SplitYourTrip-Android-Builds
+          path: |
+            android/app/build/outputs/bundle/release/*.aab
+            android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: 10. Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true' || github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/bundle/release/*.aab
+          files: |
+            android/app/build/outputs/bundle/release/*.aab
+            android/app/build/outputs/apk/release/*.apk
           name: SplitYourTrip Android ${{ github.ref_name || format('v1.0.57 (Build {0})', github.event.inputs.build_number || github.run_number) }}
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.57-android-{0}', github.event.inputs.build_number || github.run_number) }}
           draft: false
