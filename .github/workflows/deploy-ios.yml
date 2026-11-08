@@ -177,9 +177,7 @@ jobs:
             -scheme SplitYourTrip \
             -configuration Release \
             -archivePath $RUNNER_TEMP/SplitYourTrip.xcarchive \
-            -destination "generic/platform=iOS" \
-            DEVELOPMENT_TEAM="GBSNS2SUWV" \
-            CODE_SIGN_IDENTITY="Apple Distribution"
+            -destination "generic/platform=iOS"
 
       - name: 12. Export IPA
         run: |
