@@ -58,10 +58,11 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: 4. Install Gradle 8.7 with Retries
+      - name: 4. Install Gradle 8.7 with High-Speed Mirror Fallback
         run: |
           sudo mkdir -p /opt/gradle
-          curl -fSL --retry 5 --retry-delay 3 -A "Mozilla/5.0 (X11; Linux x86_64)" -o /tmp/gradle-8.7-bin.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          curl -fSL --retry 3 --retry-delay 2 -A "Mozilla/5.0" -o /tmp/gradle-8.7-bin.zip https://mirrors.cloud.tencent.com/gradle/gradle-8.7-bin.zip || \
+          curl -fSL --retry 3 --retry-delay 2 -A "Mozilla/5.0" -o /tmp/gradle-8.7-bin.zip https://repo.huaweicloud.com/gradle/gradle-8.7-bin.zip
           sudo unzip -q -o /tmp/gradle-8.7-bin.zip -d /opt/gradle
           echo "/opt/gradle/gradle-8.7/bin" >> $GITHUB_PATH
           chmod +x android/gradlew
