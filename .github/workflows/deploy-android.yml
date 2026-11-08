@@ -1,0 +1,123 @@
+name: Build & Deploy Android (AAB Distribution & Play Console)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Custom Android Version Code (leave blank to auto-increment from GitHub run number)'
+        required: false
+        default: ''
+      track:
+        description: 'Play Console Track (internal, alpha, beta, production)'
+        required: false
+        default: 'internal'
+      create_release:
+        description: 'Create a downloadable GitHub Release'
+        required: false
+        type: boolean
+        default: true
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'assets/**'
+      - 'android/**'
+      - 'package.json'
+      - 'app.json'
+      - '.github/workflows/deploy-android.yml'
+
+concurrency:
+  group: android-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    name: Build & Distribute Android AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: 4. Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: 5. Install Node dependencies
+        run: npm ci
+
+      - name: 6. Generate .env Configuration
+        run: |
+          echo "EXPO_PUBLIC_SUPABASE_URL=https://hpjizujbzvwkxvfsoqqd.supabase.co" > .env
+          echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}" >> .env
+          echo "EXPO_PUBLIC_GROQ_API_KEY=${{ secrets.EXPO_PUBLIC_GROQ_API_KEY }}" >> .env
+
+      - name: 7. Configure Android Version Code & Version Name
+        run: |
+          BUILD_NUM="${{ github.event.inputs.build_number }}"
+          if [ -z "$BUILD_NUM" ]; then
+            BUILD_NUM="${{ github.run_number }}"
+          fi
+          APP_VERSION=$(node -p "require('./app.json').expo.version || '1.0.57'")
+          echo "Setting Android versionCode to: $BUILD_NUM and versionName to: $APP_VERSION"
+
+          # Update android/app/build.gradle with dynamic version code & name
+          sed -i.bak "s/versionCode [0-9]*/versionCode $BUILD_NUM/g" android/app/build.gradle
+          sed -i.bak "s/versionName \".*\"/versionName \"$APP_VERSION\"/g" android/app/build.gradle
+          rm -f android/app/build.gradle.bak
+
+      - name: 8. Build Android App Bundle (AAB)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: 9. Upload AAB to GitHub Artifacts (Direct Download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SplitYourTrip-Android-AAB
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - name: 10. Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true' || github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/bundle/release/*.aab
+          name: SplitYourTrip Android ${{ github.ref_name || format('v1.0.57 (Build {0})', github.event.inputs.build_number || github.run_number) }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.57-android-{0}', github.event.inputs.build_number || github.run_number) }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 11. Deploy AAB to Google Play Console
+        if: env.PLAY_STORE_KEY != ''
+        env:
+          PLAY_STORE_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON_KEY }}
+          packageName: com.splityourtrip
+          releaseFiles: android/app/build/outputs/bundle/release/*.aab
+          track: ${{ github.event.inputs.track || 'internal' }}
+          status: completed
