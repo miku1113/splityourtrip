@@ -60,6 +60,8 @@ jobs:
 
       - name: 4. Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
 
       - name: 5. Install Node dependencies
         run: npm ci
@@ -88,7 +90,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew bundleRelease assembleRelease --no-daemon
+          ./gradlew bundleRelease assembleRelease --no-daemon -Dorg.gradle.internal.http.socketTimeout=60000 -Dorg.gradle.internal.http.connectionTimeout=60000
 
       - name: 9. Upload Artifacts (AAB & APK)
         uses: actions/upload-artifact@v4
