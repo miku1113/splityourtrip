@@ -440,7 +440,7 @@ export default function MyTripsScreen() {
           }}
         >
           <LinearGradient
-            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#6366F1', '#4F46E5']}
+            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#4A85B6', '#386B94']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.createBtnGradient}
@@ -1376,7 +1376,7 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(20),
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,

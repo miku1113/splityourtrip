@@ -2,7 +2,7 @@
   "expo": {
     "name": "Split Your Trip",
     "slug": "splitYourTrip",
-    "version": "1.0.58",
+    "version": "1.0.59",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "splityourtrip",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.splityourtrip.app",
-      "buildNumber": "58",
+      "buildNumber": "59",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.splityourtrip",
-      "versionCode": 58,
+      "versionCode": 59,
       "adaptiveIcon": {
         "backgroundColor": "#0b1122",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

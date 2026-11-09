@@ -1,51 +1,51 @@
 // ─────────────────────────────────────────────────────
-// SplitYourTrip — Vibrant Indigo + Warm Amber Palette
+// SplitYourTrip — Powdered Blue + Soft Lavender White + Warm Sunset Peach
 // ─────────────────────────────────────────────────────
 
 export const lightColors = {
-  primary: '#6366F1',           // Indigo 500 — signature brand
-  primaryLight: 'rgba(99, 102, 241, 0.10)',
-  primaryDark: '#4F46E5',       // Indigo 600 — pressed / emphasis
-  secondary: '#F59E0B',         // Amber 500 — warm accent
+  primary: '#4A85B6',           // Powdered Blue — soothing, clean signature brand
+  primaryLight: 'rgba(74, 133, 182, 0.12)',
+  primaryDark: '#386B94',       // Powdered Blue Deep — pressed / emphasis
+  secondary: '#F27A59',         // Warm Sunset Peach — radiant energetic accent
   success: '#10B981',           // Emerald 500 — crisp, confident green
   successBg: 'rgba(16, 185, 129, 0.10)',
   danger: '#EF4444',            // Red 500 — clear, unambiguous
   dangerBg: 'rgba(239, 68, 68, 0.08)',
-  warning: '#F59E0B',           // Amber 500
-  warningBg: 'rgba(245, 158, 11, 0.10)',
-  background: '#F5F6FA',        // Cool off-white with faint indigo tint
+  warning: '#F27A59',           // Warm Sunset Peach
+  warningBg: 'rgba(242, 122, 89, 0.12)',
+  background: '#F7F5FA',        // Soft Lavender White
   card: '#FFFFFF',
-  cardSecondary: '#EEEEF6',     // Subtle indigo-tinted secondary surface
-  text: '#111827',              // Gray 900 — near-black for contrast
-  textSecondary: '#6B7280',     // Gray 500
-  textMuted: '#9CA3AF',         // Gray 400
-  border: '#E5E7EB',            // Gray 200
-  borderLight: '#F3F4F6',       // Gray 100
-  surfaceDark: '#111827',
-  inputBackground: '#F9FAFB',   // Gray 50 — barely-there tint
+  cardSecondary: '#EFEBF5',     // Soft lavender-tinted secondary surface
+  text: '#1A1A24',              // Deep obsidian — high contrast
+  textSecondary: '#6B6D82',     // Slate lavender secondary
+  textMuted: '#9E9EB2',         // Muted lavender gray
+  border: '#E3DFEC',            // Delicate lavender-tinted border
+  borderLight: '#EFEBFA',
+  surfaceDark: '#141522',
+  inputBackground: '#FAF8FD',   // Barely-there lavender white input field
 };
 
 export const darkColors = {
-  primary: '#818CF8',           // Indigo 400 — brighter on dark
-  primaryLight: 'rgba(129, 140, 248, 0.14)',
-  primaryDark: '#6366F1',       // Indigo 500
-  secondary: '#FBBF24',         // Amber 400 — warm pop on dark
+  primary: '#7AAFD6',           // Powdered Blue — bright, luminous on dark surfaces
+  primaryLight: 'rgba(122, 175, 214, 0.16)',
+  primaryDark: '#5890BA',       // Powdered Blue Medium
+  secondary: '#FFA38A',         // Warm Sunset Peach — vibrant glow on dark
   success: '#34D399',           // Emerald 400
   successBg: 'rgba(52, 211, 153, 0.14)',
   danger: '#F87171',            // Red 400
   dangerBg: 'rgba(248, 113, 113, 0.14)',
-  warning: '#FBBF24',           // Amber 400
-  warningBg: 'rgba(251, 191, 36, 0.14)',
-  background: '#0B0F1A',       // Deep midnight — richer than generic #151B25
-  card: '#151926',              // Indigo-tinted card — NOT gray
-  cardSecondary: '#111528',     // Even deeper inset surface
-  text: '#F3F4F6',              // Gray 100 — clean white
-  textSecondary: '#9CA3AF',     // Gray 400
-  textMuted: '#6B7280',         // Gray 500
-  border: '#1E2235',            // Indigo-tinted border — not slate
-  borderLight: '#181C2E',
-  surfaceDark: '#070A14',
-  inputBackground: '#121629',   // Deep indigo input field
+  warning: '#FFA38A',           // Warm Sunset Peach
+  warningBg: 'rgba(255, 163, 138, 0.15)',
+  background: '#0E0F1A',        // Deep midnight lavender
+  card: '#161726',              // Lavender-tinted dark card surface
+  cardSecondary: '#1D1E30',     // Inset surface
+  text: '#F3F4F8',              // Clean off-white
+  textSecondary: '#9DA0B5',     // Cool muted slate
+  textMuted: '#686B80',
+  border: '#26283E',            // Midnight lavender border
+  borderLight: '#1D1F32',
+  surfaceDark: '#090A12',
+  inputBackground: '#171829',   // Deep lavender input field
 };
 
 export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device, useResponsive } from './responsive';

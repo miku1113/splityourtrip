@@ -783,7 +783,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   themeCardActive: {
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,

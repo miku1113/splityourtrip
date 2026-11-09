@@ -200,7 +200,7 @@ export default function TabLayout() {
                   activeOpacity={0.88}
                 >
                   <LinearGradient
-                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#6366F1', '#4F46E5']}
+                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#4A85B6', '#386B94']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={[

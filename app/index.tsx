@@ -134,17 +134,17 @@ export default function SplashScreen() {
 
   const badgeBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(129, 140, 248, 0.15)', 'rgba(99, 102, 241, 0.10)'],
+    outputRange: ['rgba(122, 175, 214, 0.18)', 'rgba(74, 133, 182, 0.12)'],
   });
 
   const badgeBorder = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(129, 140, 248, 0.40)', 'rgba(99, 102, 241, 0.30)'],
+    outputRange: ['rgba(122, 175, 214, 0.40)', 'rgba(74, 133, 182, 0.30)'],
   });
 
   const continueBtnBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#818CF8', '#6366F1'],
+    outputRange: ['#7AAFD6', '#4A85B6'],
   });
 
   useEffect(() => {
@@ -797,19 +797,19 @@ export default function SplashScreen() {
                   styles.themeOptionBtn,
                   {
                     backgroundColor: '#FFFFFF',
-                    borderColor: selectedMode === 'light' ? '#6366F1' : '#E5E7EB',
+                    borderColor: selectedMode === 'light' ? '#4A85B6' : '#E3DFEC',
                   },
                   selectedMode === 'light' && [
                     styles.themeOptionActive,
-                    { borderColor: '#6366F1', shadowColor: '#6366F1' },
+                    { borderColor: '#4A85B6', shadowColor: '#4A85B6' },
                   ],
                 ]}
                 onPress={() => handleSelectMode('light')}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>☀️</Text>
-                <Text style={[styles.themeOptionTitle, { color: '#111827' }]}>Light Theme</Text>
-                <Text style={[styles.themeOptionSub, selectedMode === 'light' ? { color: '#6366F1', fontWeight: '700' } : { color: '#64748B' }]}>
+                <Text style={[styles.themeOptionTitle, { color: '#1A1A24' }]}>Light Theme</Text>
+                <Text style={[styles.themeOptionSub, selectedMode === 'light' ? { color: '#4A85B6', fontWeight: '700' } : { color: '#6B6D82' }]}>
                   {selectedMode === 'light' ? '✓ Active' : 'Classic'}
                 </Text>
               </TouchableOpacity>
@@ -898,14 +898,14 @@ const styles = StyleSheet.create({
   },
   receiptTopBorder: {
     height: 3,
-    backgroundColor: '#6366F1',
+    backgroundColor: '#4A85B6',
     borderRadius: 2,
     marginBottom: 6,
   },
   receiptHeader: {
     fontSize: 9,
     fontWeight: '800',
-    color: '#4F46E5',
+    color: '#386B94',
     letterSpacing: 0.5,
     marginBottom: 4,
     textAlign: 'center',
@@ -940,7 +940,7 @@ const styles = StyleSheet.create({
   receiptTotalAmount: {
     fontSize: 9,
     fontWeight: '800',
-    color: '#4F46E5',
+    color: '#386B94',
   },
   planeContainer: {
     width: 130,
@@ -952,7 +952,7 @@ const styles = StyleSheet.create({
   planeImage: {
     width: 130,
     height: 130,
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.45,
     shadowRadius: 20,
@@ -1024,7 +1024,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   themeOptionActive: {
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,

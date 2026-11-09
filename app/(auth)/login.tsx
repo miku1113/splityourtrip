@@ -705,7 +705,7 @@ export default function LoginScreen() {
                 disabled={loading || googleLoading}
               >
                 <LinearGradient
-                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#6366F1', '#4F46E5']}
+                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#4A85B6', '#386B94']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnGradient}
@@ -1090,7 +1090,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
     shadowRadius: 14,
@@ -1200,7 +1200,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginTop: 20,
     overflow: 'hidden',
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1217,7 +1217,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 24,
-    shadowColor: '#6366F1',
+    shadowColor: '#4A85B6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,

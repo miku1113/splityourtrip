@@ -943,7 +943,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   filterPillActive: {
-    backgroundColor: '#6366F1',
+    backgroundColor: '#4A85B6',
   },
   filterPillText: {
     fontSize: scaleFont(12),
