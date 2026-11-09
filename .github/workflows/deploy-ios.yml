@@ -75,12 +75,12 @@ jobs:
         run: |
           BUILD_NUM="${{ github.event.inputs.build_number }}"
           if [ -z "$BUILD_NUM" ]; then
-            BUILD_NUM="${{ github.run_number }}"
+            BUILD_NUM=$(node -p "require('../app.json').expo.ios?.buildNumber || 58")
           fi
           echo "Setting iOS build number to: $BUILD_NUM"
           cd ios
           xcrun agvtool new-version -all "$BUILD_NUM"
-          APP_VERSION=$(node -p "require('../app.json').expo.version")
+          APP_VERSION=$(node -p "require('../app.json').expo.version || '1.0.58'")
           echo "Setting iOS marketing version to: $APP_VERSION"
           xcrun agvtool new-marketing-version "$APP_VERSION"
 
@@ -198,8 +198,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ runner.temp }}/build/*.ipa
-          name: SplitYourTrip iOS ${{ github.ref_name || format('v1.0.57 (Build {0})', github.event.inputs.build_number || github.run_number) }}
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.57-ios-{0}', github.event.inputs.build_number || github.run_number) }}
+          name: SplitYourTrip iOS ${{ github.ref_name || format('v1.0.58 (Build {0})', github.event.inputs.build_number || '58') }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.58-ios-{0}', github.event.inputs.build_number || github.run_number) }}
           draft: false
           prerelease: false
           generate_release_notes: true
