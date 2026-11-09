@@ -75,13 +75,12 @@ jobs:
         run: |
           BUILD_NUM="${{ github.event.inputs.build_number }}"
           if [ -z "$BUILD_NUM" ]; then
-            BUILD_NUM=$(node -p "require('../app.json').expo.ios?.buildNumber || 58")
+            BUILD_NUM=$(node -p "require('./app.json').expo.ios?.buildNumber || 58")
           fi
-          echo "Setting iOS build number to: $BUILD_NUM"
+          APP_VERSION=$(node -p "require('./app.json').expo.version || '1.0.58'")
+          echo "Setting iOS build number to: $BUILD_NUM and marketing version to: $APP_VERSION"
           cd ios
           xcrun agvtool new-version -all "$BUILD_NUM"
-          APP_VERSION=$(node -p "require('../app.json').expo.version || '1.0.58'")
-          echo "Setting iOS marketing version to: $APP_VERSION"
           xcrun agvtool new-marketing-version "$APP_VERSION"
 
       - name: 8. Install Apple Certificates and Provisioning Profiles
