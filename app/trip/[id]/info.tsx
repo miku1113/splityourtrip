@@ -16,6 +16,7 @@ import {
   Image,
   StatusBar,
   KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
@@ -26,7 +27,9 @@ import {
   normalizeExpensesForTrip,
   computeBalances,
   findMyMember,
+  isValidUUID,
 } from '../../../src/features/trips/useTripStore';
+import { supabase, supabaseAdmin, isSupabaseConfigured } from '../../../src/lib/supabase';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import {
   useContactsStore,
@@ -60,6 +63,7 @@ export default function TripInfoScreen() {
     balances: rawBalances,
     isLoading: tripStoreLoading,
     loadTripDetails,
+    addExpense,
     addMember,
     linkGuestWithContact,
     findContactByPhone,
@@ -637,12 +641,110 @@ export default function TripInfoScreen() {
     } catch {}
   };
 
-  const handlePayViaUpi = (amountPaise: number, receiverName: string) => {
+  const handleRecordDirectSettlement = async (
+    fromMemberId: string,
+    toMemberId: string,
+    amountPaise: number,
+    paymentMode: 'cash' | 'upi'
+  ) => {
+    try {
+      const fromName = effectiveMemberNamesMap[fromMemberId] || 'Member';
+      const toName = effectiveMemberNamesMap[toMemberId] || 'Member';
+      const desc = `${paymentMode === 'cash' ? '💵 Cash' : '📱 UPI'} Settlement: ${fromName} paid ${toName}`;
+
+      await addExpense({
+        tripId: id,
+        amountPaise,
+        description: desc,
+        category: 'settlement',
+        paidByMemberId: fromMemberId,
+        paymentMode,
+        splitType: 'exact',
+        participantMemberIds: [toMemberId],
+        customSplits: [{ memberId: toMemberId, shareAmount: amountPaise }],
+        userId: user?.id || 'local_user',
+      });
+
+      if (isSupabaseConfigured && isValidUUID(id)) {
+        try {
+          const client = supabaseAdmin || supabase;
+          await client.from('settlement_payments').insert({
+            trip_id: id,
+            from_member: fromMemberId,
+            to_member: toMemberId,
+            amount: amountPaise,
+            method: paymentMode,
+            note: paymentMode === 'cash' ? 'Settled in cash' : 'Paid via UPI',
+            paid_at: new Date().toISOString(),
+          });
+        } catch (spErr) {
+          console.log('settlement_payments insert notice:', spErr);
+        }
+      }
+
+      // Also send settlement message into trip chat
+      try {
+        const payload = {
+          type: 'payment_settlement',
+          amountPaise,
+          payerId: fromMemberId,
+          payerName: fromName,
+          receiverId: toMemberId,
+          receiverName: toName,
+          paymentMode,
+          status: 'accepted',
+          settledAt: new Date().toISOString(),
+          tripId: id,
+          note: `Settled via ${paymentMode.toUpperCase()}`,
+        };
+        await useTripStore.getState().sendMessage(
+          id,
+          user?.id || 'local_user',
+          profile?.full_name || 'You',
+          JSON.stringify(payload),
+          undefined,
+          'group'
+        );
+      } catch {}
+
+      await useContactsStore.getState().fetchFriendsSummary(user?.id);
+      await loadTripDetails(id);
+      useTripStore.getState().fetchTrips(user?.id);
+
+      Alert.alert(
+        'Settled! 🎉',
+        `${formatCurrencyAmount(amountPaise, trip.currency)} settlement from ${fromName} to ${toName} has been recorded and deducted from balances!`
+      );
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not record settlement.');
+    }
+  };
+
+  const handlePayViaUpi = (
+    amountPaise: number,
+    receiverName: string,
+    fromMemberId?: string,
+    toMemberId?: string
+  ) => {
     const rupees = (amountPaise / 100).toFixed(2);
     const upiUrl = `upi://pay?pn=${encodeURIComponent(receiverName)}&am=${rupees}&cu=INR`;
-    Linking.openURL(upiUrl).catch(() => {
-      alert(`UPI deep link: ${upiUrl}`);
-    });
+    Linking.openURL(upiUrl).catch(() => {});
+
+    if (fromMemberId && toMemberId) {
+      setTimeout(() => {
+        Alert.alert(
+          'Record UPI Settlement',
+          `Did you complete the payment of ${formatCurrencyAmount(amountPaise, trip.currency)} to ${receiverName}? Tap 'Confirm & Deduct' to deduct it from balances immediately.`,
+          [
+            { text: 'Not Yet', style: 'cancel' },
+            {
+              text: 'Confirm & Deduct',
+              onPress: () => handleRecordDirectSettlement(fromMemberId, toMemberId, amountPaise, 'upi'),
+            },
+          ]
+        );
+      }, 600);
+    }
   };
 
   // Merge contacts from useContactsStore + deviceContacts
@@ -1414,13 +1516,41 @@ export default function TripInfoScreen() {
                       </Text>
                     </View>
 
-                    <TouchableOpacity
-                      style={[styles.payUpiBtn, { backgroundColor: colors.primary }]}
-                      onPress={() => handlePayViaUpi(s.amount, toName)}
-                    >
-                      <Ionicons name="flash" size={16} color={colors.textOnSilver || '#B5504F'} />
-                      <Text style={[styles.payUpiBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Pay via UPI</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.payCashBtn,
+                          {
+                            backgroundColor: isDark ? 'rgba(34, 197, 94, 0.16)' : '#DCFCE7',
+                            borderColor: colors.success,
+                          },
+                        ]}
+                        onPress={() => {
+                          Alert.alert(
+                            'Record Cash Settlement',
+                            `Record payment of ${formatCurrencyAmount(s.amount, trip.currency)} from ${fromName} to ${toName}? This will deduct from balances immediately.`,
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Confirm Cash Settlement',
+                                onPress: () => handleRecordDirectSettlement(s.from, s.to, s.amount, 'cash'),
+                              },
+                            ]
+                          );
+                        }}
+                      >
+                        <Ionicons name="cash-outline" size={15} color={colors.success} />
+                        <Text style={[styles.payCashBtnText, { color: colors.success }]}>Cash</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.payUpiBtn, { backgroundColor: colors.primary }]}
+                        onPress={() => handlePayViaUpi(s.amount, toName, s.from, s.to)}
+                      >
+                        <Ionicons name="flash" size={15} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={[styles.payUpiBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Pay UPI</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 );
               })}
@@ -2717,18 +2847,31 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 4,
   },
+  payCashBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 11,
+    borderWidth: 1,
+    gap: 4,
+  },
+  payCashBtnText: {
+    fontWeight: '700',
+    fontSize: 12.5,
+  },
   payUpiBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 11,
+    gap: 4,
   },
   payUpiBtnText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12.5,
   },
   emptyView: {
     alignItems: 'center',

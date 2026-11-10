@@ -588,16 +588,26 @@ export default function MyTripsScreen() {
             </View>
           ) : null
         }
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
           const isOpeningThisTrip = openingTripId === item.id;
+          const isFirst = index === 0;
+          const isLast = index === paginatedTrips.length - 1;
 
           return (
             <View
               style={[
-                styles.tripCardItem,
+                styles.tripRowContainer,
                 {
                   backgroundColor: colors.card,
                   borderColor: colors.border,
+                  borderTopLeftRadius: isFirst ? 13 : 0,
+                  borderTopRightRadius: isFirst ? 13 : 0,
+                  borderBottomLeftRadius: isLast ? 13 : 0,
+                  borderBottomRightRadius: isLast ? 13 : 0,
+                  borderTopWidth: isFirst ? 1.1 : 0,
+                  borderBottomWidth: isLast ? 1.1 : 0,
+                  borderLeftWidth: 1.1,
+                  borderRightWidth: 1.1,
                 },
               ]}
             >
@@ -664,6 +674,9 @@ export default function MyTripsScreen() {
                   )}
                 </View>
               </TouchableOpacity>
+              {!isLast && (
+                <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
+              )}
             </View>
           );
         }}
@@ -1581,7 +1594,7 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: moderateScale(70),
+    marginLeft: moderateScale(60),
   },
   paginationFooter: {
     paddingVertical: 14,

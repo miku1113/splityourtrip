@@ -386,6 +386,9 @@ interface TripStoreState {
   syncTripMessages: (tripId: string, forceRefresh?: boolean) => Promise<void>;
   getOrCreatePersonalTrip: () => Promise<Trip | null>;
   getPersonalExpensesTotalPaise: () => number;
+  personalExpensesTotalPaise: number;
+  personalExpensesCount: number;
+  fetchPersonalExpensesTotal: (userId?: string) => Promise<{ totalPaise: number; count: number }>;
 }
 
 // Helper to prevent any network or native call from hanging indefinitely
@@ -696,6 +699,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   isHydrated: false,
   error: null,
   isVoiceModalOpen: false,
+  personalExpensesTotalPaise: 0,
+  personalExpensesCount: 0,
 
   setVoiceModalOpen: (open: boolean) => set({ isVoiceModalOpen: open }),
 
@@ -711,6 +716,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       isLoading: false,
       isHydrated: false,
       error: null,
+      personalExpensesTotalPaise: 0,
+      personalExpensesCount: 0,
     });
   },
 
@@ -745,6 +752,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     }
     // Also trigger fetch to sync with cloud if auth session exists
     get().fetchTrips().catch(() => {});
+    get().fetchPersonalExpensesTotal().catch(() => {});
   },
 
   fetchTrips: async (userId?: string, forceRefresh = false) => {
@@ -3098,46 +3106,54 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(storedDetails));
     } catch {}
 
-    // Automatically send an expense notification chat message from the user
-    try {
-      const trip = get().trips.find(t => t.id === tripId);
-      const formattedAmount = formatCurrencyAmount(amountPaise, trip?.currency || 'INR');
-      const summaryText = `💰 Added expense: "${description.trim()}" for ${formattedAmount} (Paid by ${payerName})`;
+    const currentTripObj = get().trips.find(t => t.id === tripId) || get().activeTrip;
+    if (currentTripObj?.trip_type === 'personal' || currentTripObj?.name.toLowerCase().includes('personal')) {
+      const newTotal = updatedExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+      set({ personalExpensesTotalPaise: newTotal, personalExpensesCount: updatedExpenses.length });
+    }
 
-      const isFriend = trip?.trip_type === 'friend_split';
-      const expensePayload = JSON.stringify({
-        type: 'expense',
-        text: summaryText,
-        chat_type: isFriend ? 'user' : 'trip',
-        expense_id: newExpenseId,
-        expense_data: {
-          id: newExpenseId,
-          description: description.trim(),
-          amount: amountPaise,
-          currency: trip?.currency || 'INR',
-          paid_by_name: payerName,
-          paid_by_id: payerMember?.id || paidByMemberId,
-          created_by: creatorId,
-          split_count: participantMemberIds.length,
-          category: category || 'General',
-          location: data.location || null,
-          latitude: data.latitude || null,
-          longitude: data.longitude || null,
-          attachment_url: resolvedAttachmentUrl,
-          screenshot_path: resolvedAttachmentUrl,
-          attachment_name: resolvedAttachmentName,
-          attachment_type: resolvedAttachmentType,
-          date: new Date().toISOString(),
-        },
-      });
+    // Automatically send an expense notification chat message from the user (skip for settlements)
+    if (category !== 'settlement') {
+      try {
+        const trip = get().trips.find(t => t.id === tripId);
+        const formattedAmount = formatCurrencyAmount(amountPaise, trip?.currency || 'INR');
+        const summaryText = `💰 Added expense: "${description.trim()}" for ${formattedAmount} (Paid by ${payerName})`;
 
-      // Always send notification as the current user who is creating the expense.
-      // The "paid by" info is already embedded in expense_data for display purposes.
-      const authState = useAuthStore.getState();
-      const creatorName = authState.profile?.full_name || authState.profile?.name || payerName;
-      await get().sendMessage(tripId, creatorId, creatorName, expensePayload);
-    } catch (e: any) {
-      console.log('Auto-chat notification error handled:', e?.message);
+        const isFriend = trip?.trip_type === 'friend_split';
+        const expensePayload = JSON.stringify({
+          type: 'expense',
+          text: summaryText,
+          chat_type: isFriend ? 'user' : 'trip',
+          expense_id: newExpenseId,
+          expense_data: {
+            id: newExpenseId,
+            description: description.trim(),
+            amount: amountPaise,
+            currency: trip?.currency || 'INR',
+            paid_by_name: payerName,
+            paid_by_id: payerMember?.id || paidByMemberId,
+            created_by: creatorId,
+            split_count: participantMemberIds.length,
+            category: category || 'General',
+            location: data.location || null,
+            latitude: data.latitude || null,
+            longitude: data.longitude || null,
+            attachment_url: resolvedAttachmentUrl,
+            screenshot_path: resolvedAttachmentUrl,
+            attachment_name: resolvedAttachmentName,
+            attachment_type: resolvedAttachmentType,
+            date: new Date().toISOString(),
+          },
+        });
+
+        // Always send notification as the current user who is creating the expense.
+        // The "paid by" info is already embedded in expense_data for display purposes.
+        const authState = useAuthStore.getState();
+        const creatorName = authState.profile?.full_name || authState.profile?.name || payerName;
+        await get().sendMessage(tripId, creatorId, creatorName, expensePayload);
+      } catch (e: any) {
+        console.log('Auto-chat notification error handled:', e?.message);
+      }
     }
 
     // Background upload attachment to Supabase storage if it's a local file
@@ -3273,6 +3289,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       details.expenses = newExpenses;
       await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
     } catch {}
+
+    const delTripObj = get().trips.find(t => t.id === tripId) || get().activeTrip;
+    if (delTripObj?.trip_type === 'personal' || delTripObj?.name.toLowerCase().includes('personal')) {
+      const newTotal = newExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+      set({ personalExpensesTotalPaise: newTotal, personalExpensesCount: newExpenses.length });
+    }
 
     // Cloud update if configured
     if (isSupabaseConfigured && isValidUUID(tripId) && isValidUUID(expenseId)) {
@@ -3487,20 +3509,55 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     markExpenseDeleted(expenseId);
 
     const currentExpenses = get().expenses;
+    const targetExpense = currentExpenses.find(e => e.id === expenseId);
     const newExpenses = currentExpenses.filter(e => e.id !== expenseId);
 
-    // Completely purge any messages referencing this expense
+    const isSettlement =
+      targetExpense?.category === 'settlement' ||
+      targetExpense?.description?.toLowerCase().includes('settlement');
+    const targetAmount = targetExpense?.amount;
+
+    // Completely purge any messages referencing this expense, including settlement cards!
     const currentMessages = get().messages;
-    const newMessages = currentMessages.filter(
-      m =>
-        m.id !== expenseId &&
-        m.id !== `group_exp_${expenseId}` &&
-        m.id !== `shared_exp_${expenseId}` &&
-        m.expense_id !== expenseId &&
-        m.expense_data?.id !== expenseId &&
-        !m.message?.includes(expenseId) &&
-        !m.content?.includes(expenseId)
-    );
+    const purgedMsgIds = new Set<string>();
+
+    const newMessages = currentMessages.filter(m => {
+      let isMatch = false;
+      if (m.id === expenseId || m.id === `group_exp_${expenseId}` || m.id === `shared_exp_${expenseId}`) {
+        isMatch = true;
+      } else if (m.expense_id === expenseId || m.expense_data?.id === expenseId) {
+        isMatch = true;
+      } else if (m.message?.includes(expenseId) || m.content?.includes(expenseId)) {
+        isMatch = true;
+      } else if (isSettlement) {
+        let pData: any = m.payload;
+        if (!pData && m.message?.startsWith('{')) {
+          try { pData = JSON.parse(m.message); } catch {}
+        }
+        if (!pData && m.content?.startsWith('{')) {
+          try { pData = JSON.parse(m.content); } catch {}
+        }
+        const isSettleMsg =
+          m.type === 'payment_settlement' ||
+          m.type === 'payment_claim' ||
+          pData?.type === 'payment_settlement' ||
+          pData?.type === 'payment_claim';
+
+        if (isSettleMsg) {
+          if (pData?.expenseId === expenseId || pData?.expense_id === expenseId) {
+            isMatch = true;
+          } else if (targetAmount && (pData?.amountPaise === targetAmount || pData?.amount === targetAmount)) {
+            isMatch = true;
+          }
+        }
+      }
+
+      if (isMatch) {
+        purgedMsgIds.add(m.id);
+        return false;
+      }
+      return true;
+    });
 
     // Recalculate balances
     const newBalances = computeBalances(
@@ -3525,6 +3582,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             changed = true;
           }
           if (Array.isArray(details.messages) && details.messages.some((m: any) =>
+            purgedMsgIds.has(m.id) ||
             m.id === expenseId ||
             m.id === `group_exp_${expenseId}` ||
             m.id === `shared_exp_${expenseId}` ||
@@ -3534,6 +3592,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             m.content?.includes(expenseId)
           )) {
             details.messages = details.messages.filter((m: any) =>
+              !purgedMsgIds.has(m.id) &&
               m.id !== expenseId &&
               m.id !== `group_exp_${expenseId}` &&
               m.id !== `shared_exp_${expenseId}` &&
@@ -3557,8 +3616,38 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         await supabaseAdmin.from('expense_splits').delete().eq('expense_id', expenseId);
         await supabaseAdmin.from('expenses').delete().eq('id', expenseId);
         await supabaseAdmin.from('trip_messages').delete().eq('id', expenseId);
+        await supabaseAdmin.from('trip_messages').delete().eq('expense_id', expenseId);
         await supabaseAdmin.from('trip_messages').delete().ilike('message', `%${expenseId}%`);
         await supabaseAdmin.from('messages').delete().ilike('content', `%${expenseId}%`);
+
+        if (isSettlement) {
+          if (targetAmount) {
+            await supabaseAdmin
+              .from('settlement_payments')
+              .delete()
+              .eq('trip_id', tripId)
+              .eq('amount', targetAmount);
+
+            try {
+              const { data: settleMsgs } = await supabaseAdmin
+                .from('trip_messages')
+                .select('id, message')
+                .eq('trip_id', tripId);
+              if (settleMsgs) {
+                for (const sm of settleMsgs) {
+                  if (sm.message && (sm.message.includes(expenseId) || (sm.message.includes('payment_settlement') && sm.message.includes(String(targetAmount))))) {
+                    await supabaseAdmin.from('trip_messages').delete().eq('id', sm.id);
+                    await supabaseAdmin.from('messages').delete().eq('id', sm.id);
+                  }
+                }
+              }
+            } catch {}
+          }
+          for (const msgId of Array.from(purgedMsgIds)) {
+            await supabaseAdmin.from('trip_messages').delete().eq('id', msgId);
+            await supabaseAdmin.from('messages').delete().eq('id', msgId);
+          }
+        }
       } catch (err: any) {
         console.log('deleteExpense cloud notice:', err?.message);
       }
@@ -4055,16 +4144,39 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   deleteTripMessage: async (tripId: string, messageId: string) => {
     if (!messageId) return false;
 
+    // Check if target message is a settlement card
+    const targetMsg = get().messages.find(m => m.id === messageId);
+    let pData: any = targetMsg?.payload;
+    if (!pData && targetMsg?.message?.startsWith('{')) {
+      try { pData = JSON.parse(targetMsg.message); } catch {}
+    }
+    if (!pData && targetMsg?.content?.startsWith('{')) {
+      try { pData = JSON.parse(targetMsg.content); } catch {}
+    }
+    const isSettlement =
+      targetMsg?.type === 'payment_settlement' ||
+      targetMsg?.type === 'payment_claim' ||
+      pData?.type === 'payment_settlement' ||
+      pData?.type === 'payment_claim';
+
+    const linkedExpenseId = pData?.expenseId || pData?.expense_id || targetMsg?.expense_id;
+    const settlementAmount = Number(pData?.amountPaise || pData?.amount) || 0;
+    const claimId = pData?.claimId;
+
     // 1. Instantly remove locally
     set(state => ({
-      messages: state.messages.filter(m => m.id !== messageId),
+      messages: state.messages.filter(
+        m => m.id !== messageId && (!claimId || (!m.message?.includes(claimId) && !m.content?.includes(claimId)))
+      ),
     }));
 
     try {
       const raw = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
       if (raw) {
         const details = JSON.parse(raw);
-        details.messages = (details.messages || []).filter((m: any) => m.id !== messageId);
+        details.messages = (details.messages || []).filter(
+          (m: any) => m.id !== messageId && (!claimId || (!m.message?.includes(claimId) && !m.content?.includes(claimId)))
+        );
         await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
       }
     } catch {}
@@ -4075,10 +4187,54 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         const client = supabaseAdmin || supabase;
         await client.from('trip_messages').delete().eq('id', messageId);
         await client.from('messages').delete().eq('id', messageId);
+        if (claimId) {
+          await client.from('trip_messages').delete().ilike('message', `%${claimId}%`);
+          await client.from('messages').delete().ilike('content', `%${claimId}%`);
+        }
       } catch (err: any) {
         console.warn('deleteTripMessage cloud notice:', err?.message);
       }
     }
+
+    // 3. If it was a settlement card, also delete the corresponding settlement expense & restore balances!
+    if (isSettlement) {
+      let expenseToDeleteId = linkedExpenseId;
+      if (!expenseToDeleteId && settlementAmount > 0) {
+        const matchExp = get().expenses.find(
+          e =>
+            e.trip_id === tripId &&
+            (e.category === 'settlement' || e.description?.toLowerCase().includes('settlement')) &&
+            e.amount === settlementAmount
+        );
+        if (matchExp) {
+          expenseToDeleteId = matchExp.id;
+        }
+      }
+
+      if (expenseToDeleteId) {
+        await get().deleteExpense(tripId, expenseToDeleteId);
+      } else if (settlementAmount > 0) {
+        if (isSupabaseConfigured && isValidUUID(tripId)) {
+          try {
+            await (supabaseAdmin || supabase)
+              .from('settlement_payments')
+              .delete()
+              .eq('trip_id', tripId)
+              .eq('amount', settlementAmount);
+          } catch {}
+        }
+      }
+
+      // Recompute friend balances
+      try {
+        const { useContactsStore } = require('../contacts/useContactsStore');
+        const { useAuthStore } = require('../auth/useAuthStore');
+        const activeId = useAuthStore.getState().user?.id;
+        useContactsStore.getState().computeFriendBalances(get().trips, activeId).catch(() => {});
+        useContactsStore.getState().fetchFriendsSummary(activeId).catch(() => {});
+      } catch {}
+    }
+
     return true;
   },
 
@@ -4945,17 +5101,135 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     return null;
   },
 
-  getPersonalExpensesTotalPaise: (): number => {
-    const personalTrip = get().trips.find(
+  fetchPersonalExpensesTotal: async (userId?: string): Promise<{ totalPaise: number; count: number }> => {
+    const authUser = useAuthStore.getState().user;
+    const profile = useAuthStore.getState().profile;
+    const effectiveUserId = userId || authUser?.id || profile?.id || 'local_user';
+
+    // 1. Immediately hydrate from local cache to prevent flickering
+    let initialTotal = get().personalExpensesTotalPaise || 0;
+    let initialCount = get().personalExpensesCount || 0;
+    try {
+      const cached = await AppStorage.getItem(`@splityourtrip_personal_total_${effectiveUserId}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed.totalPaise === 'number') {
+          initialTotal = parsed.totalPaise;
+          initialCount = parsed.count || 0;
+          set({ personalExpensesTotalPaise: initialTotal, personalExpensesCount: initialCount });
+        }
+      }
+    } catch {}
+
+    // 2. Identify personal trip
+    let personalTrip: Trip | null | undefined = get().trips.find(
       t =>
         t.trip_type === 'personal' ||
         t.name.toLowerCase() === 'personal (you)' ||
         t.name.toLowerCase() === 'you (personal)' ||
         t.name.toLowerCase() === 'personal expenses'
     );
-    if (!personalTrip) return 0;
-    const personalExpenses = get().expenses.filter(e => e.trip_id === personalTrip.id);
-    return personalExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    if (!personalTrip) {
+      try {
+        const cachedId = await AppStorage.getItem(`@splityourtrip_personal_trip_${effectiveUserId}`);
+        if (cachedId) {
+          personalTrip = get().trips.find(t => t.id === cachedId);
+        }
+      } catch {}
+    }
+
+    if (!personalTrip) {
+      personalTrip = await get().getOrCreatePersonalTrip();
+    }
+
+    if (!personalTrip) {
+      return { totalPaise: initialTotal, count: initialCount };
+    }
+
+    const personalTripId = personalTrip.id;
+    let expensesList: any[] = [];
+
+    // 3. Read cached trip details from AppStorage
+    try {
+      const raw = await AppStorage.getItem(`@splityourtrip_local_details_${personalTripId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.expenses) && parsed.expenses.length > 0) {
+          expensesList = parsed.expenses;
+        }
+      }
+    } catch {}
+
+    // 4. Merge in-memory expenses if personal trip is currently active in store
+    if (get().activeTrip?.id === personalTripId && get().expenses.length > 0) {
+      const map = new Map<string, any>();
+      expensesList.forEach(e => { if (e?.id) map.set(e.id, e); });
+      get().expenses.forEach(e => { if (e?.id) map.set(e.id, e); });
+      expensesList = Array.from(map.values());
+    }
+
+    if (expensesList.length > 0) {
+      const sum = expensesList.reduce((acc, e) => acc + (e.amount || 0), 0);
+      set({ personalExpensesTotalPaise: sum, personalExpensesCount: expensesList.length });
+    }
+
+    // 5. Query Supabase for latest up-to-date expenses
+    try {
+      const { data } = await withTimeout(
+        supabaseAdmin
+          .from('expenses')
+          .select('id, amount, description, category, date, created_at')
+          .eq('trip_id', personalTripId)
+          .order('date', { ascending: false }),
+        6000
+      ).catch(() => ({ data: null }));
+
+      if (data && Array.isArray(data)) {
+        expensesList = data;
+        const total = data.reduce((acc, e) => acc + (e.amount || 0), 0);
+        const count = data.length;
+        set({ personalExpensesTotalPaise: total, personalExpensesCount: count });
+
+        // Update local storage caches asynchronously
+        AppStorage.setItem(
+          `@splityourtrip_personal_total_${effectiveUserId}`,
+          JSON.stringify({ totalPaise: total, count })
+        ).catch(() => {});
+
+        AppStorage.getItem(`@splityourtrip_local_details_${personalTripId}`)
+          .then(raw => {
+            const parsed = raw ? JSON.parse(raw) : {};
+            parsed.expenses = data;
+            return AppStorage.setItem(`@splityourtrip_local_details_${personalTripId}`, JSON.stringify(parsed));
+          })
+          .catch(() => {});
+
+        return { totalPaise: total, count };
+      }
+    } catch {}
+
+    const finalTotal = expensesList.reduce((acc, e) => acc + (e.amount || 0), 0);
+    const finalCount = expensesList.length;
+    set({ personalExpensesTotalPaise: finalTotal, personalExpensesCount: finalCount });
+    return { totalPaise: finalTotal, count: finalCount };
+  },
+
+  getPersonalExpensesTotalPaise: (): number => {
+    const activeTrip = get().activeTrip;
+    if (
+      activeTrip &&
+      (activeTrip.trip_type === 'personal' ||
+        activeTrip.name.toLowerCase() === 'personal (you)' ||
+        activeTrip.name.toLowerCase() === 'you (personal)' ||
+        activeTrip.name.toLowerCase() === 'personal expenses')
+    ) {
+      const activeTotal = get().expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+      if (activeTotal > 0 || get().expenses.length > 0) {
+        return activeTotal;
+      }
+    }
+    return get().personalExpensesTotalPaise || 0;
   },
 }));
 

@@ -1026,6 +1026,27 @@ export default function VoiceExpenseModal({
             } else if (result.action.type === 'START_CONTACT_SPLIT' && result.action.contactSplit) {
               setPendingAction(null);
               await executeStartContactSplit(result.action.contactSplit);
+            } else if (result.action.type === 'SETTLE_UP' && result.action.settle) {
+              setPendingAction(null);
+              const s = result.action.settle;
+              try {
+                await addExpense({
+                  tripId: s.tripId,
+                  amountPaise: s.amountPaise,
+                  description: `Settlement with ${s.toMemberName || 'Member'}`,
+                  category: 'settlement',
+                  paidByMemberId: s.fromMemberId,
+                  paymentMode: 'cash',
+                  splitType: 'exact',
+                  participantMemberIds: [s.toMemberId],
+                  customSplits: [{ memberId: s.toMemberId, shareAmount: s.amountPaise }],
+                  userId: user?.id || 'local_user',
+                });
+                await useContactsStore.getState().fetchFriendsSummary(user?.id);
+                useTripStore.getState().fetchTrips(user?.id);
+              } catch (e) {
+                console.warn('Voice settle error:', e);
+              }
             }
           } else if (result.action.status === 'pending_confirmation') {
             setPendingAction(result.action);
@@ -1539,6 +1560,41 @@ export default function VoiceExpenseModal({
                                       },
                                     ]);
                                     speakAssistantReply(`Confirmed! Saved to your trip.`);
+                                  }
+                                } else if (item.action?.settle && !isExecutingAction) {
+                                  if (item.action) item.action.status = 'confirmed';
+                                  setPendingAction(null);
+                                  const s = item.action.settle;
+                                  try {
+                                    setIsExecutingAction(true);
+                                    await addExpense({
+                                      tripId: s.tripId,
+                                      amountPaise: s.amountPaise,
+                                      description: `Settlement with ${s.toMemberName || 'Member'}`,
+                                      category: 'settlement',
+                                      paidByMemberId: s.fromMemberId,
+                                      paymentMode: 'cash',
+                                      splitType: 'exact',
+                                      participantMemberIds: [s.toMemberId],
+                                      customSplits: [{ memberId: s.toMemberId, shareAmount: s.amountPaise }],
+                                      userId: user?.id || 'local_user',
+                                    });
+                                    await useContactsStore.getState().fetchFriendsSummary(user?.id);
+                                    useTripStore.getState().fetchTrips(user?.id);
+                                    setMessages(prev => [
+                                      ...prev,
+                                      {
+                                        id: generateUUID(),
+                                        role: 'assistant',
+                                        content: `Confirmed! ₹${s.amountRupees} settlement with ${s.toMemberName || 'Member'} recorded.`,
+                                        timestamp: new Date().toISOString(),
+                                      },
+                                    ]);
+                                    speakAssistantReply('Confirmed! Settlement recorded.');
+                                  } catch (e) {
+                                    console.warn('Voice settle error:', e);
+                                  } finally {
+                                    setIsExecutingAction(false);
                                   }
                                 }
                               }}

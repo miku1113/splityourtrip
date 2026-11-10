@@ -36,6 +36,7 @@ interface FriendRowItemProps {
   openingFriendId: string | null;
   colors: any;
   isDark: boolean;
+  hasTopHeader?: boolean;
   currentUserId?: string;
   currentUserName?: string | null;
   userAvatarUrl?: string | null;
@@ -53,6 +54,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
   openingFriendId,
   colors,
   isDark,
+  hasTopHeader,
   currentUserId,
   currentUserName,
   userAvatarUrl,
@@ -62,6 +64,8 @@ const FriendRowItem = React.memo(function FriendRowItem({
 }: FriendRowItemProps) {
   const isFirst = index === 0;
   const isLast = index === totalCount - 1;
+  const isTop = isFirst && !hasTopHeader;
+  const isBottom = isLast;
 
   const bal = item.netBalancePaise || 0;
   const toGet =
@@ -92,10 +96,18 @@ const FriendRowItem = React.memo(function FriendRowItem({
   return (
     <View
       style={[
-        styles.friendCardItem,
+        styles.friendRowContainer,
         {
           backgroundColor: colors.card,
           borderColor: colors.border,
+          borderTopLeftRadius: isTop ? 13 : 0,
+          borderTopRightRadius: isTop ? 13 : 0,
+          borderBottomLeftRadius: isBottom ? 13 : 0,
+          borderBottomRightRadius: isBottom ? 13 : 0,
+          borderTopWidth: isTop ? 1.1 : 0,
+          borderBottomWidth: isBottom ? 1.1 : 0,
+          borderLeftWidth: 1.1,
+          borderRightWidth: 1.1,
         },
       ]}
     >
@@ -281,6 +293,9 @@ const FriendRowItem = React.memo(function FriendRowItem({
           )}
         </View>
       </TouchableOpacity>
+      {!isLast && (
+        <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
+      )}
     </View>
   );
 });
@@ -292,8 +307,12 @@ export default function FriendsScreen() {
   const profile = useAuthStore(s => s.profile);
   const findOrCreateFriendSplitTrip = useTripStore(s => s.findOrCreateFriendSplitTrip);
   const getOrCreatePersonalTrip = useTripStore(s => s.getOrCreatePersonalTrip);
+  const personalExpensesTotalPaise = useTripStore(s => s.personalExpensesTotalPaise);
+  const personalExpensesCount = useTripStore(s => s.personalExpensesCount);
+  const fetchPersonalExpensesTotal = useTripStore(s => s.fetchPersonalExpensesTotal);
   const getPersonalExpensesTotalPaise = useTripStore(s => s.getPersonalExpensesTotalPaise);
-  const personalTotalSpent = getPersonalExpensesTotalPaise();
+  const personalTotalSpent =
+    personalExpensesTotalPaise > 0 ? personalExpensesTotalPaise : getPersonalExpensesTotalPaise();
   const contacts = useContactsStore(s => s.contacts);
   const friendsSummary = useContactsStore(s => s.friendsSummary);
   const fetchFriendsSummary = useContactsStore(s => s.fetchFriendsSummary);
@@ -321,17 +340,21 @@ export default function FriendsScreen() {
     fetchFriendsSummary(user?.id).finally(() => {
       setInitialLoading(false);
     });
+    fetchPersonalExpensesTotal(user?.id);
 
     const unsubscribe = subscribeFriendsRealtime(user?.id);
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [user?.id]);
+  }, [user?.id, fetchFriendsSummary, fetchPersonalExpensesTotal, subscribeFriendsRealtime, contacts.length]);
 
   useFocusEffect(
     useCallback(() => {
       navLockRef.current = false;
       setOpeningFriendId(null);
+
+      // Refresh personal spending total
+      fetchPersonalExpensesTotal(user?.id);
 
       // Only refetch if more than 4 seconds elapsed since last fetch to eliminate rapid-fire flickering
       if (Date.now() - lastFetchRef.current > 4000) {
@@ -342,7 +365,7 @@ export default function FriendsScreen() {
         });
         return () => task.cancel();
       }
-    }, [user?.id, fetchFriendsSummary])
+    }, [user?.id, fetchFriendsSummary, fetchPersonalExpensesTotal])
   );
 
   // Reset pagination to 10 whenever filter or search changes
@@ -354,7 +377,10 @@ export default function FriendsScreen() {
     setRefreshing(true);
     setVisibleCount(PAGE_SIZE);
     lastFetchRef.current = Date.now();
-    await fetchFriendsSummary(user?.id);
+    await Promise.all([
+      fetchFriendsSummary(user?.id),
+      fetchPersonalExpensesTotal(user?.id),
+    ]);
     setRefreshing(false);
   };
 
@@ -542,6 +568,7 @@ export default function FriendsScreen() {
         item={item}
         index={index}
         totalCount={paginatedContacts.length}
+        hasTopHeader={!searchQuery}
         userCurrency={userCurrency}
         isOpening={openingFriendId === item.id}
         openingFriendId={openingFriendId}
@@ -557,6 +584,7 @@ export default function FriendsScreen() {
     ),
     [
       paginatedContacts.length,
+      searchQuery,
       userCurrency,
       openingFriendId,
       colors,
@@ -747,6 +775,15 @@ export default function FriendsScreen() {
                 {
                   backgroundColor: colors.card,
                   borderColor: colors.border,
+                  borderTopLeftRadius: 13,
+                  borderTopRightRadius: 13,
+                  borderBottomLeftRadius: paginatedContacts.length > 0 ? 0 : 13,
+                  borderBottomRightRadius: paginatedContacts.length > 0 ? 0 : 13,
+                  borderTopWidth: 1.1,
+                  borderLeftWidth: 1.1,
+                  borderRightWidth: 1.1,
+                  borderBottomWidth: paginatedContacts.length > 0 ? 0 : 1.1,
+                  marginBottom: 0,
                 },
               ]}
             >
@@ -776,43 +813,72 @@ export default function FriendsScreen() {
                 </View>
 
                 <View style={styles.youInfo}>
-                  <View style={styles.youTitleRow}>
-                    <Text style={[styles.youTitle, { color: colors.text }]} numberOfLines={1}>
-                      Personal Expenses
-                    </Text>
-                    <View style={[styles.youBadge, { backgroundColor: colors.primaryLight }]}>
-                      <Text style={[styles.youBadgeText, { color: colors.primary }]}>Private</Text>
-                    </View>
-                  </View>
+                  <Text style={[styles.youTitle, { color: colors.text }]} numberOfLines={1}>
+                    Personal Expenses
+                  </Text>
                   <Text style={[styles.youSub, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {personalTotalSpent > 0
-                      ? `${formatCurrencyAmount(personalTotalSpent, userCurrency)} recorded`
-                      : 'Private log · Only you see this'}
+                    {personalExpensesCount > 0
+                      ? `${personalExpensesCount} personal expense${personalExpensesCount > 1 ? 's' : ''}`
+                      : 'Personal log · Only you see this'}
                   </Text>
                 </View>
 
-                <View style={styles.youRightCol}>
-                  <TouchableOpacity
-                    style={[
-                      styles.quickAddBtn,
-                      {
-                        backgroundColor: colors.primaryLight,
-                        borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
-                        marginRight: 4,
-                      },
-                    ]}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleAddPersonalExpense();
-                    }}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="add" size={15} color={colors.primary} />
-                  </TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                {/* Amount / Spent and Quick Action Column */}
+                <View style={styles.rightActionCol}>
+                  <View style={styles.balanceChevronRow}>
+                    <View style={styles.balancePillCol}>
+                      <Text
+                        style={[
+                          styles.heroAmountText,
+                          { color: colors.text },
+                        ]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit={true}
+                        minimumFontScale={0.72}
+                      >
+                        {formatCurrencyAmount(personalTotalSpent, userCurrency)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.dualSubText,
+                          { color: colors.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        spent
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.quickAddBtn,
+                        {
+                          backgroundColor: colors.primaryLight,
+                          borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
+                          marginRight: 4,
+                        },
+                      ]}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleAddPersonalExpense();
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={15} color={colors.primary} />
+                    </TouchableOpacity>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={15}
+                      color={colors.textMuted}
+                      style={{ marginLeft: 2 }}
+                    />
+                  </View>
                 </View>
               </TouchableOpacity>
+              {paginatedContacts.length > 0 && (
+                <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
+              )}
             </View>
           ) : null
         }
@@ -1125,7 +1191,7 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: moderateScale(70),
+    marginLeft: moderateScale(60),
   },
   emptyView: {
     alignItems: 'center',
@@ -1184,9 +1250,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   youCardContainer: {
-    marginBottom: moderateScale(6),
-    borderRadius: 13,
-    borderWidth: 1.1,
     overflow: 'hidden',
   },
   youCard: {
@@ -1208,30 +1271,12 @@ const styles = StyleSheet.create({
   youInfo: {
     flex: 1,
   },
-  youTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
   youTitle: {
     fontSize: scaleFont(14.5),
-    fontWeight: '700',
-  },
-  youBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 4,
-  },
-  youBadgeText: {
-    fontSize: scaleFont(9.5),
     fontWeight: '700',
   },
   youSub: {
     fontSize: scaleFont(11.5),
     marginTop: 1.5,
-  },
-  youRightCol: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
 });

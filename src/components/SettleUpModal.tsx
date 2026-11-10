@@ -19,8 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { useTheme } from '../theme/useThemeStore';
-import { useTripStore, Trip, TripMember } from '../features/trips/useTripStore';
-import { useContactsStore, FriendContact } from '../features/contacts/useContactsStore';
+import { useTripStore, Trip, TripMember, findMyMember, isValidUUID } from '../features/trips/useTripStore';
+import { useContactsStore, FriendContact, normalizePhone } from '../features/contacts/useContactsStore';
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
 import { formatCurrencyAmount } from '../services/currency';
@@ -48,7 +48,15 @@ export default function SettleUpModal({
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const { user, profile } = useAuthStore();
-  const { trips, sendMessage, findOrCreateFriendSplitTrip, members: allMembers } = useTripStore();
+  const {
+    trips,
+    sendMessage,
+    findOrCreateFriendSplitTrip,
+    members: allMembers,
+    addExpense,
+    loadTripDetails,
+    fetchTrips,
+  } = useTripStore();
   const { contacts, friendsSummary } = useContactsStore();
 
   const [step, setStep] = useState<'select_target' | 'select_member' | 'enter_details'>('select_target');
@@ -246,29 +254,82 @@ export default function SettleUpModal({
       const claimId = `claim_${Date.now()}`;
       const displayText = `💸 ${paymentMethod === 'cash' ? '💵 Cash' : '📱 UPI'} Payment: ${formatCurrencyAmount(amountPaise, 'INR')}`;
 
+      let targetTripId: string | null = null;
+      let payerMemberId: string = currentUserId;
+      let receiverMemberId: string = selectedReceiver.memberId || selectedReceiver.id;
+      let personalTripObj: Trip | null = null;
+
+      if (selectedTrip) {
+        targetTripId = selectedTrip.id;
+        await loadTripDetails(selectedTrip.id);
+        const mems: TripMember[] =
+          tripMembersList.length > 0
+            ? tripMembersList
+            : useTripStore.getState().members.filter(m => m.trip_id === selectedTrip.id);
+
+        const myMem = findMyMember(mems, currentUserId, (user as any)?.phone || (profile as any)?.phone_number);
+        if (myMem) payerMemberId = myMem.id;
+
+        const recMem = mems.find(
+          m =>
+            m.id === selectedReceiver.memberId ||
+            m.id === selectedReceiver.id ||
+            m.profile_id === selectedReceiver.profileId ||
+            (selectedReceiver.phone && m.phone_number && normalizePhone(m.phone_number) === normalizePhone(selectedReceiver.phone))
+        );
+        if (recMem) receiverMemberId = recMem.id;
+      } else {
+        // Direct friend split trip
+        const friendObj: any = {
+          id: selectedReceiver.profileId || selectedReceiver.id,
+          name: selectedReceiver.name,
+          phoneNumber: selectedReceiver.phone || undefined,
+        };
+        personalTripObj = await findOrCreateFriendSplitTrip(friendObj);
+        if (personalTripObj) {
+          targetTripId = personalTripObj.id;
+          await loadTripDetails(personalTripObj.id);
+          const pMembers: TripMember[] = useTripStore.getState().members.filter(m => m.trip_id === personalTripObj!.id);
+
+          const myMem = findMyMember(pMembers, currentUserId, (user as any)?.phone || (profile as any)?.phone_number);
+          if (myMem) payerMemberId = myMem.id;
+
+          const recMem = pMembers.find(m => m.id !== payerMemberId) || pMembers[1] || pMembers[0];
+          if (recMem) receiverMemberId = recMem.id;
+        }
+      }
+
+      if (!targetTripId) {
+        throw new Error('Could not identify trip or friend split for settlement.');
+      }
+
+      const targetDesc = `${paymentMethod === 'cash' ? '💵 Cash' : '📱 UPI'} Settlement: ${payerName} paid ${selectedReceiver.name}`;
+
+      // Dispatch pending settlement claim payload to chats so receiver can verify and accept!
       const payload = {
-        type: 'payment_claim',
+        type: 'payment_settlement',
         claimId,
         text: displayText,
         amountPaise,
         status: 'pending',
+        settledAt: new Date().toISOString(),
         paymentMode: paymentMethod,
         note: noteText.trim() || (paymentMethod === 'cash' ? 'Settled in cash' : 'Paid via UPI'),
         payerName,
         payerId: currentUserId,
+        payerMemberId,
         payerPhone: (user as any)?.phone || (profile as any)?.phone_number || null,
         receiverName: selectedReceiver.name,
         receiverId: selectedReceiver.profileId || selectedReceiver.id,
-        receiverMemberId: selectedReceiver.memberId,
+        receiverMemberId,
         receiverPhone: selectedReceiver.phone || null,
         screenshotUrl: cloudScreenshotUrl || screenshotUri,
         mediaUrl: cloudScreenshotUrl || screenshotUri,
         isTripRelated: Boolean(selectedTrip),
-        tripId: selectedTrip?.id || null,
-        tripName: selectedTrip?.name || null,
+        tripId: targetTripId,
+        tripName: selectedTrip?.name || personalTripObj?.name || null,
       };
 
-      // 2. Dispatch to chats
       if (selectedTrip) {
         // Send to group trip chat
         await sendMessage(
@@ -276,7 +337,13 @@ export default function SettleUpModal({
           currentUserId,
           payerName,
           JSON.stringify(payload),
-          undefined,
+          cloudScreenshotUrl || screenshotUri
+            ? {
+                type: 'image',
+                url: (cloudScreenshotUrl || screenshotUri) as string,
+                name: 'Payment_Screenshot.jpg',
+              }
+            : undefined,
           'group'
         );
 
@@ -294,7 +361,13 @@ export default function SettleUpModal({
               currentUserId,
               payerName,
               JSON.stringify({ ...payload, personalTripId: personalTrip.id }),
-              undefined,
+              cloudScreenshotUrl || screenshotUri
+                ? {
+                    type: 'image',
+                    url: (cloudScreenshotUrl || screenshotUri) as string,
+                    name: 'Payment_Screenshot.jpg',
+                  }
+                : undefined,
               'individual'
             );
           }
@@ -303,38 +376,41 @@ export default function SettleUpModal({
         }
       } else {
         // Direct personal split
-        const friendObj: any = {
-          id: selectedReceiver.profileId || selectedReceiver.id,
-          name: selectedReceiver.name,
-          phoneNumber: selectedReceiver.phone || undefined,
-        };
-        const personalTrip = await findOrCreateFriendSplitTrip(friendObj);
-        if (personalTrip) {
-          await sendMessage(
-            personalTrip.id,
-            currentUserId,
-            payerName,
-            JSON.stringify(payload),
-            undefined,
-            'individual'
-          );
-        }
+        await sendMessage(
+          targetTripId,
+          currentUserId,
+          payerName,
+          JSON.stringify(payload),
+          cloudScreenshotUrl || screenshotUri
+            ? {
+                type: 'image',
+                url: (cloudScreenshotUrl || screenshotUri) as string,
+                name: 'Payment_Screenshot.jpg',
+              }
+            : undefined,
+          'individual'
+        );
       }
 
-      // 3. Trigger Notification
+      // 4. Trigger Notification for receiver to verify and accept
       useNotificationStore.getState().addNotification({
         type: 'payment_claim',
         title: `💸 ${paymentMethod.toUpperCase()} Settlement: ${formatCurrencyAmount(amountPaise, 'INR')}`,
-        message: `${payerName} paid ${selectedReceiver.name} ${formatCurrencyAmount(amountPaise, 'INR')} via ${paymentMethod.toUpperCase()}. Tap to accept/decline.`,
-        tripId: selectedTrip?.id,
+        message: `${payerName} recorded a payment of ${formatCurrencyAmount(amountPaise, 'INR')} to ${selectedReceiver.name}. Tap to verify and accept.`,
+        tripId: targetTripId,
         amountPaise,
         senderId: currentUserId,
         senderName: payerName,
       });
 
+      // 5. Synchronize friends balances and trips
+      await useContactsStore.getState().fetchFriendsSummary(currentUserId);
+      await fetchTrips(currentUserId);
+      await loadTripDetails(targetTripId);
+
       Alert.alert(
-        'Payment Recorded! 🎉',
-        `A pending ${paymentMethod.toUpperCase()} settlement of ${formatCurrencyAmount(amountPaise, 'INR')} has been sent to ${selectedReceiver.name}. When they accept, it will be deducted from balances automatically.`,
+        'Payment Sent! 🎉',
+        `A pending ${paymentMethod.toUpperCase()} payment of ${formatCurrencyAmount(amountPaise, 'INR')} has been sent to ${selectedReceiver.name}.\n\nWhen they accept, it will be automatically deducted from your balances.`,
         [{ text: 'OK', onPress: onClose }]
       );
     } catch (e: any) {

@@ -61,6 +61,7 @@ import {
   deletedTripIdsSet,
   findMyMember,
   isValidUUID,
+  generateUUID,
 } from '../features/trips/useTripStore';
 import {
   useContactsStore,
@@ -2088,16 +2089,27 @@ export default function ChatView({
         remoteUrl = payScreenshotUri;
       }
 
-      const targetMem = tripMembers.find(m => m.id === payTargetMemberId) || otherMember || selectableMembers[0] || tripMembers[0];
+      const payerMem =
+        myMember ||
+        findMyMember(tripMembers, currentUserId, currentUserPhone) ||
+        tripMembers.find(m => m.profile_id === currentUserId || (m as any).user_id === currentUserId) ||
+        tripMembers[0];
+      const targetMem =
+        tripMembers.find(m => m.id === payTargetMemberId) ||
+        otherMember ||
+        selectableMembers[0] ||
+        tripMembers.find(m => m.id !== payerMem?.id) ||
+        tripMembers[0];
       const targetName = targetMem?.display_name || 'Member';
       const claimId = `claim_${Date.now()}`;
+      const targetDesc = `${payPaymentMode === 'cash' ? '💵 Cash' : '📱 UPI'} Settlement: ${resolvedSenderName} paid ${targetName}`;
 
       const payload = {
         type: 'payment_settlement',
         claimId,
         amountPaise,
         payerId: currentUserId,
-        payerMemberId: myMember?.id,
+        payerMemberId: payerMem?.id,
         payerName: resolvedSenderName,
         payerPhone: (user as any)?.phone || (profile as any)?.phone_number || null,
         receiverId: targetMem?.profile_id || targetMem?.id,
@@ -2247,9 +2259,11 @@ export default function ChatView({
       const mode = (payload.paymentMode || 'cash') as PaymentMode;
       const targetTripId = payload.tripId || tripId;
       const targetDesc = `${mode === 'cash' ? '💵 Cash' : '📱 UPI'} Settlement: ${payerName} paid ${receiverName}`;
+      const settlementExpenseId = generateUUID();
 
       // 1. Record settlement expense which mathematically offsets and deducts from debt/amount to receive!
       await addExpense({
+        expenseId: settlementExpenseId,
         tripId: targetTripId,
         amountPaise,
         description: targetDesc,
@@ -2284,6 +2298,8 @@ export default function ChatView({
       const updatedPayload = {
         ...payload,
         status: 'accepted',
+        expenseId: settlementExpenseId,
+        expense_id: settlementExpenseId,
         acceptedAt: new Date().toISOString(),
       };
       await editTripMessage(tripId, item.id, JSON.stringify(updatedPayload));
@@ -2320,9 +2336,8 @@ export default function ChatView({
       });
 
       await loadTripDetails(tripId);
-      if (!isGroup) {
-        useContactsStore.getState().fetchFriendsSummary(currentUserId);
-      }
+      await useContactsStore.getState().fetchFriendsSummary(currentUserId);
+      useTripStore.getState().fetchTrips(currentUserId);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not accept payment');
     }
@@ -2391,6 +2406,45 @@ export default function ChatView({
               await loadTripDetails(tripId);
             } catch (e: any) {
               Alert.alert('Error', e?.message || 'Could not reject payment');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteSettlementPrompt = (item: TripMessage) => {
+    let pData: any = item.payload;
+    if (!pData && item.content && item.content.startsWith('{')) {
+      try { pData = JSON.parse(item.content); } catch {}
+    }
+    if (!pData && item.message && item.message.startsWith('{')) {
+      try { pData = JSON.parse(item.message); } catch {}
+    }
+    pData = pData || {};
+
+    const amountPaise = Number(pData.amountPaise || pData.amount_paise) || 0;
+    const amtStr = formatCurrencyAmount(amountPaise, userCurrency);
+    const isAccepted = pData.status === 'accepted';
+
+    Alert.alert(
+      'Delete Settlement',
+      isAccepted
+        ? `Are you sure you want to delete this accepted settlement of ${amtStr}? The deducted balance will be restored.`
+        : `Are you sure you want to delete this pending settlement of ${amtStr}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteTripMessage(tripId, item.id);
+              await loadTripDetails(tripId);
+              await useContactsStore.getState().fetchFriendsSummary(currentUserId);
+              useTripStore.getState().fetchTrips(currentUserId);
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not delete settlement');
             }
           },
         },
@@ -3433,7 +3487,9 @@ export default function ChatView({
 
             return wrapWithDateHeader(
               <View style={styles.settlementCardContainer}>
-                <View
+                <TouchableOpacity
+                  activeOpacity={0.92}
+                  onLongPress={() => handleDeleteSettlementPrompt(item)}
                   style={[
                     styles.settlementCard,
                     {
@@ -3465,8 +3521,13 @@ export default function ChatView({
                       />
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={[styles.settleCardTitle, { color: colors.text }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text
+                          style={[styles.settleCardTitle, { color: colors.text }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit={true}
+                          minimumFontScale={0.72}
+                        >
                           Payment: {amtStr}
                         </Text>
                         <View
@@ -3560,9 +3621,9 @@ export default function ChatView({
                   )}
 
                   {isPending && !isReceiver && (
-                    <View style={[styles.settlePendingNotice, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
-                      <Ionicons name="time-outline" size={15} color={colors.textMuted} style={{ marginRight: 6 }} />
-                      <Text style={[styles.settlePendingText, { color: colors.textMuted }]}>
+                    <View style={[styles.settlePendingNotice, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', marginHorizontal: 12, marginBottom: 8 }]}>
+                      <Ionicons name="time-outline" size={14} color="#D97706" style={{ marginRight: 6 }} />
+                      <Text style={[styles.settlePendingText, { color: isDark ? '#FBBF24' : '#D97706', flex: 1 }]} numberOfLines={2}>
                         Waiting for {receiverName} to verify and accept.
                       </Text>
                     </View>
@@ -3586,12 +3647,21 @@ export default function ChatView({
                     </View>
                   )}
 
-                  <View style={[styles.settleCardBottom, { borderTopColor: colors.borderLight }]}>
+                  <View style={[styles.settleCardBottom, { borderTopColor: colors.borderLight, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
                     <Text style={[styles.timestampText, { color: colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 2, paddingHorizontal: 6 }}
+                      onPress={() => handleDeleteSettlementPrompt(item)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="trash-outline" size={14} color={colors.danger} style={{ marginRight: 4 }} />
+                      <Text style={{ fontSize: scaleFont(11), color: colors.danger, fontWeight: '600' }}>Delete</Text>
+                    </TouchableOpacity>
                   </View>
-                </View>
+                </TouchableOpacity>
               </View>
             );
           }
