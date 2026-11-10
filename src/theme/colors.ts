@@ -24,16 +24,16 @@ export const lightColors = {
   borderLight: '#E4E7EC',
   surfaceDark: '#1E2126',
   inputBackground: '#F8FAFC',
-  silver: '#C5CAD3',            // Moonlight Silver
-  silverBg: '#C5CAD3',
+  silver: '#E8ECF2',            // Brighter Moonlight Silver
+  silverBg: '#E8ECF2',
   textOnSilver: '#B5504F',      // Dull Red text / highlights on Moonlight Silver
   silverBadgeText: '#B5504F',
 };
 
 export const darkColors = {
-  primary: '#C5CAD3',           // Moonlight Silver (RGB 197, 202, 211) — buttons, key surfaces, icons
-  primaryLight: 'rgba(197, 202, 211, 0.15)',
-  primaryDark: '#9BA3AF',       // Deeper silver accent
+  primary: '#E8ECF2',           // Brighter Moonlight Silver (RGB 232, 236, 242) — luminous buttons, key surfaces, icons
+  primaryLight: 'rgba(232, 236, 242, 0.16)',
+  primaryDark: '#C5CAD3',       // Metallic Silver gradient accent
   secondary: '#B5504F',         // Dull Red (RGB 181, 80, 79) — alerts, amounts owed, highlight
   success: '#5E8C6A',           // Dull Green (RGB 94, 140, 106) — settled payments, active badges
   successBg: 'rgba(94, 140, 106, 0.15)',
@@ -51,8 +51,8 @@ export const darkColors = {
   borderLight: '#343940',
   surfaceDark: '#1E2126',
   inputBackground: '#24272D',   // Deep Charcoal input field
-  silver: '#C5CAD3',            // Moonlight Silver
-  silverBg: '#C5CAD3',
+  silver: '#E8ECF2',            // Brighter Moonlight Silver
+  silverBg: '#E8ECF2',
   textOnSilver: '#B5504F',      // Dull Red text / highlights over Moonlight Silver
   silverBadgeText: '#B5504F',
 };

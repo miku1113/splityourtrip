@@ -705,7 +705,7 @@ export default function LoginScreen() {
                 disabled={loading || googleLoading}
               >
                 <LinearGradient
-                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#C5CAD3', '#9BA3AF']}
+                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E8ECF2', '#C5CAD3']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnGradient}
