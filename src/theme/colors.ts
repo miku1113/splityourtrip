@@ -1,51 +1,59 @@
 // ─────────────────────────────────────────────────────
-// SplitYourTrip — Powdered Blue + Soft Lavender White + Warm Sunset Peach
+// SplitYourTrip — Charcoal Gray + Moonlight Silver + Signal Red Palette
 // ─────────────────────────────────────────────────────
 
 export const lightColors = {
-  primary: '#4A85B6',           // Powdered Blue — soothing, clean signature brand
-  primaryLight: 'rgba(74, 133, 182, 0.12)',
-  primaryDark: '#386B94',       // Powdered Blue Deep — pressed / emphasis
-  secondary: '#F27A59',         // Warm Sunset Peach — radiant energetic accent
+  primary: '#1E2229',           // Charcoal Gray — bold, confident anchor
+  primaryLight: 'rgba(30, 34, 41, 0.10)',
+  primaryDark: '#121418',       // Deepest Charcoal — pressed / emphasis
+  secondary: '#DC2626',         // Signal Red — bold, high-visibility highlight
   success: '#10B981',           // Emerald 500 — crisp, confident green
   successBg: 'rgba(16, 185, 129, 0.10)',
-  danger: '#EF4444',            // Red 500 — clear, unambiguous
-  dangerBg: 'rgba(239, 68, 68, 0.08)',
-  warning: '#F27A59',           // Warm Sunset Peach
-  warningBg: 'rgba(242, 122, 89, 0.12)',
-  background: '#F7F5FA',        // Soft Lavender White
+  danger: '#DC2626',            // Signal Red
+  dangerBg: 'rgba(220, 38, 38, 0.08)',
+  warning: '#F59E0B',           // Warm Amber
+  warningBg: 'rgba(245, 158, 11, 0.10)',
+  background: '#F1F3F7',        // Moonlight Silver White
   card: '#FFFFFF',
-  cardSecondary: '#EFEBF5',     // Soft lavender-tinted secondary surface
-  text: '#1A1A24',              // Deep obsidian — high contrast
-  textSecondary: '#6B6D82',     // Slate lavender secondary
-  textMuted: '#9E9EB2',         // Muted lavender gray
-  border: '#E3DFEC',            // Delicate lavender-tinted border
-  borderLight: '#EFEBFA',
-  surfaceDark: '#141522',
-  inputBackground: '#FAF8FD',   // Barely-there lavender white input field
+  cardSecondary: '#E4E7EC',     // Soft Silver secondary card
+  text: '#111318',              // Charcoal Black — maximum legibility
+  textSecondary: '#64748B',     // Slate Silver secondary
+  textMuted: '#94A3B8',         // Muted Silver
+  border: '#D0D5DD',            // Polished Silver border
+  borderLight: '#E4E7EC',
+  surfaceDark: '#111318',
+  inputBackground: '#F8FAFC',   // Crisp Silver White input field
+  silver: '#E2E8F0',            // Moonlight Silver surface
+  silverBg: '#E2E8F0',
+  textOnSilver: '#DC2626',      // Signal Red text / icons over Moonlight Silver
+  silverBadgeText: '#DC2626',
 };
 
 export const darkColors = {
-  primary: '#7AAFD6',           // Powdered Blue — bright, luminous on dark surfaces
-  primaryLight: 'rgba(122, 175, 214, 0.16)',
-  primaryDark: '#5890BA',       // Powdered Blue Medium
-  secondary: '#FFA38A',         // Warm Sunset Peach — vibrant glow on dark
+  primary: '#E2E8F0',           // Moonlight Silver — luminous, clean metallic sheen
+  primaryLight: 'rgba(226, 232, 240, 0.14)',
+  primaryDark: '#CBD5E1',       // Polished Silver
+  secondary: '#EF4444',         // Signal Red — high-contrast vibrant highlight
   success: '#34D399',           // Emerald 400
   successBg: 'rgba(52, 211, 153, 0.14)',
-  danger: '#F87171',            // Red 400
-  dangerBg: 'rgba(248, 113, 113, 0.14)',
-  warning: '#FFA38A',           // Warm Sunset Peach
-  warningBg: 'rgba(255, 163, 138, 0.15)',
-  background: '#0E0F1A',        // Deep midnight lavender
-  card: '#161726',              // Lavender-tinted dark card surface
-  cardSecondary: '#1D1E30',     // Inset surface
-  text: '#F3F4F8',              // Clean off-white
-  textSecondary: '#9DA0B5',     // Cool muted slate
-  textMuted: '#686B80',
-  border: '#26283E',            // Midnight lavender border
-  borderLight: '#1D1F32',
-  surfaceDark: '#090A12',
-  inputBackground: '#171829',   // Deep lavender input field
+  danger: '#EF4444',            // Signal Red
+  dangerBg: 'rgba(239, 68, 68, 0.14)',
+  warning: '#FBBF24',           // Amber 400
+  warningBg: 'rgba(251, 191, 36, 0.14)',
+  background: '#14161A',        // Matte Charcoal Gray
+  card: '#1E2229',              // Elevated Charcoal card surface
+  cardSecondary: '#272C35',     // Inset Charcoal surface
+  text: '#F8FAFC',              // Clean Moonlight White
+  textSecondary: '#94A3B8',     // Silver Mist secondary text
+  textMuted: '#64748B',         // Slate Charcoal
+  border: '#2E3440',            // Charcoal border
+  borderLight: '#242832',
+  surfaceDark: '#0D0E12',
+  inputBackground: '#1A1D24',   // Deep Charcoal input field
+  silver: '#E2E8F0',            // Moonlight Silver surface
+  silverBg: '#E2E8F0',
+  textOnSilver: '#EF4444',      // Signal Red text / icons over Moonlight Silver
+  silverBadgeText: '#EF4444',
 };
 
 export { scale, verticalScale, moderateScale, scaleFont, wp, hp, isSmallDevice, isTablet, Device, useResponsive } from './responsive';

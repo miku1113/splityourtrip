@@ -134,17 +134,17 @@ export default function SplashScreen() {
 
   const badgeBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(122, 175, 214, 0.18)', 'rgba(74, 133, 182, 0.12)'],
+    outputRange: ['rgba(226, 232, 240, 0.18)', 'rgba(30, 34, 41, 0.10)'],
   });
 
   const badgeBorder = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(122, 175, 214, 0.40)', 'rgba(74, 133, 182, 0.30)'],
+    outputRange: ['rgba(226, 232, 240, 0.40)', 'rgba(30, 34, 41, 0.30)'],
   });
 
   const continueBtnBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#7AAFD6', '#4A85B6'],
+    outputRange: ['#E2E8F0', '#1E2229'],
   });
 
   useEffect(() => {
