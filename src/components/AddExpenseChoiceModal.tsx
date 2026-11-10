@@ -247,10 +247,12 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
       <DraggableBottomSheet
         visible={visible}
         onClose={handleClose}
-        defaultHeight="70%"
+        height="88%"
         maxHeight="92%"
         sheetStyle={{
-          paddingBottom: Math.max(insets.bottom, 20),
+          maxWidth: 640,
+          alignSelf: 'center',
+          width: '100%',
           paddingHorizontal: moderateScale(20),
         }}
       >
@@ -289,9 +291,15 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
           {step === 'choose_type' && (
             <ScrollView
               style={{ flex: 1 }}
-              contentContainerStyle={styles.optionsContainer}
+              contentContainerStyle={[
+                styles.optionsContainer,
+                { paddingBottom: Math.max(insets.bottom, 24) + 16 },
+              ]}
               showsVerticalScrollIndicator={false}
               bounces={true}
+              nestedScrollEnabled={true}
+              alwaysBounceVertical={false}
+              keyboardShouldPersistTaps="handled"
             >
               <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
                 Choose how you want to split this expense:
@@ -302,15 +310,24 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.choiceCard,
                   {
-                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#F5F7FF',
-                    borderColor: isDark ? colors.border : '#E0E7FF',
+                    backgroundColor: isDark ? colors.card : '#FFFFFF',
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={() => setStep('select_trip')}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
-                  <Ionicons name="airplane" size={24} color={colors.textOnSilver || '#B5504F'} />
+                <View
+                  style={[
+                    styles.iconCircle,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(232, 236, 242, 0.14)'
+                        : 'rgba(43, 47, 54, 0.08)',
+                    },
+                  ]}
+                >
+                  <Ionicons name="airplane" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <Text style={[styles.choiceTitle, { color: colors.text }]}>
@@ -320,7 +337,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     Split among members of a group trip ({groupTripsOnly.length} active {groupTripsOnly.length === 1 ? 'trip' : 'trips'})
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
               {/* Option 2: Single User / Friend */}
@@ -328,8 +345,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.choiceCard,
                   {
-                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.12)' : '#F0FDF4',
-                    borderColor: isDark ? colors.border : '#DCFCE7',
+                    backgroundColor: isDark ? colors.card : '#FFFFFF',
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={() => {
@@ -338,10 +355,10 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     initContacts();
                   }
                 }}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <View style={[styles.iconCircle, { backgroundColor: colors.success }]}>
-                  <Ionicons name="person-add" size={24} color="#FFFFFF" />
+                <View style={[styles.iconCircle, { backgroundColor: colors.successBg }]}>
+                  <Ionicons name="person-add" size={22} color={colors.success} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <Text style={[styles.choiceTitle, { color: colors.text }]}>
@@ -351,7 +368,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     Direct 1-on-1 split with a contact or friend
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
               {/* Option: Personal Expense (You) */}
@@ -359,8 +376,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.choiceCard,
                   {
-                    backgroundColor: isDark ? 'rgba(168, 85, 247, 0.12)' : '#FAF5FF',
-                    borderColor: isDark ? colors.border : '#F3E8FF',
+                    backgroundColor: isDark ? colors.card : '#FFFFFF',
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={async () => {
@@ -377,20 +394,45 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     console.log('Error opening personal expense:', e);
                   }
                 }}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <View style={[styles.iconCircle, { backgroundColor: '#8B5CF6' }]}>
-                  <Ionicons name="person" size={22} color="#FFFFFF" />
+                <View
+                  style={[
+                    styles.iconCircle,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(160, 167, 181, 0.15)'
+                        : 'rgba(100, 116, 139, 0.12)',
+                    },
+                  ]}
+                >
+                  <Ionicons name="person" size={22} color={isDark ? '#E8ECF2' : '#2B2F36'} />
                 </View>
                 <View style={styles.choiceTextContainer}>
-                  <Text style={[styles.choiceTitle, { color: colors.text }]}>
-                    Personal Expense (You)
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.choiceTitle, { color: colors.text }]}>
+                      Personal Expense (You)
+                    </Text>
+                    <View
+                      style={[
+                        styles.badgePill,
+                        {
+                          backgroundColor: isDark
+                            ? 'rgba(232, 236, 242, 0.12)'
+                            : 'rgba(43, 47, 54, 0.08)',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.badgePillText, { color: colors.textSecondary }]}>
+                        PRIVATE
+                      </Text>
+                    </View>
+                  </View>
                   <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
                     Track an expense spent on yourself (not split)
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
               {/* Option 3: Scan Bill or Payment (AI Auto-detect) */}
@@ -398,30 +440,32 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.choiceCard,
                   {
-                    backgroundColor: isDark ? 'rgba(234, 179, 8, 0.12)' : '#FEFCE8',
-                    borderColor: isDark ? colors.border : '#FEF08A',
+                    backgroundColor: isDark ? colors.card : '#FFFFFF',
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={handleScanBill}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <View style={[styles.iconCircle, { backgroundColor: '#EAB308' }]}>
-                  <Ionicons name="scan" size={24} color="#FFFFFF" />
+                <View style={[styles.iconCircle, { backgroundColor: colors.warningBg }]}>
+                  <Ionicons name="scan" size={22} color={colors.warning} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.choiceTitle, { color: colors.text }]}>
                       Scan Bill or Payment
                     </Text>
-                    <View style={styles.ocrChoiceBadge}>
-                      <Text style={styles.ocrChoiceBadgeText}>AI SCANNER</Text>
+                    <View style={[styles.badgePill, { backgroundColor: colors.warningBg }]}>
+                      <Text style={[styles.badgePillText, { color: colors.warning }]}>
+                        AI SCANNER
+                      </Text>
                     </View>
                   </View>
                   <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
                     Auto-scan bills, restaurant receipts & UPI from camera or gallery
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
               {/* Option 4: Add Expense with Voice (AI Voice Assistant) */}
@@ -429,30 +473,32 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.choiceCard,
                   {
-                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#F5F7FF',
-                    borderColor: isDark ? colors.border : '#E0E7FF',
+                    backgroundColor: isDark ? colors.card : '#FFFFFF',
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={handleOpenVoiceExpense}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
-                  <Ionicons name="mic" size={24} color={colors.textOnSilver || '#B5504F'} />
+                <View style={[styles.iconCircle, { backgroundColor: colors.dangerBg }]}>
+                  <Ionicons name="mic" size={22} color={colors.danger} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.choiceTitle, { color: colors.text }]}>
                       Add Expense with Voice
                     </Text>
-                    <View style={[styles.ocrChoiceBadge, { backgroundColor: colors.primaryLight }]}>
-                      <Text style={[styles.ocrChoiceBadgeText, { color: colors.primary }]}>AI VOICE</Text>
+                    <View style={[styles.badgePill, { backgroundColor: colors.dangerBg }]}>
+                      <Text style={[styles.badgePillText, { color: colors.danger }]}>
+                        AI VOICE
+                      </Text>
                     </View>
                   </View>
                   <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
                     Speak bill details to auto-split across all or specific members
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
               {/* Option 5: Settle Up / Pay (Cash or UPI) */}
@@ -460,8 +506,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.choiceCard,
                   {
-                    backgroundColor: isDark ? 'rgba(168, 85, 247, 0.12)' : '#FAF5FF',
-                    borderColor: isDark ? colors.border : '#F3E8FF',
+                    backgroundColor: isDark ? colors.card : '#FFFFFF',
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={() => {
@@ -471,25 +517,27 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     handleClose();
                   }
                 }}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <View style={[styles.iconCircle, { backgroundColor: '#A855F7' }]}>
-                  <Ionicons name="wallet" size={24} color="#FFFFFF" />
+                <View style={[styles.iconCircle, { backgroundColor: colors.successBg }]}>
+                  <Ionicons name="wallet" size={22} color={colors.success} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.choiceTitle, { color: colors.text }]}>
                       Settle Up / Pay
                     </Text>
-                    <View style={[styles.ocrChoiceBadge, { backgroundColor: '#A855F7' }]}>
-                      <Text style={styles.ocrChoiceBadgeText}>CASH & UPI</Text>
+                    <View style={[styles.badgePill, { backgroundColor: colors.successBg }]}>
+                      <Text style={[styles.badgePillText, { color: colors.success }]}>
+                        CASH & UPI
+                      </Text>
                     </View>
                   </View>
                   <Text style={[styles.choiceDesc, { color: colors.textSecondary }]}>
                     Pay someone via Cash or UPI & record settlement
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             </ScrollView>
           )}
@@ -502,8 +550,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.directCreateTripBtn,
                   {
-                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#EEF2FF',
-                    borderColor: colors.primary,
+                    backgroundColor: colors.cardSecondary,
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={() => {
@@ -516,14 +564,14 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                   <Ionicons name="add" size={18} color={colors.textOnSilver || '#B5504F'} />
                 </View>
                 <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={[styles.directCreateTitle, { color: colors.primary }]}>
+                  <Text style={[styles.directCreateTitle, { color: colors.text }]}>
                     + Create New Trip
                   </Text>
                   <Text style={[styles.directCreateSub, { color: colors.textSecondary }]}>
                     Plan a new group trip and add members
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
 
               {/* Search trips */}
@@ -559,7 +607,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                   keyExtractor={item => item.id}
                   style={styles.scrollList}
                   contentContainerStyle={{
-                    paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                    paddingBottom: Math.max(insets.bottom, 24) + 20,
                   }}
                   showsVerticalScrollIndicator={false}
                   onEndReached={handleLoadMoreTrips}
@@ -653,32 +701,36 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 style={[
                   styles.directCreateTripBtn,
                   {
-                    backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : '#F3E8FF',
-                    borderColor: '#7C3AED',
+                    backgroundColor: colors.cardSecondary,
+                    borderColor: colors.border,
                   },
                 ]}
                 onPress={() => setShowInlineAddContact(!showInlineAddContact)}
                 activeOpacity={0.8}
               >
-                <View style={[styles.directCreateIcon, { backgroundColor: '#7C3AED' }]}>
-                  <Ionicons name="person-add" size={18} color="#FFFFFF" />
+                <View style={[styles.directCreateIcon, { backgroundColor: colors.success }]}>
+                  <Ionicons name="person-add" size={16} color="#FFFFFF" />
                 </View>
                 <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={[styles.directCreateTitle, { color: isDark ? '#A78BFA' : '#7C3AED' }]}>
+                  <Text style={[styles.directCreateTitle, { color: colors.text }]}>
                     + Add New Contact
                   </Text>
                   <Text style={[styles.directCreateSub, { color: colors.textSecondary }]}>
                     Enter friend's name and split an expense 1-on-1
                   </Text>
                 </View>
-                <Ionicons name={showInlineAddContact ? "chevron-up" : "chevron-down"} size={18} color="#7C3AED" />
+                <Ionicons
+                  name={showInlineAddContact ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={colors.textSecondary}
+                />
               </TouchableOpacity>
 
               {/* Inline Add Contact Form when expanded */}
               {showInlineAddContact && (
                 <View
                   style={{
-                    backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                    backgroundColor: colors.cardSecondary,
                     borderWidth: 1,
                     borderColor: colors.border,
                     borderRadius: 14,
@@ -731,7 +783,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                   <TouchableOpacity
                     style={{
                       height: 40,
-                      backgroundColor: '#7C3AED',
+                      backgroundColor: colors.primary,
                       borderRadius: 10,
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -743,11 +795,11 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                     disabled={!newContactName.trim() || isSavingContact}
                   >
                     {isSavingContact ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
+                      <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                     ) : (
                       <>
-                        <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-                        <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>
+                        <Ionicons name="arrow-forward" size={16} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={{ color: colors.textOnSilver || '#B5504F', fontWeight: '700', fontSize: 13 }}>
                           Save &amp; Start Split
                         </Text>
                       </>
@@ -789,7 +841,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                   keyExtractor={item => item.id}
                   style={styles.scrollList}
                   contentContainerStyle={{
-                    paddingBottom: isExpanded ? 24 : snapOffset + 24,
+                    paddingBottom: Math.max(insets.bottom, 24) + 20,
                   }}
                   showsVerticalScrollIndicator={false}
                   onEndReached={handleLoadMoreFriends}
@@ -842,9 +894,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                           {
                             backgroundColor: friend.isRegistered
                               ? colors.primaryLight
-                              : isDark
-                              ? '#374151'
-                              : '#F3F4F6',
+                              : colors.cardSecondary,
                           },
                         ]}
                       >
@@ -940,39 +990,39 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   optionsContainer: {
-    paddingVertical: moderateScale(8),
-    paddingBottom: moderateScale(28),
+    paddingVertical: moderateScale(6),
   },
   sectionSubtitle: {
-    fontSize: scaleFont(14),
-    marginBottom: moderateScale(14),
+    fontSize: scaleFont(13.5),
+    marginBottom: moderateScale(12),
   },
   choiceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: moderateScale(14),
+    padding: moderateScale(12),
     borderRadius: 16,
     borderWidth: 1,
-    marginBottom: moderateScale(11),
+    marginBottom: moderateScale(9),
   },
   iconCircle: {
-    width: moderateScale(48),
-    height: moderateScale(48),
-    borderRadius: moderateScale(24),
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(22),
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: moderateScale(14),
+    marginRight: moderateScale(13),
   },
   choiceTextContainer: {
     flex: 1,
   },
   choiceTitle: {
-    fontSize: scaleFont(16),
+    fontSize: scaleFont(15),
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   choiceDesc: {
-    fontSize: scaleFont(13),
+    fontSize: scaleFont(12.5),
+    lineHeight: scaleFont(16),
   },
   listSection: {
     flex: 1,
@@ -1104,15 +1154,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 1,
   },
-  ocrChoiceBadge: {
-    backgroundColor: '#FEF08A',
-    paddingHorizontal: 6,
+  badgePill: {
+    paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 8,
+    borderRadius: 6,
   },
-  ocrChoiceBadgeText: {
-    color: '#854D0E',
-    fontSize: 10,
+  badgePillText: {
+    fontSize: scaleFont(10),
     fontWeight: '800',
+    letterSpacing: 0.4,
   },
 });
