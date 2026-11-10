@@ -216,6 +216,8 @@ const FriendRowItem = React.memo(function FriendRowItem({
                         { color: net >= 0 ? colors.success : colors.danger },
                       ]}
                       numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.72}
                     >
                       {net >= 0 ? '+' : '-'} {formatCurrencyAmount(Math.abs(net), userCurrency)}
                     </Text>
@@ -232,6 +234,8 @@ const FriendRowItem = React.memo(function FriendRowItem({
                         { color: toGet > 0 ? colors.success : colors.danger },
                       ]}
                       numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.72}
                     >
                       {toGet > 0
                         ? `+${formatCurrencyAmount(toGet, userCurrency)}`
@@ -250,7 +254,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                   {
                     backgroundColor: colors.primaryLight,
                     borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
-                    marginRight: 6,
+                    marginRight: 4,
                   },
                 ]}
                 onPress={(e) => {
@@ -260,7 +264,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="add" size={17} color={colors.primary} />
+                <Ionicons name="add" size={15} color={colors.primary} />
               </TouchableOpacity>
 
               {!item.isRegistered && item.phoneNumber ? (
@@ -268,10 +272,10 @@ const FriendRowItem = React.memo(function FriendRowItem({
                   style={[styles.inviteMiniBtn, { backgroundColor: '#25D366' }]}
                   onPress={() => onInvite(item.name, item.phoneNumber)}
                 >
-                  <Ionicons name="logo-whatsapp" size={13} color="#FFFFFF" />
+                  <Ionicons name="logo-whatsapp" size={12} color="#FFFFFF" />
                 </TouchableOpacity>
               ) : (
-                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 2 }} />
+                <Ionicons name="chevron-forward" size={15} color={colors.textMuted} style={{ marginLeft: 2 }} />
               )}
             </View>
           )}
@@ -763,10 +767,10 @@ export default function FriendsScreen() {
                     {profile?.avatar_url ? (
                       <Image
                         source={{ uri: profile.avatar_url }}
-                        style={{ width: '100%', height: '100%', borderRadius: 21 }}
+                        style={{ width: '100%', height: '100%', borderRadius: 12 }}
                       />
                     ) : (
-                      <Ionicons name="person" size={20} color={colors.primary} />
+                      <Ionicons name="person" size={17} color={colors.primary} />
                     )}
                   </View>
                 </View>
@@ -794,7 +798,7 @@ export default function FriendsScreen() {
                       {
                         backgroundColor: colors.primaryLight,
                         borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
-                        marginRight: 6,
+                        marginRight: 4,
                       },
                     ]}
                     onPress={(e) => {
@@ -804,9 +808,9 @@ export default function FriendsScreen() {
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="add" size={16} color={colors.primary} />
+                    <Ionicons name="add" size={15} color={colors.primary} />
                   </TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
                 </View>
               </TouchableOpacity>
             </View>
@@ -965,9 +969,9 @@ const styles = StyleSheet.create({
     paddingBottom: moderateScale(100),
   },
   friendCardItem: {
-    borderRadius: 16,
-    borderWidth: 1.2,
-    marginBottom: 8,
+    borderRadius: 13,
+    borderWidth: 1.1,
+    marginBottom: moderateScale(6),
     overflow: 'hidden',
   },
   friendRowContainer: {
@@ -976,31 +980,31 @@ const styles = StyleSheet.create({
   friendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: moderateScale(12),
-    paddingHorizontal: moderateScale(14),
+    paddingVertical: moderateScale(8),
+    paddingHorizontal: moderateScale(12),
   },
   avatarWrapper: {
     position: 'relative',
-    marginRight: moderateScale(12),
+    marginRight: moderateScale(10),
   },
   avatar: {
-    width: moderateScale(44),
-    height: moderateScale(44),
-    borderRadius: moderateScale(22),
+    width: moderateScale(38),
+    height: moderateScale(38),
+    borderRadius: moderateScale(19),
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarStatusDot: {
     position: 'absolute',
-    bottom: -1,
-    right: -1,
-    width: moderateScale(12),
-    height: moderateScale(12),
-    borderRadius: moderateScale(6),
-    borderWidth: 2,
+    bottom: 0,
+    right: 0,
+    width: moderateScale(10),
+    height: moderateScale(10),
+    borderRadius: moderateScale(5),
+    borderWidth: 1.5,
   },
   avatarText: {
-    fontSize: scaleFont(17),
+    fontSize: scaleFont(15.5),
     fontWeight: '700',
   },
   friendDetails: {
@@ -1010,34 +1014,34 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   friendName: {
-    fontSize: scaleFont(15),
+    fontSize: scaleFont(14.5),
     fontWeight: '700',
   },
   appBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 4,
   },
   appBadgeText: {
-    fontSize: scaleFont(10),
+    fontSize: scaleFont(9.5),
     fontWeight: '700',
   },
   unreadBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
   },
   unreadBadgeText: {
     color: '#B5504F',
-    fontSize: scaleFont(10),
+    fontSize: scaleFont(9.5),
     fontWeight: '700',
   },
   friendPhone: {
-    fontSize: scaleFont(12),
-    marginTop: 3,
+    fontSize: scaleFont(11.5),
+    marginTop: 1.5,
   },
   rightActionCol: {
     marginLeft: moderateScale(8),
@@ -1093,31 +1097,31 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   heroAmountText: {
-    fontSize: scaleFont(15),
+    fontSize: scaleFont(14),
     fontWeight: '800',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   dualSubText: {
-    fontSize: scaleFont(10.5),
+    fontSize: scaleFont(10),
     fontWeight: '600',
-    marginTop: 2,
+    marginTop: 1,
   },
   settledBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   balSettledText: {
-    fontSize: scaleFont(12),
+    fontSize: scaleFont(11.5),
     fontWeight: '600',
   },
   inviteMiniBtn: {
-    width: moderateScale(26),
-    height: moderateScale(26),
-    borderRadius: moderateScale(13),
+    width: moderateScale(24),
+    height: moderateScale(24),
+    borderRadius: moderateScale(12),
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 6,
+    marginLeft: 4,
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,
@@ -1180,24 +1184,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   youCardContainer: {
-    marginBottom: moderateScale(12),
-    borderRadius: 18,
-    borderWidth: 1.2,
+    marginBottom: moderateScale(6),
+    borderRadius: 13,
+    borderWidth: 1.1,
     overflow: 'hidden',
   },
   youCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: moderateScale(12),
-    paddingHorizontal: moderateScale(14),
+    paddingVertical: moderateScale(8),
+    paddingHorizontal: moderateScale(12),
   },
   youAvatarWrapper: {
-    marginRight: moderateScale(12),
+    marginRight: moderateScale(10),
   },
   youAvatar: {
-    width: moderateScale(42),
-    height: moderateScale(42),
-    borderRadius: 14,
+    width: moderateScale(38),
+    height: moderateScale(38),
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1207,24 +1211,24 @@ const styles = StyleSheet.create({
   youTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   youTitle: {
-    fontSize: scaleFont(15),
+    fontSize: scaleFont(14.5),
     fontWeight: '700',
   },
   youBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 4,
   },
   youBadgeText: {
-    fontSize: scaleFont(10),
+    fontSize: scaleFont(9.5),
     fontWeight: '700',
   },
   youSub: {
-    fontSize: scaleFont(12),
-    marginTop: 2,
+    fontSize: scaleFont(11.5),
+    marginTop: 1.5,
   },
   youRightCol: {
     flexDirection: 'row',

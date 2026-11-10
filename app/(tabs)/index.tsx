@@ -486,7 +486,7 @@ export default function MyTripsScreen() {
             end={{ x: 1, y: 1 }}
             style={styles.voiceMicCircle}
           >
-            <Ionicons name="mic" size={18} color="#FFFFFF" />
+            <Ionicons name="mic" size={16} color="#FFFFFF" />
           </LinearGradient>
           <View style={styles.voiceWidgetTextCol}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -614,7 +614,8 @@ export default function MyTripsScreen() {
               >
                 <TripCoverBadge
                   imageUrl={item.image_url}
-                  size={46}
+                  size={38}
+                  borderRadius={10}
                   style={styles.tripBadge}
                   fallbackEmoji="🌴"
                 />
@@ -624,7 +625,7 @@ export default function MyTripsScreen() {
                     {item.name}
                   </Text>
                   <View style={styles.tripSubRow}>
-                    <Ionicons name="calendar-outline" size={12} color={colors.textMuted} style={{ marginRight: 4 }} />
+                    <Ionicons name="calendar-outline" size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
                     <Text style={[styles.tripDates, { color: colors.textSecondary }]} numberOfLines={1}>
                       {item.start_date ? `${item.start_date}${item.end_date ? ` • ${item.end_date}` : ''}` : 'Ongoing trip'}
                     </Text>
@@ -655,10 +656,10 @@ export default function MyTripsScreen() {
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           activeOpacity={0.7}
                         >
-                          <Ionicons name="add" size={17} color={colors.primary} />
+                          <Ionicons name="add" size={15} color={colors.primary} />
                         </TouchableOpacity>
                       )}
-                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} style={{ marginLeft: 4 }} />
+                      <Ionicons name="chevron-forward" size={15} color={colors.textMuted} style={{ marginLeft: 3 }} />
                     </View>
                   )}
                 </View>
@@ -1433,22 +1434,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginHorizontal: moderateScale(16),
-    marginBottom: moderateScale(12),
-    paddingHorizontal: moderateScale(14),
-    paddingVertical: moderateScale(12),
-    borderRadius: 16,
-    borderWidth: 1.2,
+    marginBottom: moderateScale(8),
+    paddingHorizontal: moderateScale(12),
+    paddingVertical: moderateScale(8.5),
+    borderRadius: 13,
+    borderWidth: 1.1,
   },
   voiceWidgetLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    gap: 12,
+    gap: 10,
   },
   voiceMicCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     shadowOffset: { width: 0, height: 2 },
@@ -1460,21 +1461,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   voiceWidgetTitle: {
-    fontSize: scaleFont(14),
+    fontSize: scaleFont(13.5),
     fontWeight: '700',
   },
   voicePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 5,
   },
   voicePillText: {
-    fontSize: scaleFont(10),
+    fontSize: scaleFont(9.5),
     fontWeight: '800',
   },
   voiceWidgetSub: {
-    fontSize: scaleFont(12),
-    marginTop: 2,
+    fontSize: scaleFont(11.5),
+    marginTop: 1.5,
   },
   loadingBanner: {
     flexDirection: 'row',
@@ -1496,9 +1497,9 @@ const styles = StyleSheet.create({
     paddingBottom: moderateScale(100),
   },
   tripCardItem: {
-    borderRadius: 18,
-    borderWidth: 1.2,
-    marginBottom: 10,
+    borderRadius: 13,
+    borderWidth: 1.1,
+    marginBottom: moderateScale(6),
     overflow: 'hidden',
   },
   tripRowContainer: {
@@ -1507,13 +1508,13 @@ const styles = StyleSheet.create({
   tripRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: moderateScale(12),
-    paddingHorizontal: moderateScale(14),
+    paddingVertical: moderateScale(8),
+    paddingHorizontal: moderateScale(12),
   },
   tripBadge: {
-    width: moderateScale(46),
-    height: moderateScale(46),
-    borderRadius: 14,
+    width: moderateScale(38),
+    height: moderateScale(38),
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -1523,25 +1524,25 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   tripBadgeText: {
-    fontSize: scaleFont(22),
+    fontSize: scaleFont(18),
   },
   tripInfo: {
     flex: 1,
-    marginLeft: moderateScale(12),
-    marginRight: moderateScale(8),
+    marginLeft: moderateScale(10),
+    marginRight: moderateScale(6),
   },
   tripName: {
-    fontSize: scaleFont(16),
+    fontSize: scaleFont(15),
     fontWeight: '700',
     letterSpacing: -0.2,
   },
   tripSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 3,
+    marginTop: 2,
   },
   tripDates: {
-    fontSize: scaleFont(12),
+    fontSize: scaleFont(11.5),
   },
   tripRightCol: {
     alignItems: 'flex-end',
@@ -1552,13 +1553,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickAddBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    marginRight: 6,
+    marginRight: 4,
   },
   statusTag: {
     flexDirection: 'row',

@@ -213,21 +213,21 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(12),
   },
   cardsContainer: {
-    borderRadius: moderateScale(16),
+    borderRadius: moderateScale(13),
     borderWidth: 1,
     overflow: 'hidden',
   },
   tripCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: moderateScale(14),
-    paddingHorizontal: moderateScale(14),
-    gap: moderateScale(12),
+    paddingVertical: moderateScale(8),
+    paddingHorizontal: moderateScale(12),
+    gap: moderateScale(10),
   },
   imageSquare: {
-    width: moderateScale(48),
-    height: moderateScale(48),
-    borderRadius: moderateScale(12),
+    width: moderateScale(38),
+    height: moderateScale(38),
+    borderRadius: moderateScale(10),
   },
   tripMetaCol: {
     flex: 1,
