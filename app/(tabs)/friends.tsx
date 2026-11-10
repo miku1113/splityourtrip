@@ -20,7 +20,6 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact, getEffectiveContactName, normalizeNameForMatch, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
-import { LinearGradient } from 'expo-linear-gradient';
 import { AppStorage } from '../../src/lib/storage';
 import FriendsListSkeleton from '../../src/components/FriendsListSkeleton';
 

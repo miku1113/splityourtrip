@@ -45,27 +45,34 @@ import {
   setTtsEnabled,
 } from '../services/voiceTtsService';
 
-import { Audio } from 'expo-av';
+// Safely load expo-av if ExponentAV native module is compiled into this binary
+let Audio: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  Audio = require('expo-av')?.Audio;
+} catch {
+  // Graceful fallback when ExponentAV native module is not compiled into current binary
+}
 
 /**
  * Dedicated mono audio recording profile for speech-to-text.
  * Explicitly sets numberOfChannels: 1 to eliminate dual-mic phase cancellation
  * between primary talk mic (bottom) and ambient noise cancellation mic (top).
  */
-const SPEECH_RECORDING_OPTIONS: Audio.RecordingOptions = {
+const SPEECH_RECORDING_OPTIONS: any = {
   isMeteringEnabled: true,
   android: {
     extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
+    outputFormat: Audio?.AndroidOutputFormat?.MPEG_4 ?? 2,
+    audioEncoder: Audio?.AndroidAudioEncoder?.AAC ?? 3,
     sampleRate: 44100,
     numberOfChannels: 1, // Mono: Eliminates dual-microphone phase cancellation
     bitRate: 128000,
   },
   ios: {
     extension: '.m4a',
-    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.HIGH,
+    outputFormat: Audio?.IOSOutputFormat?.MPEG4AAC ?? 'mp4f',
+    audioQuality: Audio?.IOSAudioQuality?.HIGH ?? 127,
     sampleRate: 44100,
     numberOfChannels: 1, // Mono: Clean primary vocal mic
     bitRate: 128000,

@@ -35,7 +35,6 @@ import { Trip, TripMember, TripBalanceRow } from '../../src/types/database';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import AnalyserSkeleton from '../../src/components/AnalyserSkeleton';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
-import { LinearGradient } from 'expo-linear-gradient';
 import SpendingLineChart from '../../src/components/SpendingLineChart';
 
 const PAGE_SIZE = 10;

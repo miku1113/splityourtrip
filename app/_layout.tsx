@@ -17,6 +17,7 @@ LogBox.ignoreLogs([
   'WebCrypto API is not supported',
   'Network request failed',
   'Failed to fetch',
+  'Possible unhandled promise rejection',
 ]);
 
 
@@ -61,7 +62,7 @@ export default function RootLayout() {
     initializeAuth().then(() => {
       useAuthStore.getState().fetchProfile().catch(() => {});
     });
-    initTrips();
+    initTrips().catch(() => {});
     initContacts(false).catch(() => {});
 
     // Global listener for deep links (e.g. splityourtrip://join/CODE, splityourtrip://trip/ID, OAuth)

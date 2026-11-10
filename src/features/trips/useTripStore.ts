@@ -744,7 +744,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       set({ isHydrated: true });
     }
     // Also trigger fetch to sync with cloud if auth session exists
-    get().fetchTrips();
+    get().fetchTrips().catch(() => {});
   },
 
   fetchTrips: async (userId?: string, forceRefresh = false) => {
