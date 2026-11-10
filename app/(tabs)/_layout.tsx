@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from '../../src/components/common/LinearGradient';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
@@ -200,7 +200,7 @@ export default function TabLayout() {
                   activeOpacity={0.88}
                 >
                   <LinearGradient
-                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#4A85B6', '#386B94']}
+                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E2E8F0', '#CBD5E1']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={[
@@ -210,7 +210,7 @@ export default function TabLayout() {
                       },
                     ]}
                   >
-                    <Ionicons name="add" size={28} color="#FFFFFF" />
+                    <Ionicons name="add" size={28} color={colors.textOnSilver || '#DC2626'} />
                   </LinearGradient>
                 </TouchableOpacity>
               </View>

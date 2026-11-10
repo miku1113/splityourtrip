@@ -26,7 +26,7 @@ import { useTripStore, Trip } from '../../src/features/trips/useTripStore';
 import { useContactsStore, normalizePhone } from '../../src/features/contacts/useContactsStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from '../../src/components/common/LinearGradient';
 import TripCoverBadge from '../../src/components/TripCoverBadge';
 import TripsListSkeleton from '../../src/components/TripsListSkeleton';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
@@ -440,13 +440,13 @@ export default function MyTripsScreen() {
           }}
         >
           <LinearGradient
-            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#4A85B6', '#386B94']}
+            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E2E8F0', '#CBD5E1']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.createBtnGradient}
           >
-            <Ionicons name="add-circle" size={19} color="#FFFFFF" />
-            <Text style={styles.createBtnText}>New Trip</Text>
+            <Ionicons name="add-circle" size={19} color={colors.textOnSilver || '#DC2626'} />
+            <Text style={[styles.createBtnText, { color: colors.textOnSilver || '#DC2626' }]}>New Trip</Text>
           </LinearGradient>
         </TouchableOpacity>
 
@@ -892,11 +892,11 @@ export default function MyTripsScreen() {
                       disabled={!newTripName.trim() || creating}
                     >
                       {creating ? (
-                        <ActivityIndicator color="#FFFFFF" />
+                        <ActivityIndicator color={colors.textOnSilver || '#DC2626'} />
                       ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={styles.submitBtnText}>Next: Add Members</Text>
-                          <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                          <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#DC2626' }]}>Next: Add Members</Text>
+                          <Ionicons name="arrow-forward" size={16} color={colors.textOnSilver || '#DC2626'} />
                         </View>
                       )}
                     </TouchableOpacity>
@@ -1229,8 +1229,8 @@ export default function MyTripsScreen() {
                       onPress={handleFinishCreateTrip}
                     >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-                        <Text style={styles.submitBtnText}>Done & Open Trip</Text>
+                        <Ionicons name="checkmark-circle" size={18} color={colors.textOnSilver || '#DC2626'} />
+                        <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#DC2626' }]}>Done & Open Trip</Text>
                       </View>
                     </TouchableOpacity>
                   </View>
@@ -1333,9 +1333,9 @@ export default function MyTripsScreen() {
                   disabled={joining}
                 >
                   {joining ? (
-                    <ActivityIndicator color="#FFFFFF" />
+                    <ActivityIndicator color={colors.textOnSilver || '#DC2626'} />
                   ) : (
-                    <Text style={styles.submitBtnText}>Join Trip</Text>
+                    <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#DC2626' }]}>Join Trip</Text>
                   )}
                 </TouchableOpacity>
               </View>

@@ -22,7 +22,7 @@ import { useTripStore } from '../../src/features/trips/useTripStore';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { SUPPORTED_CURRENCIES, CurrencyItem } from '../../src/services/currency';
 import { AppLogo } from '../../src/components/AppLogo';
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from '../../src/components/common/LinearGradient';
 import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet';
 
 export default function LoginScreen() {
@@ -705,15 +705,15 @@ export default function LoginScreen() {
                 disabled={loading || googleLoading}
               >
                 <LinearGradient
-                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#4A85B6', '#386B94']}
+                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E2E8F0', '#CBD5E1']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnGradient}
                 >
                   {loading ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={colors.textOnSilver || '#DC2626'} />
                   ) : (
-                    <Text style={styles.primaryBtnText}>
+                    <Text style={[styles.primaryBtnText, { color: colors.textOnSilver || '#DC2626' }]}>
                       {activeTab === 'signin' ? 'Sign In' : 'Create Account'}
                     </Text>
                   )}
