@@ -200,7 +200,7 @@ export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) 
                   onError={() => setAvatarError(true)}
                 />
               ) : (
-                <Text style={styles.avatarText}>{avatarLetter}</Text>
+                <Text style={[styles.avatarText, { color: colors.textOnSilver || '#B5504F' }]}>{avatarLetter}</Text>
               )}
             </View>
 
@@ -220,8 +220,8 @@ export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) 
               style={[styles.viewProfileBtn, { backgroundColor: colors.primary }]}
               onPress={() => handleNavigate('/(tabs)/profile')}
             >
-              <Ionicons name="person-outline" size={14} color="#FFFFFF" />
-              <Text style={styles.viewProfileText}>View Full Profile</Text>
+              <Ionicons name="person-outline" size={14} color={colors.textOnSilver || '#B5504F'} />
+              <Text style={[styles.viewProfileText, { color: colors.textOnSilver || '#B5504F' }]}>View Full Profile</Text>
             </TouchableOpacity>
           </View>
 
@@ -462,7 +462,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#B5504F',
   },
   profileName: {
     fontSize: 18,

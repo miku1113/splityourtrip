@@ -97,9 +97,9 @@ export default function JoinTripScreen() {
             disabled={joining}
           >
             {joining ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
             ) : (
-              <Text style={styles.acceptBtnText}>Accept & Join</Text>
+              <Text style={[styles.acceptBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Accept & Join</Text>
             )}
           </TouchableOpacity>
 
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   acceptBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
     fontSize: 15,
   },

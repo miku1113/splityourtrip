@@ -833,7 +833,7 @@ export default function AllExpensesScreen() {
               <Ionicons
                 name="filter"
                 size={sf(17)}
-                color={activeModalFiltersCount > 0 ? '#FFFFFF' : colors.text}
+                color={activeModalFiltersCount > 0 ? (colors.textOnSilver || '#B5504F') : colors.text}
               />
               {activeModalFiltersCount > 0 && <View style={styles.activeFilterDot} />}
             </TouchableOpacity>
@@ -959,7 +959,7 @@ export default function AllExpensesScreen() {
                             },
                           ]}
                         >
-                          <Text style={[styles.filterActionText, { color: isSelected ? '#FFFFFF' : colors.primary, fontSize: sf(11) }]}>
+                          <Text style={[styles.filterActionText, { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary, fontSize: sf(11) }]}>
                             {isSelected ? 'Selected' : 'Select'}
                           </Text>
                         </View>
@@ -1035,7 +1035,7 @@ export default function AllExpensesScreen() {
                             },
                           ]}
                         >
-                          <Text style={[styles.filterActionText, { color: isSelected ? '#FFFFFF' : colors.primary, fontSize: sf(11) }]}>
+                          <Text style={[styles.filterActionText, { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary, fontSize: sf(11) }]}>
                             {isSelected ? 'Selected' : 'Select'}
                           </Text>
                         </View>
@@ -1211,13 +1211,13 @@ export default function AllExpensesScreen() {
                 <Ionicons
                   name="globe-outline"
                   size={14}
-                  color={selectedTripFilter === 'all' ? '#FFFFFF' : colors.textSecondary}
+                  color={selectedTripFilter === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
                   style={{ marginRight: 5 }}
                 />
                 <Text
                   style={[
                     styles.filterChipText,
-                    { color: selectedTripFilter === 'all' ? '#FFFFFF' : colors.textSecondary, fontSize: sf(12) },
+                    { color: selectedTripFilter === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary, fontSize: sf(12) },
                   ]}
                 >
                   All ({uniqueGroupTrips.length} Trips)
@@ -1240,13 +1240,13 @@ export default function AllExpensesScreen() {
                   <Ionicons
                     name="airplane-outline"
                     size={13}
-                    color={selectedTripFilter === trip.id ? '#FFFFFF' : colors.textSecondary}
+                    color={selectedTripFilter === trip.id ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
                     style={{ marginRight: 4 }}
                   />
                   <Text
                     style={[
                       styles.filterChipText,
-                      { color: selectedTripFilter === trip.id ? '#FFFFFF' : colors.textSecondary, fontSize: sf(12) },
+                      { color: selectedTripFilter === trip.id ? (colors.textOnSilver || '#B5504F') : colors.textSecondary, fontSize: sf(12) },
                     ]}
                     numberOfLines={1}
                   >
@@ -1287,14 +1287,14 @@ export default function AllExpensesScreen() {
                     <Ionicons
                       name={meta.icon}
                       size={13}
-                      color={isSelected ? '#FFFFFF' : meta.color}
+                      color={isSelected ? (colors.textOnSilver || '#B5504F') : meta.color}
                       style={{ marginRight: 4 }}
                     />
                   )}
                   <Text
                     style={[
                       styles.categoryChipText,
-                      { color: isSelected ? '#FFFFFF' : colors.textSecondary, fontSize: sf(12) },
+                      { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.textSecondary, fontSize: sf(12) },
                     ]}
                   >
                     {cat === 'all' ? 'All' : cat}
@@ -1452,7 +1452,7 @@ export default function AllExpensesScreen() {
                     styles.modalOptionText,
                     {
                       color:
-                        selectedCategory.toLowerCase() === cat.toLowerCase() ? '#FFFFFF' : colors.text,
+                        selectedCategory.toLowerCase() === cat.toLowerCase() ? (colors.textOnSilver || '#B5504F') : colors.text,
                       fontSize: sf(11.5),
                     },
                   ]}
@@ -1486,7 +1486,7 @@ export default function AllExpensesScreen() {
                 <Text
                   style={[
                     styles.modalOptionText,
-                    { color: selectedTimeframe === tf.id ? '#FFFFFF' : colors.text, fontSize: sf(11.5) },
+                    { color: selectedTimeframe === tf.id ? (colors.textOnSilver || '#B5504F') : colors.text, fontSize: sf(11.5) },
                   ]}
                 >
                   {tf.label}
@@ -1518,7 +1518,7 @@ export default function AllExpensesScreen() {
                 <Text
                   style={[
                     styles.modalOptionText,
-                    { color: selectedPaymentMode === pm.id ? '#FFFFFF' : colors.text, fontSize: sf(11.5) },
+                    { color: selectedPaymentMode === pm.id ? (colors.textOnSilver || '#B5504F') : colors.text, fontSize: sf(11.5) },
                   ]}
                 >
                   {pm.label}
@@ -1549,7 +1549,7 @@ export default function AllExpensesScreen() {
                 <Text
                   style={[
                     styles.modalOptionText,
-                    { color: selectedPayerFilter === pf.id ? '#FFFFFF' : colors.text, fontSize: sf(11.5) },
+                    { color: selectedPayerFilter === pf.id ? (colors.textOnSilver || '#B5504F') : colors.text, fontSize: sf(11.5) },
                   ]}
                 >
                   {pf.label}
@@ -1572,7 +1572,7 @@ export default function AllExpensesScreen() {
             style={[styles.modalApplyBtn, { backgroundColor: colors.primary }]}
             onPress={() => setFilterModalVisible(false)}
           >
-            <Text style={[styles.modalApplyBtnText, { fontSize: sf(12.5) }]}>Apply Filters</Text>
+            <Text style={[styles.modalApplyBtnText, { color: colors.textOnSilver || '#B5504F', fontSize: sf(12.5) }]}>Apply Filters</Text>
           </TouchableOpacity>
         </View>
       </DraggableBottomSheet>

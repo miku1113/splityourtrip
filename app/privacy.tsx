@@ -264,8 +264,8 @@ export default function PrivacyPolicyScreen() {
           onPress={handleEmailSupport}
           activeOpacity={0.85}
         >
-          <Ionicons name="mail-outline" size={16} color="#FFFFFF" />
-          <Text style={styles.contactBtnText}>Email: splityourtrip1@gmail.com</Text>
+          <Ionicons name="mail-outline" size={16} color={colors.textOnSilver || '#B5504F'} />
+          <Text style={[styles.contactBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Email: splityourtrip1@gmail.com</Text>
         </TouchableOpacity>
       </View>
 
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   contactBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 13,
     fontWeight: '700',
   },

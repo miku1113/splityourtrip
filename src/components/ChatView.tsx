@@ -661,7 +661,7 @@ export default function ChatView({
         <Ionicons
           name="checkmark-done"
           size={15}
-          color={isMineBubble ? 'rgba(255,255,255,0.7)' : colors.textMuted}
+          color={isMineBubble ? (colors.textOnSilver || '#B5504F') : colors.textMuted}
           style={{ marginLeft: 3 }}
         />
       );
@@ -670,7 +670,7 @@ export default function ChatView({
       <Ionicons
         name="time-outline"
         size={14}
-        color={isMineBubble ? 'rgba(255,255,255,0.7)' : colors.textMuted}
+        color={isMineBubble ? (colors.textOnSilver || '#B5504F') : colors.textMuted}
         style={{ marginLeft: 3 }}
       />
     );
@@ -2676,8 +2676,8 @@ export default function ChatView({
                 else router.push(`/trip/${tripId}/add`);
               }}
             >
-              <Ionicons name="add" size={15} color="#FFFFFF" />
-              <Text style={styles.addSplitMiniText}>Split</Text>
+              <Ionicons name="add" size={15} color={colors.textOnSilver || '#B5504F'} />
+              <Text style={[styles.addSplitMiniText, { color: colors.textOnSilver || '#B5504F' }]}>Split</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -2890,13 +2890,13 @@ export default function ChatView({
                   </TouchableOpacity>
 
                   {item.message && item.message !== '📷 Photo' ? (
-                    <Text style={[styles.imageCaption, { color: isMine ? '#FFFFFF' : colors.text }]}>
+                    <Text style={[styles.imageCaption, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.text }]}>
                       {item.message}
                     </Text>
                   ) : null}
 
                   <View style={styles.bubbleMetaRow}>
-                    <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                    <Text style={[styles.timestampText, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
                     {isMine && renderMessageTicks(item, isMine)}
@@ -2990,13 +2990,13 @@ export default function ChatView({
                   </TouchableOpacity>
 
                   {item.message && item.message !== '🎥 Video' ? (
-                    <Text style={[styles.imageCaption, { color: isMine ? '#FFFFFF' : colors.text }]}>
+                    <Text style={[styles.imageCaption, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.text }]}>
                       {item.message}
                     </Text>
                   ) : null}
 
                   <View style={styles.bubbleMetaRow}>
-                    <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                    <Text style={[styles.timestampText, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
                     {isMine && renderMessageTicks(item, isMine)}
@@ -3039,16 +3039,16 @@ export default function ChatView({
                       {resolveSenderName(item)}
                     </Text>
                   )}
-                  <View style={[styles.docIconBox, { backgroundColor: isMine ? 'rgba(255,255,255,0.2)' : colors.dangerBg }]}>
+                  <View style={[styles.docIconBox, { backgroundColor: isMine ? (colors.dangerBg || 'rgba(181, 80, 79, 0.15)') : colors.dangerBg }]}>
                     {item.is_sent === false ? (
-                      <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.danger} />
+                      <ActivityIndicator size="small" color={isMine ? (colors.textOnSilver || '#B5504F') : colors.danger} />
                     ) : (
-                      <Ionicons name="document-text" size={24} color={isMine ? '#FFFFFF' : colors.danger} />
+                      <Ionicons name="document-text" size={24} color={isMine ? (colors.textOnSilver || '#B5504F') : colors.danger} />
                     )}
                   </View>
                   <View style={{ flex: 1, marginHorizontal: 8 }}>
                     <Text
-                      style={[styles.docName, { color: isMine ? '#FFFFFF' : colors.text }]}
+                      style={[styles.docName, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.text }]}
                       numberOfLines={1}
                     >
                       {item.media_name || item.message || 'Document.pdf'}
@@ -3058,29 +3058,29 @@ export default function ChatView({
                         <Ionicons
                           name={!isNetOnline ? 'cloud-offline-outline' : 'cloud-upload-outline'}
                           size={12}
-                          color={isMine ? 'rgba(255,255,255,0.9)' : colors.primary}
+                          color={isMine ? (colors.textOnSilver || '#B5504F') : colors.primary}
                           style={{ marginRight: 4 }}
                         />
-                        <Text style={[styles.docSize, { color: isMine ? '#FFFFFF' : colors.primary, fontWeight: '700' }]}>
+                        <Text style={[styles.docSize, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.primary, fontWeight: '700' }]}>
                           {!isNetOnline ? 'Waiting for network...' : 'Uploading document...'}
                         </Text>
                       </View>
                     ) : (
-                      <Text style={[styles.docSize, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                      <Text style={[styles.docSize, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted }]}>
                         {item.media_size || 'PDF Document'}
                       </Text>
                     )}
                   </View>
                   {item.is_sent === false ? (
                     <View style={styles.docUploadingBox}>
-                      <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.primary} />
+                      <ActivityIndicator size="small" color={isMine ? (colors.textOnSilver || '#B5504F') : colors.primary} />
                     </View>
                   ) : (
-                    <Ionicons name="download-outline" size={20} color={isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary} />
+                    <Ionicons name="download-outline" size={20} color={isMine ? (colors.textOnSilver || '#B5504F') : colors.textSecondary} />
                   )}
 
                   <View style={styles.docMetaRow}>
-                    <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                    <Text style={[styles.timestampText, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
                     {isMine && renderMessageTicks(item, isMine)}
@@ -3146,12 +3146,12 @@ export default function ChatView({
                       onPress={() => handleTogglePlayAudio(item.id, audioUrl, item.duration)}
                     >
                       {item.is_sent === false ? (
-                        <ActivityIndicator size="small" color={isMine ? '#FFFFFF' : colors.primary} />
+                        <ActivityIndicator size="small" color={isMine ? (colors.textOnSilver || '#B5504F') : colors.primary} />
                       ) : (
                         <Ionicons
                           name={isThisPlaying ? 'pause' : 'play'}
                           size={22}
-                          color={isMine ? '#FFFFFF' : colors.primary}
+                          color={isMine ? (colors.textOnSilver || '#B5504F') : colors.primary}
                           style={{ marginLeft: isThisPlaying ? 0 : 2 }}
                         />
                       )}
@@ -3165,7 +3165,7 @@ export default function ChatView({
                             styles.audioTrackProgress,
                             {
                               width: `${Math.round(progressRatio * 100)}%`,
-                              backgroundColor: isMine ? '#FFFFFF' : colors.primary,
+                              backgroundColor: isMine ? (colors.textOnSilver || '#B5504F') : colors.primary,
                             },
                           ]}
                         />
@@ -3183,7 +3183,7 @@ export default function ChatView({
                                 {
                                   height: h,
                                   backgroundColor: isMine
-                                    ? (barActive ? '#FFFFFF' : 'rgba(255,255,255,0.45)')
+                                    ? (barActive ? (colors.textOnSilver || '#B5504F') : (colors.textOnSilver || '#B5504F') + '60')
                                     : (barActive ? colors.primary : (isDark ? 'rgba(255,255,255,0.18)' : '#CBD5E1')),
                                 },
                               ]}
@@ -3197,7 +3197,7 @@ export default function ChatView({
                         <Text
                           style={[
                             styles.audioDurationText,
-                            { color: isMine ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
+                            { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                           ]}
                         >
                           {item.is_sent === false
@@ -3207,14 +3207,14 @@ export default function ChatView({
                         <Ionicons
                           name="mic"
                           size={12}
-                          color={isMine ? 'rgba(255,255,255,0.7)' : colors.textMuted}
+                          color={isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted}
                         />
                       </View>
                     </View>
                   </View>
 
                   <View style={styles.audioMetaRow}>
-                    <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                    <Text style={[styles.timestampText, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted }]}>
                       {formatTime(item.created_at)}
                     </Text>
                     {isMine && renderMessageTicks(item, isMine)}
@@ -3360,7 +3360,7 @@ export default function ChatView({
                         }
                       }}
                     >
-                      <Text style={styles.viewExpenseText}>View Bill</Text>
+                      <Text style={[styles.viewExpenseText, { color: colors.textOnSilver || '#B5504F' }]}>View Bill</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -3659,8 +3659,8 @@ export default function ChatView({
                       style={[styles.payNowActionBtn, { backgroundColor: colors.primary }]}
                       onPress={() => handleOpenPayModal(amountPaise, pData.requesterMemberId || pData.requesterId)}
                     >
-                      <Ionicons name="card" size={17} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.payNowActionBtnText}>Pay / Settle Up</Text>
+                      <Ionicons name="card" size={17} color={colors.textOnSilver || '#B5504F'} style={{ marginRight: 6 }} />
+                      <Text style={[styles.payNowActionBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Pay / Settle Up</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={[styles.settlePendingNotice, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' }]}>
@@ -3704,7 +3704,7 @@ export default function ChatView({
                 {isGroup && !isMine && (
                   <Text style={[styles.senderNameHeader, { color: colors.primary }]}>{resolveSenderName(item)}</Text>
                 )}
-                <Text style={[styles.messageText, { color: isMine ? '#FFFFFF' : colors.text }]}>
+                <Text style={[styles.messageText, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.text }]}>
                   {item.message}
                 </Text>
 
@@ -3713,13 +3713,13 @@ export default function ChatView({
                     <Text
                       style={[
                         styles.editedBadgeText,
-                        { color: isMine ? 'rgba(255,255,255,0.65)' : colors.textMuted },
+                        { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted },
                       ]}
                     >
                       edited{' '}
                     </Text>
                   ) : null}
-                  <Text style={[styles.timestampText, { color: isMine ? 'rgba(255,255,255,0.75)' : colors.textMuted }]}>
+                  <Text style={[styles.timestampText, { color: isMine ? (colors.textOnSilver || '#B5504F') : colors.textMuted }]}>
                     {formatTime(item.created_at)}
                   </Text>
                   {isMine && renderMessageTicks(item, isMine)}
@@ -3921,9 +3921,9 @@ export default function ChatView({
               disabled={isSendingVoice}
             >
               {isSendingVoice ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
               ) : (
-                <Ionicons name="send" size={18} color="#FFFFFF" style={{ marginLeft: 2 }} />
+                <Ionicons name="send" size={18} color={colors.textOnSilver || '#B5504F'} style={{ marginLeft: 2 }} />
               )}
             </TouchableOpacity>
           </View>
@@ -3990,7 +3990,7 @@ export default function ChatView({
               <Ionicons
                 name={editingMessage ? 'checkmark' : (inputText.trim() ? 'send' : 'mic')}
                 size={20}
-                color="#FFFFFF"
+                color={colors.textOnSilver || '#B5504F'}
                 style={{ marginLeft: (!editingMessage && inputText.trim()) ? 2 : 0 }}
               />
             </TouchableOpacity>
@@ -4074,8 +4074,8 @@ export default function ChatView({
                       style={[styles.reloadContactsBtn, { backgroundColor: colors.primary }]}
                       onPress={() => initContacts()}
                     >
-                      <Ionicons name="refresh" size={15} color="#FFFFFF" />
-                      <Text style={styles.reloadContactsBtnText}>Reload Phone Contacts</Text>
+                      <Ionicons name="refresh" size={15} color={colors.textOnSilver || '#B5504F'} />
+                      <Text style={[styles.reloadContactsBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Reload Phone Contacts</Text>
                     </TouchableOpacity>
                   </View>
                 }
@@ -4149,8 +4149,8 @@ export default function ChatView({
                       </Text>
                     </View>
                     <View style={[styles.linkSelectPill, { backgroundColor: colors.primary }]}>
-                      <Ionicons name="link" size={13} color="#FFFFFF" />
-                      <Text style={styles.linkSelectPillText}>Link</Text>
+                      <Ionicons name="link" size={13} color={colors.textOnSilver || '#B5504F'} />
+                      <Text style={[styles.linkSelectPillText, { color: colors.textOnSilver || '#B5504F' }]}>Link</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -4369,7 +4369,7 @@ export default function ChatView({
                         <Text
                           style={[
                             styles.memberAvatarText,
-                            { color: isSelected ? '#FFFFFF' : colors.primary },
+                            { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary },
                           ]}
                         >
                           {m.display_name.charAt(0).toUpperCase()}
@@ -4377,7 +4377,7 @@ export default function ChatView({
                       </View>
                       {isSelected ? (
                         <View style={[styles.memberCheckmarkCircle, { backgroundColor: colors.primary }]}>
-                          <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                          <Ionicons name="checkmark" size={12} color={colors.textOnSilver || '#B5504F'} />
                         </View>
                       ) : null}
                     </View>
@@ -4441,11 +4441,11 @@ export default function ChatView({
             >
               <View style={styles.methodCardHeader}>
                 <View style={[styles.methodIconBadge, { backgroundColor: colors.primary }]}>
-                  <Ionicons name="card" size={18} color="#FFFFFF" />
+                  <Ionicons name="card" size={18} color={colors.textOnSilver || '#B5504F'} />
                 </View>
                 {payPaymentMode === 'upi' && (
                   <View style={[styles.methodCheckBadge, { backgroundColor: colors.primary }]}>
-                    <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                    <Ionicons name="checkmark" size={12} color={colors.textOnSilver || '#B5504F'} />
                   </View>
                 )}
               </View>
@@ -4658,11 +4658,11 @@ export default function ChatView({
           disabled={isSubmittingPayment}
         >
           {isSubmittingPayment ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
+            <ActivityIndicator color={payPaymentMode === 'cash' ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')} size="small" />
           ) : (
             <>
-              <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <Text style={styles.submitPayBtnText}>Send Payment for Acceptance</Text>
+              <Ionicons name="paper-plane-outline" size={18} color={payPaymentMode === 'cash' ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')} style={{ marginRight: 6 }} />
+              <Text style={[styles.submitPayBtnText, payPaymentMode !== 'cash' && { color: colors.textOnSilver || '#B5504F' }]}>Send Payment for Acceptance</Text>
             </>
           )}
         </TouchableOpacity>
@@ -4754,7 +4754,7 @@ export default function ChatView({
                           },
                         ]}
                       >
-                        <Text style={[styles.memberChipText, { color: isSelected ? '#FFFFFF' : colors.text }]}>
+                        <Text style={[styles.memberChipText, { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.text }]}>
                           {m.display_name}
                         </Text>
                       </TouchableOpacity>
@@ -4783,11 +4783,11 @@ export default function ChatView({
               disabled={isSubmittingRequest}
             >
               {isSubmittingRequest ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color={colors.textOnSilver || '#B5504F'} size="small" />
               ) : (
                 <>
-                  <Ionicons name="paper-plane" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.submitPayBtnText}>Send Payment Request</Text>
+                  <Ionicons name="paper-plane" size={18} color={colors.textOnSilver || '#B5504F'} style={{ marginRight: 6 }} />
+                  <Text style={[styles.submitPayBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Send Payment Request</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -5950,7 +5950,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   reloadContactsBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -5993,7 +5993,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   linkSelectPillText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -6318,7 +6318,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   payNowActionBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: scaleFont(13.5),
     fontWeight: '700',
   },
@@ -6491,7 +6491,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   submitPayBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: scaleFont(15),
     fontWeight: '700',
   },

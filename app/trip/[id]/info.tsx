@@ -889,8 +889,8 @@ export default function TripInfoScreen() {
               style={[styles.addMemberBtn, { backgroundColor: colors.primary }]}
               onPress={() => router.push(`/trip/${id}/add`)}
             >
-              <Ionicons name="add" size={19} color="#FFFFFF" />
-              <Text style={styles.addMemberBtnText}>Add Expense</Text>
+              <Ionicons name="add" size={19} color={colors.textOnSilver || '#B5504F'} />
+              <Text style={[styles.addMemberBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Add Expense</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1054,8 +1054,8 @@ export default function TripInfoScreen() {
                 style={[styles.addMemberBtn, { backgroundColor: colors.primary }]}
                 onPress={() => setMemberModalOpen(true)}
               >
-                <Ionicons name="person-add" size={18} color="#FFFFFF" />
-                <Text style={styles.addMemberBtnText}>Add / Search Members</Text>
+                <Ionicons name="person-add" size={18} color={colors.textOnSilver || '#B5504F'} />
+                <Text style={[styles.addMemberBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Add / Search Members</Text>
               </TouchableOpacity>
 
               {inviteCode && (
@@ -1268,8 +1268,8 @@ export default function TripInfoScreen() {
                             setLinkingGuestMember({ id: item.id, name: item.display_name });
                           }}
                         >
-                          <Ionicons name="link-outline" size={14} color="#FFFFFF" />
-                          <Text style={styles.memberInviteBtnText}>Link</Text>
+                          <Ionicons name="link-outline" size={14} color={colors.textOnSilver || '#B5504F'} />
+                          <Text style={[styles.memberInviteBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Link</Text>
                         </TouchableOpacity>
                       )}
 
@@ -1418,8 +1418,8 @@ export default function TripInfoScreen() {
                       style={[styles.payUpiBtn, { backgroundColor: colors.primary }]}
                       onPress={() => handlePayViaUpi(s.amount, toName)}
                     >
-                      <Ionicons name="flash" size={16} color="#FFFFFF" />
-                      <Text style={styles.payUpiBtnText}>Pay via UPI</Text>
+                      <Ionicons name="flash" size={16} color={colors.textOnSilver || '#B5504F'} />
+                      <Text style={[styles.payUpiBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Pay via UPI</Text>
                     </TouchableOpacity>
                   </View>
                 );
@@ -1700,14 +1700,14 @@ export default function TripInfoScreen() {
                             onPress={() => handleAddRegisteredMember(reg)}
                           >
                             {isAddingThis ? (
-                              <ActivityIndicator size="small" color="#FFFFFF" />
+                              <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                             ) : (
                               <Text
                                 style={[
                                   styles.addContactActionText,
                                   isAlreadyMember || isAddedNow
                                     ? { color: colors.success }
-                                    : { color: '#FFFFFF' },
+                                    : { color: colors.textOnSilver || '#B5504F' },
                                 ]}
                               >
                                 {isAlreadyMember || isAddedNow ? '✓ Added' : '+ Add'}
@@ -1798,14 +1798,14 @@ export default function TripInfoScreen() {
                               onPress={() => handleAddContactMember(contact)}
                             >
                               {isAddingThis ? (
-                                <ActivityIndicator size="small" color="#FFFFFF" />
+                                <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                               ) : (
                                 <Text
                                   style={[
                                     styles.addContactActionText,
                                     isAlreadyMember || isAddedNow
                                       ? { color: colors.success }
-                                      : { color: '#FFFFFF' },
+                                      : { color: colors.textOnSilver || '#B5504F' },
                                   ]}
                                 >
                                   {isAlreadyMember || isAddedNow ? '✓ Added' : '+ Add'}
@@ -2064,9 +2064,9 @@ export default function TripInfoScreen() {
                         style={[styles.addContactActionBtn, { backgroundColor: colors.primary }]}
                       >
                         {isLinkingThis ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
+                          <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                         ) : (
-                          <Text style={[styles.addContactActionText, { color: '#FFFFFF' }]}>
+                          <Text style={[styles.addContactActionText, { color: colors.textOnSilver || '#B5504F' }]}>
                             Link
                           </Text>
                         )}

@@ -692,9 +692,9 @@ export default function TripSettingsScreen() {
           disabled={isSaving}
         >
           {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
           ) : (
-            <Text style={styles.headerSaveBtnText} allowFontScaling={false}>Save</Text>
+            <Text style={[styles.headerSaveBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>Save</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -986,7 +986,7 @@ export default function TripSettingsScreen() {
                     <Text
                       style={[
                         styles.statusSegmentText,
-                        { color: isSelected ? '#FFFFFF' : colors.textSecondary },
+                        { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                       ]}
                       allowFontScaling={false}
                     >
@@ -1017,8 +1017,8 @@ export default function TripSettingsScreen() {
                   style={[styles.shareInvitePill, { backgroundColor: colors.primary }]}
                   onPress={() => setAddMemberModalVisible(true)}
                 >
-                  <Ionicons name="person-add-outline" size={14} color="#FFFFFF" />
-                  <Text style={[styles.shareInviteText, { color: '#FFFFFF' }]} allowFontScaling={false}>+ Add</Text>
+                  <Ionicons name="person-add-outline" size={14} color={colors.textOnSilver || '#B5504F'} />
+                  <Text style={[styles.shareInviteText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>+ Add</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.shareInvitePill, { backgroundColor: colors.primaryLight }]}
@@ -1080,7 +1080,7 @@ export default function TripSettingsScreen() {
                         resizeMode="cover"
                       />
                     ) : (
-                      <Text style={[styles.memberAvatarText, { color: isAppUser ? '#FFFFFF' : colors.text }]} allowFontScaling={false}>
+                      <Text style={[styles.memberAvatarText, { color: isAppUser ? (colors.textOnSilver || '#B5504F') : colors.text }]} allowFontScaling={false}>
                         {(m.display_name || 'U').charAt(0).toUpperCase()}
                       </Text>
                     )}
@@ -1133,8 +1133,8 @@ export default function TripSettingsScreen() {
                         style={[styles.memberActionBtn, { backgroundColor: colors.primary }]}
                         onPress={() => openLinkModal(m)}
                       >
-                        <Ionicons name="link-outline" size={13} color="#FFFFFF" />
-                        <Text style={styles.memberActionBtnText} allowFontScaling={false}>Link</Text>
+                        <Ionicons name="link-outline" size={13} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={[styles.memberActionBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>Link</Text>
                       </TouchableOpacity>
                     )}
 
@@ -1337,8 +1337,8 @@ export default function TripSettingsScreen() {
           >
             {isSaving ? (
               <View style={styles.btnRow}>
-                <ActivityIndicator color="#FFFFFF" size="small" />
-                <Text style={styles.mainSaveBtnText} allowFontScaling={false}>Saving changes to database...</Text>
+                <ActivityIndicator color={savedSuccess ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')} size="small" />
+                <Text style={[styles.mainSaveBtnText, !savedSuccess && { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>Saving changes to database...</Text>
               </View>
             ) : savedSuccess ? (
               <View style={styles.btnRow}>
@@ -1347,8 +1347,8 @@ export default function TripSettingsScreen() {
               </View>
             ) : (
               <View style={styles.btnRow}>
-                <Ionicons name="save-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.mainSaveBtnText} allowFontScaling={false}>Save Trip Changes to Database</Text>
+                <Ionicons name="save-outline" size={18} color={colors.textOnSilver || '#B5504F'} />
+                <Text style={[styles.mainSaveBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>Save Trip Changes to Database</Text>
               </View>
             )}
           </TouchableOpacity>
@@ -1511,7 +1511,7 @@ export default function TripSettingsScreen() {
                 <Text
                   style={[
                     styles.tabSegmentText,
-                    { color: addMemberTab === 'contacts' ? '#FFFFFF' : colors.textSecondary },
+                    { color: addMemberTab === 'contacts' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                   ]}
                   allowFontScaling={false}
                 >
@@ -1528,7 +1528,7 @@ export default function TripSettingsScreen() {
                 <Text
                   style={[
                     styles.tabSegmentText,
-                    { color: addMemberTab === 'manual' ? '#FFFFFF' : colors.textSecondary },
+                    { color: addMemberTab === 'manual' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                   ]}
                   allowFontScaling={false}
                 >
@@ -1576,7 +1576,7 @@ export default function TripSettingsScreen() {
                               { backgroundColor: colors.primary },
                             ]}
                           >
-                            <Text style={{ color: '#FFFFFF', fontWeight: '700' }} allowFontScaling={false}>
+                            <Text style={{ color: colors.textOnSilver || '#B5504F', fontWeight: '700' }} allowFontScaling={false}>
                               {(ru.full_name || 'U').charAt(0).toUpperCase()}
                             </Text>
                           </View>
@@ -1597,7 +1597,7 @@ export default function TripSettingsScreen() {
                             })}
                             disabled={isAddingMember}
                           >
-                            <Text style={styles.smallAddBtnText} allowFontScaling={false}>+ Add</Text>
+                            <Text style={[styles.smallAddBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>+ Add</Text>
                           </TouchableOpacity>
                         </View>
                       ))}
@@ -1652,7 +1652,7 @@ export default function TripSettingsScreen() {
                           <Text
                             style={[
                               styles.smallAddBtnText,
-                              alreadyAdded && { color: colors.textSecondary },
+                              alreadyAdded ? { color: colors.textSecondary } : { color: colors.textOnSilver || '#B5504F' },
                             ]}
                             allowFontScaling={false}
                           >
@@ -1741,9 +1741,9 @@ export default function TripSettingsScreen() {
                   disabled={!addManualName.trim() || isAddingMember}
                 >
                   {isAddingMember ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                   ) : (
-                    <Text style={styles.mainSaveBtnText} allowFontScaling={false}>+ Add to Trip</Text>
+                    <Text style={[styles.mainSaveBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>+ Add to Trip</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -1861,8 +1861,8 @@ export default function TripSettingsScreen() {
                   }}
                   disabled={isLinking}
                 >
-                  <Ionicons name="link-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.linkDirectBtnText} allowFontScaling={false}>
+                  <Ionicons name="link-outline" size={16} color={colors.textOnSilver || '#B5504F'} />
+                  <Text style={[styles.linkDirectBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>
                     Save & Link Phone: {linkManualPhone.trim()}
                   </Text>
                 </TouchableOpacity>
@@ -1924,8 +1924,8 @@ export default function TripSettingsScreen() {
                     )}
                   </View>
                   <View style={[styles.memberActionBtn, { backgroundColor: colors.primary }]}>
-                    <Ionicons name="link-outline" size={12} color="#FFFFFF" />
-                    <Text style={styles.memberActionBtnText} allowFontScaling={false}>Link</Text>
+                    <Ionicons name="link-outline" size={12} color={colors.textOnSilver || '#B5504F'} />
+                    <Text style={[styles.memberActionBtnText, { color: colors.textOnSilver || '#B5504F' }]} allowFontScaling={false}>Link</Text>
                   </View>
                 </TouchableOpacity>
               ))}

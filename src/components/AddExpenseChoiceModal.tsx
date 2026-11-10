@@ -310,7 +310,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 activeOpacity={0.8}
               >
                 <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
-                  <Ionicons name="airplane" size={24} color="#FFFFFF" />
+                  <Ionicons name="airplane" size={24} color={colors.textOnSilver || '#B5504F'} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <Text style={[styles.choiceTitle, { color: colors.text }]}>
@@ -437,7 +437,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 activeOpacity={0.8}
               >
                 <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
-                  <Ionicons name="mic" size={24} color="#FFFFFF" />
+                  <Ionicons name="mic" size={24} color={colors.textOnSilver || '#B5504F'} />
                 </View>
                 <View style={styles.choiceTextContainer}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -513,7 +513,7 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                 activeOpacity={0.8}
               >
                 <View style={[styles.directCreateIcon, { backgroundColor: colors.primary }]}>
-                  <Ionicons name="add" size={18} color="#FFFFFF" />
+                  <Ionicons name="add" size={18} color={colors.textOnSilver || '#B5504F'} />
                 </View>
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={[styles.directCreateTitle, { color: colors.primary }]}>
@@ -577,8 +577,8 @@ export default function AddExpenseChoiceModal({ visible, onClose, onOpenSettleUp
                           router.push('/(tabs)?openCreate=true');
                         }}
                       >
-                        <Ionicons name="add" size={16} color="#FFFFFF" />
-                        <Text style={styles.createNewBtnText}>Create New Trip</Text>
+                        <Ionicons name="add" size={16} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={[styles.createNewBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Create New Trip</Text>
                       </TouchableOpacity>
                     </View>
                   }

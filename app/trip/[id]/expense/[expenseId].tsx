@@ -533,7 +533,7 @@ export default function BillDetailScreen() {
             style={[styles.backBtn, { backgroundColor: colors.primary }]}
             onPress={() => router.back()}
           >
-            <Text style={styles.backBtnText}>Go Back</Text>
+            <Text style={[styles.backBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -689,12 +689,12 @@ export default function BillDetailScreen() {
             <Ionicons
               name={isEditing ? 'close' : 'pencil'}
               size={14}
-              color={isEditing ? colors.text : '#FFFFFF'}
+              color={isEditing ? colors.text : (colors.textOnSilver || '#B5504F')}
             />
             <Text
               style={[
                 styles.editToggleBtnText,
-                { color: isEditing ? colors.text : '#FFFFFF' },
+                { color: isEditing ? colors.text : (colors.textOnSilver || '#B5504F') },
               ]}
             >
               {isEditing ? 'Cancel' : 'Edit Bill'}
@@ -814,8 +814,8 @@ export default function BillDetailScreen() {
                         if (url) Linking.openURL(url).catch(() => {});
                       }}
                     >
-                      <Ionicons name="map-outline" size={14} color="#FFFFFF" />
-                      <Text style={styles.mapOpenBtnText}>View Map</Text>
+                      <Ionicons name="map-outline" size={14} color={colors.textOnSilver || '#B5504F'} />
+                      <Text style={[styles.mapOpenBtnText, { color: colors.textOnSilver || '#B5504F' }]}>View Map</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -910,8 +910,8 @@ export default function BillDetailScreen() {
                         style={[styles.attachmentOpenBtn, { backgroundColor: colors.primary }]}
                         onPress={() => handleOpenAttachment(effectiveAttachmentUri)}
                       >
-                        <Ionicons name="download-outline" size={15} color="#FFFFFF" />
-                        <Text style={[styles.attachmentOpenBtnText, { color: '#FFFFFF' }]}>Open</Text>
+                        <Ionicons name="download-outline" size={15} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={[styles.attachmentOpenBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Open</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1130,7 +1130,7 @@ export default function BillDetailScreen() {
               >
                 <Text
                   style={{
-                    color: editCategory === cat ? '#FFFFFF' : colors.textSecondary,
+                    color: editCategory === cat ? (colors.textOnSilver || '#B5504F') : colors.textSecondary,
                     fontWeight: '700',
                     fontSize: 12,
                   }}
@@ -1160,7 +1160,7 @@ export default function BillDetailScreen() {
               >
                 <Text
                   style={{
-                    color: editPaymentMode === mode ? '#FFFFFF' : colors.textSecondary,
+                    color: editPaymentMode === mode ? (colors.textOnSilver || '#B5504F') : colors.textSecondary,
                     fontWeight: '700',
                     fontSize: 12,
                   }}
@@ -1189,7 +1189,7 @@ export default function BillDetailScreen() {
               >
                 <Text
                   style={{
-                    color: editPaidBy === m.id ? '#FFFFFF' : colors.text,
+                    color: editPaidBy === m.id ? (colors.textOnSilver || '#B5504F') : colors.text,
                     fontWeight: '700',
                     fontSize: 12,
                   }}
@@ -1406,7 +1406,7 @@ export default function BillDetailScreen() {
               >
                 <Text
                   style={{
-                    color: editSplitType === st ? '#FFFFFF' : colors.textSecondary,
+                    color: editSplitType === st ? (colors.textOnSilver || '#B5504F') : colors.textSecondary,
                     fontWeight: '700',
                     fontSize: 12,
                   }}
@@ -1490,9 +1490,9 @@ export default function BillDetailScreen() {
             disabled={saving || deleting}
           >
             {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
             ) : (
-              <Text style={styles.saveBtnText}>Save Updated Bill</Text>
+              <Text style={[styles.saveBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Save Updated Bill</Text>
             )}
           </TouchableOpacity>
 

@@ -401,9 +401,9 @@ export default function LoginScreen() {
                 disabled={loading}
               >
                 {loading ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
                 ) : (
-                  <Text style={styles.primaryBtnText}>Verify & Enter</Text>
+                  <Text style={[styles.primaryBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Verify & Enter</Text>
                 )}
               </TouchableOpacity>
 
@@ -705,15 +705,15 @@ export default function LoginScreen() {
                 disabled={loading || googleLoading}
               >
                 <LinearGradient
-                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E2E8F0', '#CBD5E1']}
+                  colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#C5CAD3', '#9BA3AF']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnGradient}
                 >
                   {loading ? (
-                    <ActivityIndicator color={colors.textOnSilver || '#DC2626'} />
+                    <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
                   ) : (
-                    <Text style={[styles.primaryBtnText, { color: colors.textOnSilver || '#DC2626' }]}>
+                    <Text style={[styles.primaryBtnText, { color: colors.textOnSilver || '#B5504F' }]}>
                       {activeTab === 'signin' ? 'Sign In' : 'Create Account'}
                     </Text>
                   )}
@@ -932,9 +932,9 @@ export default function LoginScreen() {
                     disabled={forgotLoading}
                   >
                     {forgotLoading ? (
-                      <ActivityIndicator color="#fff" />
+                      <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
                     ) : (
-                      <Text style={styles.primaryBtnText}>Send Recovery Code</Text>
+                      <Text style={[styles.primaryBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Send Recovery Code</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -1031,9 +1031,9 @@ export default function LoginScreen() {
                     disabled={forgotLoading}
                   >
                     {forgotLoading ? (
-                      <ActivityIndicator color="#fff" />
+                      <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
                     ) : (
-                      <Text style={styles.primaryBtnText}>Reset Password & Sign In</Text>
+                      <Text style={[styles.primaryBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Reset Password & Sign In</Text>
                     )}
                   </TouchableOpacity>
 

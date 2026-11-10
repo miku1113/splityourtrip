@@ -409,12 +409,12 @@ export default function SettleUpModal({
                     <Ionicons
                       name="airplane"
                       size={16}
-                      color={settleType === 'trip' ? '#FFFFFF' : colors.textSecondary}
+                      color={settleType === 'trip' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
                     />
                     <Text
                       style={[
                         styles.typeTabText,
-                        { color: settleType === 'trip' ? '#FFFFFF' : colors.textSecondary },
+                        { color: settleType === 'trip' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                       ]}
                     >
                       In a Trip
@@ -431,12 +431,12 @@ export default function SettleUpModal({
                     <Ionicons
                       name="person"
                       size={16}
-                      color={settleType === 'friend' ? '#FFFFFF' : colors.textSecondary}
+                      color={settleType === 'friend' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
                     />
                     <Text
                       style={[
                         styles.typeTabText,
-                        { color: settleType === 'friend' ? '#FFFFFF' : colors.textSecondary },
+                        { color: settleType === 'friend' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                       ]}
                     >
                       With a Friend
@@ -654,7 +654,7 @@ export default function SettleUpModal({
                     activeOpacity={0.8}
                   >
                     <View style={[styles.methodIconBox, { backgroundColor: colors.primary }]}>
-                      <Ionicons name="card" size={20} color="#FFFFFF" />
+                      <Ionicons name="card" size={20} color={colors.textOnSilver || '#B5504F'} />
                     </View>
                     <Text style={[styles.methodTitle, { color: colors.text }]}>UPI / Online</Text>
                     <Text style={[styles.methodSub, { color: colors.textSecondary }]}>
@@ -662,7 +662,7 @@ export default function SettleUpModal({
                     </Text>
                     {paymentMethod === 'upi' && (
                       <View style={[styles.methodCheck, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                        <Ionicons name="checkmark" size={14} color={colors.textOnSilver || '#B5504F'} />
                       </View>
                     )}
                   </TouchableOpacity>
@@ -771,15 +771,15 @@ export default function SettleUpModal({
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <ActivityIndicator size="small" color={paymentMethod === 'cash' ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')} />
                   ) : (
                     <View style={styles.submitBtnRow}>
                       <Ionicons
                         name={paymentMethod === 'cash' ? 'cash-outline' : 'send-outline'}
                         size={18}
-                        color="#FFFFFF"
+                        color={paymentMethod === 'cash' ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')}
                       />
-                      <Text style={styles.submitBtnText}>
+                      <Text style={[styles.submitBtnText, paymentMethod !== 'cash' && { color: colors.textOnSilver || '#B5504F' }]}>
                         Record & Send {paymentMethod.toUpperCase()} Payment
                       </Text>
                     </View>

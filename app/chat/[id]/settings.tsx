@@ -190,9 +190,9 @@ export default function FriendSettingsScreen() {
           disabled={isSaving}
         >
           {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
           ) : (
-            <Text style={styles.headerSaveBtnText}>Save</Text>
+            <Text style={[styles.headerSaveBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Save</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -219,7 +219,7 @@ export default function FriendSettingsScreen() {
         >
           <View style={styles.profileHeaderRow}>
             <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-              <Text style={styles.avatarText}>
+              <Text style={[styles.avatarText, { color: colors.textOnSilver || '#B5504F' }]}>
                 {(nickname || displayName || 'F').charAt(0).toUpperCase()}
               </Text>
             </View>
@@ -389,7 +389,7 @@ export default function FriendSettingsScreen() {
                   <Text
                     style={[
                       styles.splitSegmentText,
-                      { color: isSelected ? '#FFFFFF' : colors.textSecondary },
+                      { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                     ]}
                   >
                     {item.label}
@@ -490,8 +490,8 @@ export default function FriendSettingsScreen() {
         >
           {isSaving ? (
             <View style={styles.btnRow}>
-              <ActivityIndicator color="#FFFFFF" size="small" />
-              <Text style={styles.mainSaveBtnText}>Saving changes...</Text>
+              <ActivityIndicator color={savedSuccess ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')} size="small" />
+              <Text style={[styles.mainSaveBtnText, !savedSuccess && { color: colors.textOnSilver || '#B5504F' }]}>Saving changes...</Text>
             </View>
           ) : savedSuccess ? (
             <View style={styles.btnRow}>
@@ -500,8 +500,8 @@ export default function FriendSettingsScreen() {
             </View>
           ) : (
             <View style={styles.btnRow}>
-              <Ionicons name="save-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.mainSaveBtnText}>Save Friend Settings</Text>
+              <Ionicons name="save-outline" size={18} color={colors.textOnSilver || '#B5504F'} />
+              <Text style={[styles.mainSaveBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Save Friend Settings</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -544,7 +544,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   headerSaveBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
     fontSize: 13,
   },
@@ -571,7 +571,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 24,
     fontWeight: '700',
   },

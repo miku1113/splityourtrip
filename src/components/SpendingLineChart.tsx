@@ -526,7 +526,7 @@ export default function SpendingLineChart({
                   style={[
                     styles.timeframePillText,
                     {
-                      color: isSelected ? '#FFFFFF' : colors.textSecondary,
+                      color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.textSecondary,
                       fontWeight: isSelected ? '700' : '600',
                       fontSize: isSmall ? sf(10.5) : sf(11.5),
                     },

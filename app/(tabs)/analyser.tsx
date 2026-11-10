@@ -1203,7 +1203,7 @@ export default function AnalyserScreen() {
           <Ionicons
             name="filter"
             size={sf(17)}
-            color={activeModalFiltersCount > 0 ? '#FFFFFF' : colors.text}
+            color={activeModalFiltersCount > 0 ? (colors.textOnSilver || '#B5504F') : colors.text}
           />
           {activeModalFiltersCount > 0 && <View style={styles.activeFilterDot} />}
         </TouchableOpacity>
@@ -1348,7 +1348,7 @@ export default function AnalyserScreen() {
                         style={[
                           styles.filterActionText,
                           {
-                            color: isSelected ? '#FFFFFF' : colors.primary,
+                            color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary,
                           },
                         ]}
                       >
@@ -1437,7 +1437,7 @@ export default function AnalyserScreen() {
                         style={[
                           styles.filterActionText,
                           {
-                            color: isSelected ? '#FFFFFF' : colors.primary,
+                            color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary,
                           },
                         ]}
                       >
@@ -1568,13 +1568,13 @@ export default function AnalyserScreen() {
             <Ionicons
               name="globe-outline"
               size={14}
-              color={selectedTripFilter === 'all' ? '#FFFFFF' : colors.textSecondary}
+              color={selectedTripFilter === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
               style={{ marginRight: 5 }}
             />
             <Text
               style={[
                 styles.filterChipText,
-                { color: selectedTripFilter === 'all' ? '#FFFFFF' : colors.textSecondary },
+                { color: selectedTripFilter === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
               ]}
             >
               All ({uniqueGroupTrips.length} Trips)
@@ -1596,13 +1596,13 @@ export default function AnalyserScreen() {
               <Ionicons
                 name="airplane-outline"
                 size={13}
-                color={selectedTripFilter === trip.id ? '#FFFFFF' : colors.textSecondary}
+                color={selectedTripFilter === trip.id ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
                 style={{ marginRight: 4 }}
               />
               <Text
                 style={[
                   styles.filterChipText,
-                  { color: selectedTripFilter === trip.id ? '#FFFFFF' : colors.textSecondary },
+                  { color: selectedTripFilter === trip.id ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                 ]}
                 numberOfLines={1}
               >
@@ -1796,12 +1796,12 @@ export default function AnalyserScreen() {
             <Ionicons
               name="grid-outline"
               size={13}
-              color={viewMode === 'all' ? '#FFFFFF' : colors.textSecondary}
+              color={viewMode === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
             />
             <Text
               style={[
                 styles.viewModeChipText,
-                { color: viewMode === 'all' ? '#FFFFFF' : colors.textSecondary },
+                { color: viewMode === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
               ]}
             >
               All Dashboard
@@ -1821,12 +1821,12 @@ export default function AnalyserScreen() {
             <Ionicons
               name="calendar-outline"
               size={13}
-              color={viewMode === 'daily' ? '#FFFFFF' : colors.textSecondary}
+              color={viewMode === 'daily' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
             />
             <Text
               style={[
                 styles.viewModeChipText,
-                { color: viewMode === 'daily' ? '#FFFFFF' : colors.textSecondary },
+                { color: viewMode === 'daily' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
               ]}
             >
               Daily Expense ({dailySpendingData.activeDaysCount}d)
@@ -1846,12 +1846,12 @@ export default function AnalyserScreen() {
             <Ionicons
               name="pie-chart-outline"
               size={13}
-              color={viewMode === 'categories' ? '#FFFFFF' : colors.textSecondary}
+              color={viewMode === 'categories' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
             />
             <Text
               style={[
                 styles.viewModeChipText,
-                { color: viewMode === 'categories' ? '#FFFFFF' : colors.textSecondary },
+                { color: viewMode === 'categories' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
               ]}
             >
               Categories ({analytics.sortedCategories.length})
@@ -1871,12 +1871,12 @@ export default function AnalyserScreen() {
             <Ionicons
               name="receipt-outline"
               size={13}
-              color={viewMode === 'transactions' ? '#FFFFFF' : colors.textSecondary}
+              color={viewMode === 'transactions' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
             />
             <Text
               style={[
                 styles.viewModeChipText,
-                { color: viewMode === 'transactions' ? '#FFFFFF' : colors.textSecondary },
+                { color: viewMode === 'transactions' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
               ]}
             >
               Transactions ({filteredAndSortedExpenses.length})
@@ -2418,7 +2418,7 @@ export default function AnalyserScreen() {
                   style={[styles.resetInEmptyBtn, { backgroundColor: colors.primary }]}
                   onPress={resetAllFilters}
                 >
-                  <Text style={styles.resetInEmptyText}>Reset All Filters</Text>
+                  <Text style={[styles.resetInEmptyText, { color: colors.textOnSilver || '#B5504F' }]}>Reset All Filters</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2747,7 +2747,7 @@ export default function AnalyserScreen() {
             <Text
               style={[
                 styles.modalTabPillText,
-                { color: searchModalTab === 'all' ? '#FFFFFF' : colors.text },
+                { color: searchModalTab === 'all' ? (colors.textOnSilver || '#B5504F') : colors.text },
               ]}
             >
               All ({modalMatchedPeople.length + modalMatchedTrips.length})
@@ -2767,13 +2767,13 @@ export default function AnalyserScreen() {
             <Ionicons
               name="people"
               size={13}
-              color={searchModalTab === 'friends' ? '#FFFFFF' : colors.primary}
+              color={searchModalTab === 'friends' ? (colors.textOnSilver || '#B5504F') : colors.primary}
               style={{ marginRight: 4 }}
             />
             <Text
               style={[
                 styles.modalTabPillText,
-                { color: searchModalTab === 'friends' ? '#FFFFFF' : colors.text },
+                { color: searchModalTab === 'friends' ? (colors.textOnSilver || '#B5504F') : colors.text },
               ]}
             >
               Friends ({modalMatchedPeople.length})
@@ -2793,13 +2793,13 @@ export default function AnalyserScreen() {
             <Ionicons
               name="airplane"
               size={13}
-              color={searchModalTab === 'trips' ? '#FFFFFF' : colors.primary}
+              color={searchModalTab === 'trips' ? (colors.textOnSilver || '#B5504F') : colors.primary}
               style={{ marginRight: 4 }}
             />
             <Text
               style={[
                 styles.modalTabPillText,
-                { color: searchModalTab === 'trips' ? '#FFFFFF' : colors.text },
+                { color: searchModalTab === 'trips' ? (colors.textOnSilver || '#B5504F') : colors.text },
               ]}
             >
               Trips ({modalMatchedTrips.length})
@@ -2952,7 +2952,7 @@ export default function AnalyserScreen() {
                         <Text
                           style={[
                             styles.filterActionText,
-                            { color: isSelected ? '#FFFFFF' : colors.primary },
+                            { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary },
                           ]}
                         >
                           {isSelected ? 'Selected' : 'Select'}
@@ -3049,7 +3049,7 @@ export default function AnalyserScreen() {
                         <Text
                           style={[
                             styles.filterActionText,
-                            { color: isSelected ? '#FFFFFF' : colors.primary },
+                            { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.primary },
                           ]}
                         >
                           {isSelected ? 'Selected' : 'Select'}
@@ -3127,7 +3127,7 @@ export default function AnalyserScreen() {
                       style={[
                         styles.modalOptionText,
                         {
-                          color: selectedCategoryFilter.toLowerCase() === cat.toLowerCase() ? '#FFFFFF' : colors.text,
+                          color: selectedCategoryFilter.toLowerCase() === cat.toLowerCase() ? (colors.textOnSilver || '#B5504F') : colors.text,
                         },
                       ]}
                     >
@@ -3159,7 +3159,7 @@ export default function AnalyserScreen() {
                     <Text
                       style={[
                         styles.modalOptionText,
-                        { color: selectedTimeframe === tf.id ? '#FFFFFF' : colors.text },
+                        { color: selectedTimeframe === tf.id ? (colors.textOnSilver || '#B5504F') : colors.text },
                       ]}
                     >
                       {tf.label}
@@ -3190,7 +3190,7 @@ export default function AnalyserScreen() {
                     <Text
                       style={[
                         styles.modalOptionText,
-                        { color: selectedPaymentMode === pm.id ? '#FFFFFF' : colors.text },
+                        { color: selectedPaymentMode === pm.id ? (colors.textOnSilver || '#B5504F') : colors.text },
                       ]}
                     >
                       {pm.label}
@@ -3220,7 +3220,7 @@ export default function AnalyserScreen() {
                     <Text
                       style={[
                         styles.modalOptionText,
-                        { color: selectedPayerFilter === pf.id ? '#FFFFFF' : colors.text },
+                        { color: selectedPayerFilter === pf.id ? (colors.textOnSilver || '#B5504F') : colors.text },
                       ]}
                     >
                       {pf.label}
@@ -3243,7 +3243,7 @@ export default function AnalyserScreen() {
                 style={[styles.modalApplyBtn, { backgroundColor: colors.primary }]}
                 onPress={() => setFilterModalVisible(false)}
               >
-                <Text style={styles.modalApplyBtnText}>Apply Filters</Text>
+                <Text style={[styles.modalApplyBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Apply Filters</Text>
               </TouchableOpacity>
             </View>
       </DraggableBottomSheet>
@@ -3763,7 +3763,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   resetInEmptyText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -4159,7 +4159,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalApplyBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 13,
     fontWeight: '700',
   },

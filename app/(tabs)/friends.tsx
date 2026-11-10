@@ -159,7 +159,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
             </Text>
             {Boolean(item.unseenMessagesCount && item.unseenMessagesCount > 0) && (
               <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.unreadBadgeText}>
+                <Text style={[styles.unreadBadgeText, { color: colors.textOnSilver || '#B5504F' }]}>
                   {item.unseenMessagesCount} new
                 </Text>
               </View>
@@ -677,7 +677,7 @@ export default function FriendsScreen() {
           <Text
             style={[
               styles.filterPillText,
-              { color: activeFilter === 'all' ? '#FFFFFF' : colors.textSecondary },
+              { color: activeFilter === 'all' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
             ]}
           >
             All ({activeFriends.length})
@@ -1031,7 +1031,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   unreadBadgeText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: scaleFont(10),
     fontWeight: '700',
   },

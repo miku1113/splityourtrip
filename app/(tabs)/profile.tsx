@@ -267,13 +267,13 @@ export default function ProfileScreen() {
             />
           ) : (
             <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-              <Text style={styles.avatarText}>
+              <Text style={[styles.avatarText, { color: colors.textOnSilver || '#B5504F' }]}>
                 {(profile?.name || name || 'U').charAt(0).toUpperCase()}
               </Text>
             </View>
           )}
           <View style={[styles.cameraBadge, { backgroundColor: colors.primary, borderColor: colors.card }]}>
-            <Ionicons name="camera" size={14} color="#FFFFFF" />
+            <Ionicons name="camera" size={14} color={colors.textOnSilver || '#B5504F'} />
           </View>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setPhotoPickerVisible(true)}>
@@ -426,8 +426,8 @@ export default function ProfileScreen() {
           >
             {isSaving ? (
               <View style={styles.btnRow}>
-                <ActivityIndicator size="small" color="#FFFFFF" />
-                <Text style={styles.saveBtnText}>Saving changes...</Text>
+                <ActivityIndicator size="small" color={savedMsg ? '#FFFFFF' : (colors.textOnSilver || '#B5504F')} />
+                <Text style={[styles.saveBtnText, !savedMsg && { color: colors.textOnSilver || '#B5504F' }]}>Saving changes...</Text>
               </View>
             ) : savedMsg ? (
               <View style={styles.btnRow}>
@@ -436,8 +436,8 @@ export default function ProfileScreen() {
               </View>
             ) : (
               <View style={styles.btnRow}>
-                <Ionicons name="save-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.saveBtnText}>Save Changes</Text>
+                <Ionicons name="save-outline" size={18} color={colors.textOnSilver || '#B5504F'} />
+                <Text style={[styles.saveBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Save Changes</Text>
               </View>
             )}
           </TouchableOpacity>
@@ -471,7 +471,7 @@ export default function ProfileScreen() {
           ]}
           onPress={() => router.push('/(auth)/login')}
         >
-          <Text style={styles.saveBtnText}>Sign In / Create Account</Text>
+          <Text style={[styles.saveBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Sign In / Create Account</Text>
         </TouchableOpacity>
       )}
 
@@ -686,7 +686,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   avatarText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 30,
     fontWeight: '700',
   },
@@ -866,7 +866,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   saveBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '600',
     fontSize: 14,
   },

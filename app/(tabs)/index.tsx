@@ -413,7 +413,7 @@ export default function MyTripsScreen() {
               resizeMode="cover"
             />
           ) : (
-            <Text style={styles.avatarMiniText}>
+            <Text style={[styles.avatarMiniText, { color: colors.textOnSilver || '#B5504F' }]}>
               {(profile?.full_name || profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
             </Text>
           )}
@@ -440,13 +440,13 @@ export default function MyTripsScreen() {
           }}
         >
           <LinearGradient
-            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E2E8F0', '#CBD5E1']}
+            colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#C5CAD3', '#9BA3AF']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.createBtnGradient}
           >
-            <Ionicons name="add-circle" size={19} color={colors.textOnSilver || '#DC2626'} />
-            <Text style={[styles.createBtnText, { color: colors.textOnSilver || '#DC2626' }]}>New Trip</Text>
+            <Ionicons name="add-circle" size={19} color={colors.textOnSilver || '#B5504F'} />
+            <Text style={[styles.createBtnText, { color: colors.textOnSilver || '#B5504F' }]}>New Trip</Text>
           </LinearGradient>
         </TouchableOpacity>
 
@@ -699,7 +699,7 @@ export default function MyTripsScreen() {
                         : { backgroundColor: colors.success },
                     ]}
                   >
-                    <Text style={styles.stepBadgeText}>
+                    <Text style={[styles.stepBadgeText, createStep === 'details' && { color: colors.textOnSilver || '#B5504F' }]}>
                       {createStep === 'members' ? '✓' : '1'}
                     </Text>
                   </View>
@@ -727,7 +727,9 @@ export default function MyTripsScreen() {
                     <Text
                       style={[
                         styles.stepBadgeText,
-                        createStep !== 'members' && { color: colors.textSecondary },
+                        createStep === 'members'
+                          ? { color: colors.textOnSilver || '#B5504F' }
+                          : { color: colors.textSecondary },
                       ]}
                     >
                       2
@@ -892,11 +894,11 @@ export default function MyTripsScreen() {
                       disabled={!newTripName.trim() || creating}
                     >
                       {creating ? (
-                        <ActivityIndicator color={colors.textOnSilver || '#DC2626'} />
+                        <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
                       ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#DC2626' }]}>Next: Add Members</Text>
-                          <Ionicons name="arrow-forward" size={16} color={colors.textOnSilver || '#DC2626'} />
+                          <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Next: Add Members</Text>
+                          <Ionicons name="arrow-forward" size={16} color={colors.textOnSilver || '#B5504F'} />
                         </View>
                       )}
                     </TouchableOpacity>
@@ -1001,11 +1003,11 @@ export default function MyTripsScreen() {
                         onPress={handleAddGuestMember}
                       >
                         {addingMemberId === 'guest_manual' ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
+                          <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                         ) : (
                           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            <Ionicons name="add" size={16} color="#FFFFFF" />
-                            <Text style={styles.manualAddBtnText}>
+                            <Ionicons name="add" size={16} color={colors.textOnSilver || '#B5504F'} />
+                            <Text style={[styles.manualAddBtnText, { color: colors.textOnSilver || '#B5504F' }]}>
                               {guestNameInput.trim()
                                 ? `+ Add "${guestNameInput.trim()}"`
                                 : '+ Add Guest Member'}
@@ -1189,11 +1191,11 @@ export default function MyTripsScreen() {
                               onPress={() => handleAddContactMember(contact)}
                             >
                               {isAddingThis ? (
-                                <ActivityIndicator size="small" color="#FFFFFF" />
+                                <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                               ) : (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                  <Ionicons name="add" size={14} color="#FFFFFF" />
-                                  <Text style={styles.addContactBtnText}>Add</Text>
+                                  <Ionicons name="add" size={14} color={colors.textOnSilver || '#B5504F'} />
+                                  <Text style={[styles.addContactBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Add</Text>
                                 </View>
                               )}
                             </TouchableOpacity>
@@ -1229,8 +1231,8 @@ export default function MyTripsScreen() {
                       onPress={handleFinishCreateTrip}
                     >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Ionicons name="checkmark-circle" size={18} color={colors.textOnSilver || '#DC2626'} />
-                        <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#DC2626' }]}>Done & Open Trip</Text>
+                        <Ionicons name="checkmark-circle" size={18} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Done & Open Trip</Text>
                       </View>
                     </TouchableOpacity>
                   </View>
@@ -1333,9 +1335,9 @@ export default function MyTripsScreen() {
                   disabled={joining}
                 >
                   {joining ? (
-                    <ActivityIndicator color={colors.textOnSilver || '#DC2626'} />
+                    <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
                   ) : (
-                    <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#DC2626' }]}>Join Trip</Text>
+                    <Text style={[styles.submitBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Join Trip</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -1383,7 +1385,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   avatarMiniText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: scaleFont(16),
     fontWeight: '700',
   },
@@ -1408,7 +1410,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   createBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
     fontSize: scaleFont(14),
   },
@@ -1784,7 +1786,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   addMemberChipBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
     fontSize: 13,
   },
@@ -1826,7 +1828,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   stepBadgeText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1876,7 +1878,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   manualAddBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
     fontSize: 13,
   },
@@ -1957,7 +1959,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   addContactBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 12,
     fontWeight: '700',
   },

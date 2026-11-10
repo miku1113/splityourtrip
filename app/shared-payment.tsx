@@ -535,7 +535,7 @@ export default function SharedPaymentScreen() {
             <Text
               style={[
                 styles.filterChipText,
-                { color: activeTab === 'all' ? '#FFFFFF' : colors.text },
+                { color: activeTab === 'all' ? (colors.textOnSilver || '#B5504F') : colors.text },
               ]}
             >
               All Destinations
@@ -555,12 +555,12 @@ export default function SharedPaymentScreen() {
             <Ionicons
               name="chatbubble-ellipses"
               size={14}
-              color={activeTab === 'chats' ? '#FFFFFF' : colors.primary}
+              color={activeTab === 'chats' ? (colors.textOnSilver || '#B5504F') : colors.primary}
             />
             <Text
               style={[
                 styles.filterChipText,
-                { color: activeTab === 'chats' ? '#FFFFFF' : colors.text },
+                { color: activeTab === 'chats' ? (colors.textOnSilver || '#B5504F') : colors.text },
               ]}
             >
               Recent Chats ({filteredContacts.length})
@@ -580,12 +580,12 @@ export default function SharedPaymentScreen() {
             <Ionicons
               name="people"
               size={14}
-              color={activeTab === 'trips' ? '#FFFFFF' : colors.primary}
+              color={activeTab === 'trips' ? (colors.textOnSilver || '#B5504F') : colors.primary}
             />
             <Text
               style={[
                 styles.filterChipText,
-                { color: activeTab === 'trips' ? '#FFFFFF' : colors.text },
+                { color: activeTab === 'trips' ? (colors.textOnSilver || '#B5504F') : colors.text },
               ]}
             >
               Trips ({filteredTrips.length})

@@ -1463,7 +1463,7 @@ export default function VoiceExpenseModal({
                     <Text
                       style={[
                         styles.bubbleText,
-                        { color: isAssistant ? colors.text : '#FFFFFF' },
+                        { color: isAssistant ? colors.text : (colors.textOnSilver || '#B5504F') },
                         isSmall && { fontSize: scaleFont(13) },
                       ]}
                     >
@@ -1987,7 +1987,7 @@ export default function VoiceExpenseModal({
                               }}
                               activeOpacity={0.85}
                             >
-                              <Text style={styles.openSplitBtnText}>Open Split →</Text>
+                              <Text style={[styles.openSplitBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Open Split →</Text>
                             </TouchableOpacity>
                           </View>
                         )}
@@ -2004,8 +2004,8 @@ export default function VoiceExpenseModal({
                         }}
                         activeOpacity={0.85}
                       >
-                        <Ionicons name="arrow-forward-circle" size={16} color="#FFFFFF" />
-                        <Text style={styles.navActionCardText}>Open Screen →</Text>
+                        <Ionicons name="arrow-forward-circle" size={16} color={colors.textOnSilver || '#B5504F'} />
+                        <Text style={[styles.navActionCardText, { color: colors.textOnSilver || '#B5504F' }]}>Open Screen →</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -2177,7 +2177,7 @@ export default function VoiceExpenseModal({
                 onPress={() => handleProcessUserTurn(textInput)}
                 activeOpacity={0.8}
               >
-                <Ionicons name="arrow-up" size={16} color="#FFFFFF" />
+                <Ionicons name="arrow-up" size={16} color={colors.textOnSilver || '#B5504F'} />
               </TouchableOpacity>
             )}
           </View>

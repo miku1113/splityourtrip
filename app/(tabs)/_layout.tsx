@@ -200,7 +200,7 @@ export default function TabLayout() {
                   activeOpacity={0.88}
                 >
                   <LinearGradient
-                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#E2E8F0', '#CBD5E1']}
+                    colors={colors.primaryDark ? [colors.primary, colors.primaryDark] : ['#C5CAD3', '#9BA3AF']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={[
@@ -210,7 +210,7 @@ export default function TabLayout() {
                       },
                     ]}
                   >
-                    <Ionicons name="add" size={28} color={colors.textOnSilver || '#DC2626'} />
+                    <Ionicons name="add" size={28} color={colors.textOnSilver || '#B5504F'} />
                   </LinearGradient>
                 </TouchableOpacity>
               </View>

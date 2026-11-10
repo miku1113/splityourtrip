@@ -506,8 +506,8 @@ export default function SettingsScreen() {
           style={[styles.loginBtn, { backgroundColor: colors.primary }]}
           onPress={() => router.push('/(auth)/login')}
         >
-          <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.loginBtnText}>Sign In / Create Account</Text>
+          <Ionicons name="log-in-outline" size={18} color={colors.textOnSilver || '#B5504F'} />
+          <Text style={[styles.loginBtnText, { color: colors.textOnSilver || '#B5504F' }]}>Sign In / Create Account</Text>
         </TouchableOpacity>
       )}
 

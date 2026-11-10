@@ -682,11 +682,11 @@ export default function AddExpenseScreen() {
                 activeOpacity={0.8}
               >
                 {creatingTrip ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={colors.textOnSilver || '#B5504F'} />
                 ) : (
                   <>
-                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-                    <Text style={styles.dialogSubmitText}>Create &amp; Add Expense</Text>
+                    <Ionicons name="arrow-forward" size={18} color={colors.textOnSilver || '#B5504F'} />
+                    <Text style={[styles.dialogSubmitText, { color: colors.textOnSilver || '#B5504F' }]}>Create &amp; Add Expense</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1003,7 +1003,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   dialogSubmitText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontSize: 15,
     fontWeight: '700',
   },

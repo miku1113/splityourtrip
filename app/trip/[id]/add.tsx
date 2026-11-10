@@ -863,7 +863,7 @@ export default function AddExpenseScreen() {
               <Text
                 style={[
                   styles.modeBtnText,
-                  { color: paymentMode === mode ? '#FFFFFF' : colors.textSecondary },
+                  { color: paymentMode === mode ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                   paymentMode === mode && styles.modeBtnTextActive,
                 ]}
               >
@@ -893,7 +893,7 @@ export default function AddExpenseScreen() {
               <Text
                 style={[
                   styles.payerText,
-                  { color: paidBy === m.id ? '#FFFFFF' : colors.text },
+                  { color: paidBy === m.id ? (colors.textOnSilver || '#B5504F') : colors.text },
                   paidBy === m.id && styles.payerTextActive,
                 ]}
               >
@@ -1123,13 +1123,13 @@ export default function AddExpenseScreen() {
             <Ionicons
               name="git-compare-outline"
               size={15}
-              color={splitType === 'equal' ? '#FFFFFF' : colors.textSecondary}
+              color={splitType === 'equal' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
               style={{ marginRight: 6 }}
             />
             <Text
               style={[
                 styles.modeBtnText,
-                { color: splitType === 'equal' ? '#FFFFFF' : colors.textSecondary },
+                { color: splitType === 'equal' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                 splitType === 'equal' && styles.modeBtnTextActive,
               ]}
             >
@@ -1157,13 +1157,13 @@ export default function AddExpenseScreen() {
             <Ionicons
               name="calculator-outline"
               size={15}
-              color={splitType === 'custom' ? '#FFFFFF' : colors.textSecondary}
+              color={splitType === 'custom' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
               style={{ marginRight: 6 }}
             />
             <Text
               style={[
                 styles.modeBtnText,
-                { color: splitType === 'custom' ? '#FFFFFF' : colors.textSecondary },
+                { color: splitType === 'custom' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
                 splitType === 'custom' && styles.modeBtnTextActive,
               ]}
             >
@@ -1234,7 +1234,7 @@ export default function AddExpenseScreen() {
                 style={[styles.autoDistributeBtn, { backgroundColor: colors.primary }]}
                 onPress={handleAutoDistributeRemaining}
               >
-                <Text style={styles.autoDistributeText}>Distribute Remaining Evenly</Text>
+                <Text style={[styles.autoDistributeText, { color: colors.textOnSilver || '#B5504F' }]}>Distribute Remaining Evenly</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -1343,9 +1343,9 @@ export default function AddExpenseScreen() {
         disabled={saving}
       >
         {saving ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
         ) : (
-          <Text style={styles.saveBtnText}>
+          <Text style={[styles.saveBtnText, { color: colors.textOnSilver || '#B5504F' }]}>
             {expenseId ? 'Update Expense' : 'Save Expense'}
           </Text>
         )}
@@ -1468,7 +1468,7 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
   },
   modeBtnTextActive: {
-    color: '#FFFFFF',
+    color: '#B5504F',
   },
   payerChip: {
     backgroundColor: '#FFFFFF',
@@ -1489,7 +1489,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   payerTextActive: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
   },
   splitHeader: {
@@ -1606,7 +1606,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   saveBtnText: {
-    color: '#FFFFFF',
+    color: '#B5504F',
     fontWeight: '700',
     fontSize: 16,
   },
