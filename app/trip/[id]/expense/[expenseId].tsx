@@ -61,11 +61,20 @@ export default function BillDetailScreen() {
     loadTripDetails,
     updateExpense,
     deleteExpense,
+    disputeExpense,
+    resolveExpenseDispute,
   } = useTripStore();
 
   const [localMembers, setLocalMembers] = useState<TripMember[]>([]);
   const [localExpenses, setLocalExpenses] = useState<any[]>([]);
   const [loadingBill, setLoadingBill] = useState(true);
+
+  // Dispute & Pause state
+  const [disputeModalOpen, setDisputeModalOpen] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [selectedDisputeChip, setSelectedDisputeChip] = useState('Incorrect amount');
+  const [isDisputing, setIsDisputing] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
 
   // Edit mode state (only available to creator of the expense)
   const [isEditing, setIsEditing] = useState(false);
@@ -555,6 +564,66 @@ export default function BillDetailScreen() {
     currentTrip?.trip_type === 'friend_split' ||
     currentTrip?.name?.toLowerCase().startsWith('split with ');
 
+  const isPaused = Boolean(expense.is_paused || expense.status === 'paused' || expense.is_disputed);
+
+  const handleConfirmDispute = async () => {
+    if (!expense) return;
+    const finalReason = disputeReason.trim() || selectedDisputeChip;
+    setIsDisputing(true);
+    try {
+      const ok = await disputeExpense({
+        tripId: (expense.trip_id || tripId) as string,
+        expenseId: expense.id,
+        reason: finalReason,
+        reporterId: myMember?.id || user?.id || 'anonymous',
+        reporterName: myMember?.display_name || profile?.full_name || (user as any)?.user_metadata?.full_name || 'Member',
+      });
+      if (ok) {
+        setDisputeModalOpen(false);
+        setDisputeReason('');
+        Alert.alert('Payment Paused', 'This expense has been paused and removed from current trip balances.');
+      } else {
+        Alert.alert('Error', 'Could not dispute this expense.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to dispute expense');
+    } finally {
+      setIsDisputing(false);
+    }
+  };
+
+  const handleResumePayment = () => {
+    if (!expense) return;
+    Alert.alert(
+      'Resume Payment?',
+      'Are you sure you want to resolve the dispute and resume this bill? It will be re-included in trip balances.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Resume',
+          style: 'default',
+          onPress: async () => {
+            setIsResolving(true);
+            try {
+              const ok = await resolveExpenseDispute({
+                tripId: (expense.trip_id || tripId) as string,
+                expenseId: expense.id,
+                resolverName: myMember?.display_name || profile?.full_name || (user as any)?.user_metadata?.full_name || 'Member',
+              });
+              if (ok) {
+                Alert.alert('Success', 'The expense is no longer paused and is active in trip balances.');
+              }
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to resume payment');
+            } finally {
+              setIsResolving(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -674,33 +743,6 @@ export default function BillDetailScreen() {
               : `Created by ${creatorName} • View Only`}
           </Text>
         </View>
-
-        {canEdit && (
-          <TouchableOpacity
-            style={[
-              styles.editToggleBtn,
-              { backgroundColor: isEditing ? colors.border : colors.primary },
-            ]}
-            onPress={() => {
-              setErrorMsg(null);
-              setIsEditing(!isEditing);
-            }}
-          >
-            <Ionicons
-              name={isEditing ? 'close' : 'pencil'}
-              size={14}
-              color={isEditing ? colors.text : (colors.textOnSilver || '#B5504F')}
-            />
-            <Text
-              style={[
-                styles.editToggleBtnText,
-                { color: isEditing ? colors.text : (colors.textOnSilver || '#B5504F') },
-              ]}
-            >
-              {isEditing ? 'Cancel' : 'Edit Bill'}
-            </Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       {errorMsg && (
@@ -712,18 +754,77 @@ export default function BillDetailScreen() {
       {/* VIEW MODE */}
       {!isEditing ? (
         <>
+          {/* Paused / Disputed Banner */}
+          {isPaused && (
+            <View
+              style={[
+                styles.disputeBannerContainer,
+                { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' },
+              ]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Ionicons name="pause-circle" size={26} color="#D97706" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#92400E' }}>
+                    Payment Paused (Disputed)
+                  </Text>
+                  <Text style={{ fontSize: 12, color: '#B45309', marginTop: 2 }}>
+                    {expense.dispute_reason
+                      ? `Reason: "${expense.dispute_reason}"`
+                      : 'This payment is disputed and excluded from balances.'}
+                  </Text>
+                  {expense.disputed_by_name && (
+                    <Text style={{ fontSize: 11, color: '#B45309', marginTop: 1 }}>
+                      Disputed by {expense.disputed_by_name}
+                    </Text>
+                  )}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.resumePaymentBtn, { backgroundColor: '#D97706' }]}
+                onPress={handleResumePayment}
+                disabled={isResolving}
+              >
+                {isResolving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="play" size={14} color="#FFFFFF" />
+                    <Text style={styles.resumePaymentBtnText}>Resume</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Hero Bill Summary Card */}
           <View
             style={[
               styles.heroCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
+              {
+                backgroundColor: colors.card,
+                borderColor: isPaused ? '#F59E0B' : colors.border,
+              },
             ]}
           >
             <View style={styles.heroTopRow}>
               <View style={[styles.categoryIconCircle, { backgroundColor: catMeta.bg }]}>
                 <Text style={styles.categoryEmoji}>{catMeta.emoji}</Text>
               </View>
-              <View style={styles.badgesRow}>
+              <View style={[styles.badgesRow, { flexWrap: 'wrap' }]}>
+                {isPaused && (
+                  <View
+                    style={[
+                      styles.pillBadge,
+                      { backgroundColor: '#FEF3C7', borderColor: '#F59E0B', borderWidth: 1 },
+                    ]}
+                  >
+                    <Text style={[styles.pillBadgeText, { color: '#D97706', fontWeight: '800' }]}>
+                      PAUSED
+                    </Text>
+                  </View>
+                )}
                 <View style={[styles.pillBadge, { backgroundColor: catMeta.bg }]}>
                   <Text style={[styles.pillBadgeText, { color: catMeta.color }]}>
                     {expense.category || 'General'}
@@ -746,7 +847,15 @@ export default function BillDetailScreen() {
               {expense.description}
             </Text>
 
-            <Text style={[styles.billAmount, { color: colors.primary }]}>
+            <Text
+              style={[
+                styles.billAmount,
+                { color: isPaused ? '#D97706' : colors.primary },
+              ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.72}
+            >
               {formatCurrencyAmount(expense.amount, currencyCode)}
             </Text>
 
@@ -1053,6 +1162,53 @@ export default function BillDetailScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          {/* Dispute / Disagree Action Section */}
+          {!isPaused ? (
+            <View style={styles.disputeActionSection}>
+              <TouchableOpacity
+                style={[
+                  styles.disputeActionBtn,
+                  { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' },
+                ]}
+                onPress={() => {
+                  setDisputeReason('');
+                  setSelectedDisputeChip('Incorrect amount');
+                  setDisputeModalOpen(true);
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="alert-circle-outline" size={18} color="#D97706" />
+                <Text style={styles.disputeActionBtnText}>Disagree with this Bill / Dispute</Text>
+              </TouchableOpacity>
+              <Text style={[styles.disputeActionHelpText, { color: colors.textSecondary }]}>
+                Disputing this bill temporarily pauses the payment and excludes it from trip balances until resolved.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.disputeActionSection}>
+              <TouchableOpacity
+                style={[
+                  styles.disputeActionBtn,
+                  { backgroundColor: '#ECFDF5', borderColor: '#10B981' },
+                ]}
+                onPress={handleResumePayment}
+                activeOpacity={0.8}
+                disabled={isResolving}
+              >
+                {isResolving ? (
+                  <ActivityIndicator size="small" color="#059669" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#059669" />
+                    <Text style={[styles.disputeActionBtnText, { color: '#059669' }]}>
+                      Resolve & Resume Payment
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
         </>
       ) : (
         /* EDIT MODE (Only accessible if canEdit === true) */
@@ -1541,6 +1697,145 @@ export default function BillDetailScreen() {
               resizeMode="contain"
             />
           </View>
+        </Modal>
+      )}
+
+      {/* Disagree / Dispute Modal */}
+      {disputeModalOpen && (
+        <Modal
+          visible={disputeModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setDisputeModalOpen(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.disputeModalOverlay}
+          >
+            <TouchableOpacity
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={() => setDisputeModalOpen(false)}
+            />
+            <View
+              style={[
+                styles.disputeModalCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.disputeModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Ionicons name="pause-circle" size={22} color="#D97706" />
+                  <Text style={[styles.disputeModalTitle, { color: colors.text }]} numberOfLines={1}>
+                    Disagree & Pause Payment
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setDisputeModalOpen(false)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.disputeModalSubtitle, { color: colors.textSecondary }]}>
+                This bill will be frozen and excluded from all debt and settlement calculations until resolved.
+              </Text>
+
+              <Text style={[styles.disputeReasonSectionLabel, { color: colors.text }]}>
+                Select a reason:
+              </Text>
+              <View style={styles.reasonChipsRow}>
+                {[
+                  'Incorrect amount',
+                  'I was not included',
+                  'Already paid separately',
+                  'Duplicate bill',
+                  'Other',
+                ].map(chip => (
+                  <TouchableOpacity
+                    key={chip}
+                    style={[
+                      styles.reasonChip,
+                      {
+                        backgroundColor:
+                          selectedDisputeChip === chip
+                            ? '#FEF3C7'
+                            : isDark
+                            ? '#334155'
+                            : '#F1F5F9',
+                        borderColor: selectedDisputeChip === chip ? '#F59E0B' : 'transparent',
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedDisputeChip(chip);
+                      if (chip !== 'Other') setDisputeReason(chip);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.reasonChipText,
+                        {
+                          color:
+                            selectedDisputeChip === chip
+                              ? '#92400E'
+                              : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {chip}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TextInput
+                style={[
+                  styles.disputeTextInput,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+                placeholder="Optional explanation / note..."
+                placeholderTextColor={colors.textMuted}
+                value={disputeReason}
+                onChangeText={setDisputeReason}
+                multiline
+                numberOfLines={3}
+              />
+
+              <View style={styles.disputeModalFooter}>
+                <TouchableOpacity
+                  style={[styles.disputeCancelBtn, { borderColor: colors.border }]}
+                  onPress={() => setDisputeModalOpen(false)}
+                >
+                  <Text style={[styles.disputeCancelBtnText, { color: colors.textSecondary }]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.disputeSubmitBtn, { backgroundColor: '#D97706' }]}
+                  onPress={handleConfirmDispute}
+                  disabled={isDisputing}
+                >
+                  {isDisputing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="pause" size={16} color="#FFFFFF" />
+                      <Text style={styles.disputeSubmitBtnText}>Pause Payment</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
         </Modal>
       )}
     </View>
@@ -2147,5 +2442,142 @@ const styles = StyleSheet.create({
   fullscreenModalImage: {
     width: '92%',
     height: '80%',
+  },
+  disputeBannerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 14,
+    gap: 10,
+  },
+  resumePaymentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  resumePaymentBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  disputeActionSection: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  disputeActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    width: '100%',
+  },
+  disputeActionBtnText: {
+    color: '#D97706',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  disputeActionHelpText: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 6,
+    paddingHorizontal: 12,
+    lineHeight: 16,
+  },
+  disputeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  disputeModalCard: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+  },
+  disputeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  disputeModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    flex: 1,
+  },
+  disputeModalSubtitle: {
+    fontSize: 13,
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  disputeReasonSectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  reasonChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  reasonChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  reasonChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  disputeTextInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 14,
+    minHeight: 70,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  disputeModalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  disputeCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  disputeCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  disputeSubmitBtn: {
+    flex: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  disputeSubmitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

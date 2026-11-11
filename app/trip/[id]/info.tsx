@@ -203,7 +203,9 @@ export default function TripInfoScreen() {
     memberNamesMap[m.id] = m.display_name;
   });
 
-  const totalSpentPaise = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const activeExpenses = expenses.filter(e => !e.is_paused && (e as any).status !== 'paused' && !e.is_disputed);
+  const pausedExpenses = expenses.filter(e => e.is_paused || (e as any).status === 'paused' || e.is_disputed);
+  const totalSpentPaise = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   // Friend Split Detection & Cross-Trip Shared Data Integration
   const isFriendSplit =
@@ -379,9 +381,25 @@ export default function TripInfoScreen() {
   }, [isFriendSplit, loadFriendSplitData]);
 
   const effectiveExpenses = isFriendSplit ? friendSharedExpenses : expenses;
+  const [expenseSubFilter, setExpenseSubFilter] = useState<'all' | 'active' | 'paused'>('all');
+
+  const activeEffectiveExpenses = React.useMemo(
+    () => effectiveExpenses.filter(e => !e.is_paused && (e as any).status !== 'paused' && !e.is_disputed),
+    [effectiveExpenses]
+  );
+  const pausedEffectiveExpenses = React.useMemo(
+    () => effectiveExpenses.filter(e => e.is_paused || (e as any).status === 'paused' || e.is_disputed),
+    [effectiveExpenses]
+  );
+  const filteredExpenses = React.useMemo(() => {
+    if (expenseSubFilter === 'active') return activeEffectiveExpenses;
+    if (expenseSubFilter === 'paused') return pausedEffectiveExpenses;
+    return effectiveExpenses;
+  }, [expenseSubFilter, activeEffectiveExpenses, pausedEffectiveExpenses, effectiveExpenses]);
+
   const effectiveTotalSpentPaise = isFriendSplit
-    ? friendSharedExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
-    : totalSpentPaise;
+    ? activeEffectiveExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+    : activeExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
   const effectiveMembers = React.useMemo(() => {
     if (!isFriendSplit) return members;
@@ -1007,12 +1025,66 @@ export default function TripInfoScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Expense Filter Tabs (All / Active / Paused) */}
+          <View style={styles.expenseSubFilterRow}>
+            <TouchableOpacity
+              style={[
+                styles.expenseSubFilterTab,
+                expenseSubFilter === 'all' && [styles.expenseSubFilterTabActive, { backgroundColor: colors.primaryLight, borderColor: colors.primary }],
+              ]}
+              onPress={() => setExpenseSubFilter('all')}
+            >
+              <Text
+                style={[
+                  styles.expenseSubFilterText,
+                  { color: expenseSubFilter === 'all' ? colors.primary : colors.textSecondary },
+                ]}
+              >
+                All ({effectiveExpenses.length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.expenseSubFilterTab,
+                expenseSubFilter === 'active' && [styles.expenseSubFilterTabActive, { backgroundColor: colors.primaryLight, borderColor: colors.primary }],
+              ]}
+              onPress={() => setExpenseSubFilter('active')}
+            >
+              <Text
+                style={[
+                  styles.expenseSubFilterText,
+                  { color: expenseSubFilter === 'active' ? colors.primary : colors.textSecondary },
+                ]}
+              >
+                Active ({activeEffectiveExpenses.length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.expenseSubFilterTab,
+                expenseSubFilter === 'paused' && [styles.expenseSubFilterTabActive, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }],
+              ]}
+              onPress={() => setExpenseSubFilter('paused')}
+            >
+              <Text
+                style={[
+                  styles.expenseSubFilterText,
+                  { color: expenseSubFilter === 'paused' ? '#D97706' : colors.textSecondary },
+                ]}
+              >
+                Paused ({pausedEffectiveExpenses.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <FlatList
-            data={effectiveExpenses.slice(0, expensesVisibleCount)}
+            data={filteredExpenses.slice(0, expensesVisibleCount)}
             keyExtractor={item => item.id}
             contentContainerStyle={styles.listContent}
             onEndReached={() => {
-              if (expensesVisibleCount < effectiveExpenses.length && !expensesLoadingMore) {
+              if (expensesVisibleCount < filteredExpenses.length && !expensesLoadingMore) {
                 setExpensesLoadingMore(true);
                 setTimeout(() => {
                   setExpensesVisibleCount(prev => prev + PAGE_SIZE);
@@ -1044,7 +1116,7 @@ export default function TripInfoScreen() {
               )
             }
             ListFooterComponent={
-              expensesVisibleCount < effectiveExpenses.length ? (
+              expensesVisibleCount < filteredExpenses.length ? (
                 <TouchableOpacity
                   style={[
                     styles.loadMoreBtn,
@@ -1067,11 +1139,11 @@ export default function TripInfoScreen() {
                     </View>
                   ) : (
                     <Text style={[styles.loadMoreText, { color: colors.primary }]}>
-                      Load More ({effectiveExpenses.length - expensesVisibleCount} remaining)
+                      Load More ({filteredExpenses.length - expensesVisibleCount} remaining)
                     </Text>
                   )}
                 </TouchableOpacity>
-              ) : effectiveExpenses.length > 0 ? (
+              ) : filteredExpenses.length > 0 ? (
                 <Text
                   style={{
                     textAlign: 'center',
@@ -1080,7 +1152,7 @@ export default function TripInfoScreen() {
                     marginTop: 8,
                   }}
                 >
-                  Showing {Math.min(expensesVisibleCount, effectiveExpenses.length)} of {effectiveExpenses.length}{' '}
+                  Showing {Math.min(expensesVisibleCount, filteredExpenses.length)} of {filteredExpenses.length}{' '}
                   expenses
                 </Text>
               ) : null
@@ -1091,7 +1163,7 @@ export default function TripInfoScreen() {
                   styles.expenseCardRow,
                   {
                     backgroundColor: colors.card,
-                    borderColor: colors.border,
+                    borderColor: (item.is_paused || item.status === 'paused' || item.is_disputed) ? '#F59E0B' : colors.border,
                   },
                 ]}
                 activeOpacity={0.8}
@@ -1102,11 +1174,13 @@ export default function TripInfoScreen() {
                 <View
                   style={[
                     styles.expIconContainer,
-                    { backgroundColor: colors.primaryLight },
+                    { backgroundColor: (item.is_paused || item.status === 'paused' || item.is_disputed) ? '#FEF3C7' : colors.primaryLight },
                   ]}
                 >
                   <Text style={styles.expIconEmoji}>
-                    {item.category === 'Food'
+                    {(item.is_paused || item.status === 'paused' || item.is_disputed)
+                      ? '⏸️'
+                      : item.category === 'Food'
                       ? '🍕'
                       : item.category === 'Stay'
                       ? '🏨'
@@ -1117,10 +1191,15 @@ export default function TripInfoScreen() {
                 </View>
 
                 <View style={styles.expDetailsCol}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.expDescText, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={[styles.expDescText, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>
                       {item.description}
                     </Text>
+                    {(item.is_paused || item.status === 'paused' || item.is_disputed) && (
+                      <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#F59E0B' }}>
+                        <Text style={{ fontSize: 10, color: '#D97706', fontWeight: '700' }}>PAUSED</Text>
+                      </View>
+                    )}
                     {isFriendSplit && item.trip_name && (
                       <View style={{ backgroundColor: colors.primaryLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
                         <Text style={{ fontSize: 10, color: colors.primary, fontWeight: '700' }}>{item.trip_name}</Text>
@@ -1134,7 +1213,15 @@ export default function TripInfoScreen() {
                 </View>
 
                 <View style={styles.expAmountCol}>
-                  <Text style={[styles.expAmountText, { color: colors.text }]}>
+                  <Text
+                    style={[
+                      styles.expAmountText,
+                      { color: (item.is_paused || item.status === 'paused' || item.is_disputed) ? '#D97706' : colors.text },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.72}
+                  >
                     {formatCurrencyAmount(item.amount, item.currency || trip.currency)}
                   </Text>
                   <Text style={[styles.expViewText, { color: colors.primary }]}>
@@ -3086,5 +3173,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  expenseSubFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  expenseSubFilterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  expenseSubFilterTabActive: {
+    borderWidth: 1,
+  },
+  expenseSubFilterText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

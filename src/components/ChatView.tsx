@@ -176,6 +176,8 @@ export default function ChatView({
     editTripMessage,
     deleteTripMessage,
     addExpense,
+    disputeExpense,
+    resolveExpenseDispute,
   } = useTripStore();
   const {
     contacts,
@@ -524,6 +526,24 @@ export default function ChatView({
     () => tripExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0),
     [tripExpenses]
   );
+  const pausedExpenses = useMemo(
+    () => tripExpenses.filter(e => e.is_paused || (e as any).status === 'paused' || e.is_disputed),
+    [tripExpenses]
+  );
+
+  // Dispute & Paused Payments State
+  const [disputeModalVisible, setDisputeModalVisible] = useState(false);
+  const [selectedExpenseForDispute, setSelectedExpenseForDispute] = useState<{
+    id: string;
+    description: string;
+    amount: number;
+    paid_by_name: string;
+    currency?: string;
+  } | null>(null);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [selectedReasonChip, setSelectedReasonChip] = useState('Wrong split share');
+  const [isDisputing, setIsDisputing] = useState(false);
+  const [pausedListVisible, setPausedListVisible] = useState(false);
 
   // Reset pagination when switching trips
   useEffect(() => {
@@ -688,6 +708,75 @@ export default function ChatView({
     },
     [tripMembers, user?.id, currentUserId, myMember]
   );
+
+  const handleOpenDisputeModal = useCallback((expData: any, item: any) => {
+    const expenseId = expData.id || item.expense_id;
+    if (!expenseId) return;
+    setSelectedExpenseForDispute({
+      id: expenseId,
+      description: expData.description || 'Expense',
+      amount: expData.amount || 0,
+      paid_by_name: resolveExpensePayerName(expData),
+      currency: expData.currency || currentTrip?.currency,
+    });
+    setSelectedReasonChip('Wrong split share');
+    setDisputeReason('');
+    setDisputeModalVisible(true);
+  }, [resolveExpensePayerName, currentTrip]);
+
+  const handleSubmitDispute = useCallback(async () => {
+    if (!selectedExpenseForDispute || isDisputing) return;
+    setIsDisputing(true);
+    try {
+      const finalReason = disputeReason.trim()
+        ? `${selectedReasonChip}: ${disputeReason.trim()}`
+        : selectedReasonChip;
+
+      const myId = currentUserId || user?.id || myMember?.id || 'member';
+      const myName = currentUserName || myMember?.display_name || 'Member';
+
+      await disputeExpense({
+        tripId,
+        expenseId: selectedExpenseForDispute.id,
+        reason: finalReason,
+        reporterId: myId,
+        reporterName: myName,
+      });
+
+      setDisputeModalVisible(false);
+      setSelectedExpenseForDispute(null);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to pause and dispute expense.');
+    } finally {
+      setIsDisputing(false);
+    }
+  }, [selectedExpenseForDispute, isDisputing, disputeReason, selectedReasonChip, currentUserId, user, myMember, currentUserName, disputeExpense, tripId]);
+
+  const handleResolveDisputePrompt = useCallback((expenseId: string, title?: string) => {
+    Alert.alert(
+      'Resume Payment?',
+      `Are you sure you want to resolve the dispute on "${title || 'this expense'}" and resume active balances?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Resume Payment',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const myName = currentUserName || myMember?.display_name || 'Member';
+              await resolveExpenseDispute({
+                tripId,
+                expenseId,
+                resolverName: myName,
+              });
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to resume payment.');
+            }
+          },
+        },
+      ]
+    );
+  }, [currentUserName, myMember, resolveExpenseDispute, tripId]);
 
   const renderMessageTicks = useCallback((item: TripMessage, isMineBubble: boolean) => {
     if (!isMineBubble) return null;
@@ -2590,6 +2679,32 @@ export default function ChatView({
         </View>
       )}
 
+      {/* Paused Expenses Top Alert Banner */}
+      {pausedExpenses.length > 0 && (
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => setPausedListVisible(true)}
+          style={[
+            styles.pausedExpensesBanner,
+            {
+              backgroundColor: isDark ? '#422006' : '#FEF3C7',
+              borderBottomColor: '#F59E0B',
+            },
+          ]}
+        >
+          <View style={styles.pausedBannerLeft}>
+            <Ionicons name="pause-circle" size={17} color="#D97706" />
+            <Text style={[styles.pausedBannerText, { color: isDark ? '#FDE68A' : '#92400E' }]} numberOfLines={1}>
+              {pausedExpenses.length} {pausedExpenses.length === 1 ? 'payment is' : 'payments are'} on pause (in dispute)
+            </Text>
+          </View>
+          <View style={styles.pausedBannerBtn}>
+            <Text style={styles.pausedBannerBtnText}>View List</Text>
+            <Ionicons name="chevron-forward" size={13} color="#D97706" />
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Guest Friend Link Prompt Banner (if guest / unlinked in 1-on-1 chat) */}
       {!isGroup && isGuestFriend && (
         <View
@@ -3445,21 +3560,190 @@ export default function ChatView({
                     </Text>
                   </View>
 
+                  {/* Paused / Disputed Banner on Card if Paused */}
+                  {(() => {
+                    const targetExpId = exp.id || item.expense_id;
+                    const matchedTripExp = tripExpenses.find(e => e.id === targetExpId);
+                    const isCardPaused = Boolean(
+                      exp.is_paused ||
+                      (exp as any).status === 'paused' ||
+                      exp.is_disputed ||
+                      matchedTripExp?.is_paused ||
+                      matchedTripExp?.status === 'paused' ||
+                      matchedTripExp?.is_disputed
+                    );
+                    if (!isCardPaused) return null;
+                    return (
+                      <View style={[styles.cardPausedNoticeBanner, { backgroundColor: isDark ? '#422006' : '#FEF3C7' }]}>
+                        <Ionicons name="pause-circle" size={13} color="#D97706" />
+                        <Text style={[styles.cardPausedNoticeText, { color: isDark ? '#FDE68A' : '#92400E' }]} numberOfLines={1}>
+                          Payment Paused (In Dispute) • Excluded from balances
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
                   <View style={[styles.expenseCardBottom, { borderTopColor: colors.border }]}>
                     <Text style={[styles.expenseTime, { color: colors.textMuted }]}>{formatTime(item.created_at)}</Text>
-                    <TouchableOpacity
-                      style={[styles.viewExpenseBtn, { backgroundColor: colors.primary, minWidth: 84, alignItems: 'center' }]}
-                      onPress={() => {
-                        const expenseIdToOpen = exp.id || item.expense_id;
-                        if (expenseIdToOpen) {
-                          router.push(`/trip/${targetTripId}/expense/${expenseIdToOpen}`);
-                        } else {
-                          router.push(`/trip/${targetTripId}`);
-                        }
-                      }}
-                    >
-                      <Text style={[styles.viewExpenseText, { color: colors.textOnSilver || '#B5504F' }]}>View Bill</Text>
-                    </TouchableOpacity>
+                    {(() => {
+                      const targetExpId = exp.id || item.expense_id;
+                      const matchedTripExp = tripExpenses.find(e => e.id === targetExpId);
+                      const isCardPaused = Boolean(
+                        exp.is_paused ||
+                        (exp as any).status === 'paused' ||
+                        exp.is_disputed ||
+                        matchedTripExp?.is_paused ||
+                        matchedTripExp?.status === 'paused' ||
+                        matchedTripExp?.is_disputed
+                      );
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          {isCardPaused ? (
+                            <TouchableOpacity
+                              style={[styles.pausedListBtn, { borderColor: '#F59E0B' }]}
+                              onPress={() => setPausedListVisible(true)}
+                            >
+                              <Ionicons name="list" size={12} color="#D97706" />
+                              <Text style={[styles.pausedListBtnText, { color: '#D97706' }]}>Paused List</Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity
+                              style={[styles.disagreeBtn, { backgroundColor: isDark ? '#422006' : '#FEF3C7', borderColor: '#F59E0B' }]}
+                              onPress={() => handleOpenDisputeModal(exp, item)}
+                            >
+                              <Ionicons name="alert-circle-outline" size={13} color="#D97706" />
+                              <Text style={[styles.disagreeBtnText, { color: '#D97706' }]}>Disagree</Text>
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            style={[styles.viewExpenseBtn, { backgroundColor: colors.primary, minWidth: 76, alignItems: 'center' }]}
+                            onPress={() => {
+                              const expenseIdToOpen = exp.id || item.expense_id;
+                              if (expenseIdToOpen) {
+                                router.push(`/trip/${targetTripId}/expense/${expenseIdToOpen}`);
+                              } else {
+                                router.push(`/trip/${targetTripId}`);
+                              }
+                            }}
+                          >
+                            <Text style={[styles.viewExpenseText, { color: colors.textOnSilver || '#B5504F' }]}>View Bill</Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })()}
+                  </View>
+                </View>
+              </View>
+            );
+          }
+
+          // 3.5 Dispute & Paused Expense Notification Card
+          const isDisputeMsg =
+            item.type === 'dispute' ||
+            (item.content && item.content.includes('"type":"dispute"')) ||
+            (item.message && item.message.includes('"type":"dispute"'));
+
+          if (isDisputeMsg) {
+            let dData: any = item.expense_data || item.payload;
+            if (!dData && item.content && item.content.startsWith('{')) {
+              try { dData = JSON.parse(item.content); } catch {}
+            }
+            if (!dData && item.message && item.message.startsWith('{')) {
+              try { dData = JSON.parse(item.message); } catch {}
+            }
+            const expData = dData?.expense_data || dData || {};
+            const targetExpId = dData?.expense_id || expData.id || item.expense_id;
+            const currentExp = tripExpenses.find(e => e.id === targetExpId);
+            const isCurrentlyPaused = currentExp
+              ? Boolean(currentExp.is_paused || currentExp.status === 'paused' || currentExp.is_disputed)
+              : true;
+            const reporterName = expData.disputed_by || item.sender_name || 'Member';
+            const reasonText = expData.dispute_reason || dData?.text || 'Expense flagged for review';
+            const expTitle = expData.description || currentExp?.description || 'Expense';
+            const amountPaise = expData.amount || currentExp?.amount || 0;
+            const currency = expData.currency || currentTrip?.currency || 'INR';
+            const targetTripId = expData.trip_id || tripId;
+
+            return wrapWithDateHeader(
+              <View style={styles.disputeCardContainer}>
+                <View style={[styles.disputeCard, { backgroundColor: colors.card, borderColor: isCurrentlyPaused ? '#F59E0B' : colors.border }]}>
+                  {/* Header Banner */}
+                  <View style={[styles.disputeCardHeader, { backgroundColor: isDark ? '#422006' : '#FEF3C7' }]}>
+                    <Ionicons name={isCurrentlyPaused ? "pause-circle" : "checkmark-circle"} size={19} color={isCurrentlyPaused ? "#D97706" : colors.success} />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.disputeCardTitle, { color: isCurrentlyPaused ? "#B45309" : colors.success }]}>
+                        {isCurrentlyPaused ? 'Payment Paused (In Dispute)' : 'Dispute Resolved'}
+                      </Text>
+                      <Text style={[styles.disputeCardSubtitle, { color: isDark ? '#FDE68A' : '#92400E' }]}>
+                        Flagged by {reporterName}
+                      </Text>
+                    </View>
+                    <View style={[styles.disputeStatusPill, { backgroundColor: isCurrentlyPaused ? '#FDE68A' : colors.successBg }]}>
+                      <Text style={[styles.disputeStatusPillText, { color: isCurrentlyPaused ? '#92400E' : colors.success }]}>
+                        {isCurrentlyPaused ? 'On Hold' : 'Active'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Expense info & dispute reason */}
+                  <View style={styles.disputeCardBody}>
+                    <View style={styles.disputeExpenseRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.disputeExpenseName, { color: colors.text }]}>{expTitle}</Text>
+                        <Text style={[styles.disputeExpenseMeta, { color: colors.textSecondary }]}>
+                          {currentExp?.payerName ? `Paid by ${currentExp.payerName}` : 'Shared Expense'} • {currentExp?.splits?.length || expData.split_count || 2} members
+                        </Text>
+                      </View>
+                      <Text style={[styles.disputeAmountText, { color: isCurrentlyPaused ? '#D97706' : colors.text }]}>
+                        {formatCurrencyAmount(amountPaise, currency)}
+                      </Text>
+                    </View>
+
+                    {/* Reason box */}
+                    <View style={[styles.disputeReasonBox, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.border }]}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.textSecondary} style={{ marginTop: 2, marginRight: 6 }} />
+                      <Text style={[styles.disputeReasonText, { color: colors.text }]}>
+                        {reasonText}
+                      </Text>
+                    </View>
+
+                    <Text style={[styles.disputeExcludedNotice, { color: colors.textMuted }]}>
+                      {isCurrentlyPaused
+                        ? '⏸️ This expense is excluded from group balances and settlements.'
+                        : '▶️ This expense has been restored to group balances.'}
+                    </Text>
+                  </View>
+
+                  {/* Actions Row */}
+                  <View style={[styles.disputeCardFooter, { borderTopColor: colors.border }]}>
+                    <Text style={[styles.expenseTime, { color: colors.textMuted }]}>{formatTime(item.created_at)}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <TouchableOpacity
+                        style={[styles.pausedListBtn, { borderColor: '#F59E0B' }]}
+                        onPress={() => setPausedListVisible(true)}
+                      >
+                        <Ionicons name="list" size={13} color="#D97706" />
+                        <Text style={[styles.pausedListBtnText, { color: '#D97706' }]}>Paused List</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.viewExpenseBtn, { backgroundColor: isDark ? '#334155' : '#E2E8F0', minWidth: 68, alignItems: 'center' }]}
+                        onPress={() => {
+                          if (targetExpId) router.push(`/trip/${targetTripId}/expense/${targetExpId}`);
+                        }}
+                      >
+                        <Text style={[styles.viewExpenseText, { color: colors.text }]}>View</Text>
+                      </TouchableOpacity>
+
+                      {isCurrentlyPaused && (
+                        <TouchableOpacity
+                          style={[styles.resumeBtn, { backgroundColor: colors.success, minWidth: 74, alignItems: 'center' }]}
+                          onPress={() => handleResolveDisputePrompt(targetExpId, expTitle)}
+                        >
+                          <Text style={[styles.resumeBtnText, { color: '#FFFFFF' }]}>Resume</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   </View>
                 </View>
               </View>
@@ -5407,6 +5691,249 @@ export default function ChatView({
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Dispute / Disagree Modal */}
+      <Modal
+        visible={disputeModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDisputeModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setDisputeModalVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ width: '100%', justifyContent: 'flex-end' }}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              style={[
+                styles.disputeModalContent,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.actionSheetHandle} />
+
+              <View style={styles.disputeModalHeaderRow}>
+                <View style={[styles.disputeIconBadge, { backgroundColor: isDark ? '#422006' : '#FEF3C7' }]}>
+                  <Ionicons name="alert-circle" size={24} color="#D97706" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.disputeModalTitle, { color: colors.text }]}>Disagree on Expense</Text>
+                  <Text style={[styles.disputeModalSubtitle, { color: colors.textSecondary }]}>
+                    This will pause the payment and exclude it from group balances.
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setDisputeModalVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Expense preview pill */}
+              {selectedExpenseForDispute && (
+                <View style={[styles.disputePreviewCard, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.disputePreviewTitle, { color: colors.text }]} numberOfLines={1}>
+                      {selectedExpenseForDispute.description}
+                    </Text>
+                    <Text style={[styles.disputePreviewSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                      Paid by {selectedExpenseForDispute.paid_by_name}
+                    </Text>
+                  </View>
+                  <Text style={[styles.disputePreviewAmount, { color: colors.primary }]}>
+                    {formatCurrencyAmount(selectedExpenseForDispute.amount, selectedExpenseForDispute.currency || currentTrip?.currency)}
+                  </Text>
+                </View>
+              )}
+
+              {/* Reason chips */}
+              <Text style={[styles.disputeSectionLabel, { color: colors.textSecondary }]}>Select Reason</Text>
+              <View style={styles.chipsRow}>
+                {['Wrong split share', "Didn't attend", 'Incorrect amount', 'Duplicate expense', 'Other'].map(chip => (
+                  <TouchableOpacity
+                    key={chip}
+                    onPress={() => setSelectedReasonChip(chip)}
+                    style={[
+                      styles.reasonChip,
+                      {
+                        backgroundColor: selectedReasonChip === chip ? '#D97706' : (isDark ? '#334155' : '#E2E8F0'),
+                        borderColor: selectedReasonChip === chip ? '#D97706' : 'transparent',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.reasonChipText,
+                        { color: selectedReasonChip === chip ? '#FFFFFF' : colors.text },
+                      ]}
+                    >
+                      {chip}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Custom note */}
+              <Text style={[styles.disputeSectionLabel, { color: colors.textSecondary }]}>Additional Explanation (Optional)</Text>
+              <TextInput
+                style={[
+                  styles.disputeTextInput,
+                  {
+                    backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                    color: colors.text,
+                    borderColor: colors.border,
+                  },
+                ]}
+                placeholder="Why do you disagree with this expense?"
+                placeholderTextColor={colors.textMuted}
+                value={disputeReason}
+                onChangeText={setDisputeReason}
+                multiline
+                maxLength={200}
+              />
+
+              {/* Actions */}
+              <View style={styles.disputeModalActions}>
+                <TouchableOpacity
+                  style={[styles.disputeCancelBtn, { borderColor: colors.border }]}
+                  onPress={() => setDisputeModalVisible(false)}
+                  disabled={isDisputing}
+                >
+                  <Text style={[styles.disputeCancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.disputeConfirmBtn, { backgroundColor: '#D97706' }]}
+                  onPress={handleSubmitDispute}
+                  disabled={isDisputing}
+                >
+                  {isDisputing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="pause" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.disputeConfirmBtnText}>Pause Payment</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Paused Expenses List Modal ("Another List") */}
+      <Modal
+        visible={pausedListVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPausedListVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setPausedListVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[
+              styles.pausedListModalContent,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.actionSheetHandle} />
+
+            <View style={styles.pausedListHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={[styles.pausedListIconBox, { backgroundColor: isDark ? '#422006' : '#FEF3C7' }]}>
+                  <Ionicons name="pause-circle" size={20} color="#D97706" />
+                </View>
+                <View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.pausedListTitle, { color: colors.text }]}>Paused Payments</Text>
+                    <View style={[styles.pausedCountBadge, { backgroundColor: '#D97706' }]}>
+                      <Text style={styles.pausedCountBadgeText}>{pausedExpenses.length}</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.pausedListSubtitle, { color: colors.textSecondary }]}>
+                    Expenses on hold & excluded from balances
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setPausedListVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close-circle" size={26} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {pausedExpenses.length === 0 ? (
+              <View style={styles.pausedEmptyBox}>
+                <Ionicons name="checkmark-circle-outline" size={48} color={colors.success} />
+                <Text style={[styles.pausedEmptyTitle, { color: colors.text }]}>No Paused Payments</Text>
+                <Text style={[styles.pausedEmptySubtitle, { color: colors.textSecondary }]}>
+                  All expenses are currently active and factored into settlements.
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={pausedExpenses}
+                keyExtractor={item => item.id}
+                contentContainerStyle={{ paddingVertical: 8, gap: 10 }}
+                style={{ maxHeight: 420 }}
+                renderItem={({ item }) => (
+                  <View style={[styles.pausedListItem, { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border }]}>
+                    <View style={styles.pausedListItemTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.pausedListItemTitle, { color: colors.text }]} numberOfLines={1}>
+                          {item.description}
+                        </Text>
+                        <Text style={[styles.pausedListItemSub, { color: colors.textSecondary }]}>
+                          Paid by {item.payerName || 'Member'} • {item.date || item.created_at ? new Date(item.date || item.created_at).toLocaleDateString() : 'Recent'}
+                        </Text>
+                      </View>
+                      <Text style={[styles.pausedListItemAmount, { color: '#D97706' }]}>
+                        {formatCurrencyAmount(item.amount, item.currency || currentTrip?.currency)}
+                      </Text>
+                    </View>
+
+                    {item.dispute_reason && (
+                      <View style={[styles.pausedReasonCallout, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
+                        <Ionicons name="alert-circle-outline" size={13} color="#D97706" style={{ marginTop: 2, marginRight: 5 }} />
+                        <Text style={[styles.pausedReasonCalloutText, { color: colors.text }]}>
+                          Flagged by {item.disputed_by_name || 'Member'}: "{item.dispute_reason}"
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={styles.pausedListItemActions}>
+                      <TouchableOpacity
+                        style={[styles.pausedItemViewBtn, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                        onPress={() => {
+                          setPausedListVisible(false);
+                          router.push(`/trip/${tripId}/expense/${item.id}`);
+                        }}
+                      >
+                        <Ionicons name="eye-outline" size={13} color={colors.text} style={{ marginRight: 4 }} />
+                        <Text style={[styles.pausedItemViewBtnText, { color: colors.text }]}>View Bill</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.pausedItemResumeBtn, { backgroundColor: colors.success }]}
+                        onPress={() => handleResolveDisputePrompt(item.id, item.description)}
+                      >
+                        <Ionicons name="play" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+                        <Text style={styles.pausedItemResumeBtnText}>Resume Payment</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              />
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -7036,5 +7563,398 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: scaleFont(11),
     fontWeight: '600',
+  },
+  cardPausedNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 6,
+    gap: 4,
+  },
+  cardPausedNoticeText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+    flex: 1,
+  },
+  disagreeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 3,
+  },
+  disagreeBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  pausedListBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 4,
+    backgroundColor: 'transparent',
+  },
+  pausedListBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  disputeCardContainer: {
+    marginVertical: 6,
+    paddingHorizontal: 8,
+    width: '100%',
+  },
+  disputeCard: {
+    borderRadius: 12,
+    borderWidth: 1.5,
+    overflow: 'hidden',
+  },
+  disputeCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  disputeCardTitle: {
+    fontSize: scaleFont(13),
+    fontWeight: '800',
+  },
+  disputeCardSubtitle: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  disputeStatusPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  disputeStatusPillText: {
+    fontSize: scaleFont(10),
+    fontWeight: '800',
+  },
+  disputeCardBody: {
+    padding: 12,
+  },
+  disputeExpenseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  disputeExpenseName: {
+    fontSize: scaleFont(14),
+    fontWeight: '700',
+  },
+  disputeExpenseMeta: {
+    fontSize: scaleFont(11),
+    marginTop: 2,
+  },
+  disputeAmountText: {
+    fontSize: scaleFont(15),
+    fontWeight: '800',
+  },
+  disputeReasonBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginVertical: 8,
+  },
+  disputeReasonText: {
+    fontSize: scaleFont(12),
+    fontStyle: 'italic',
+    flex: 1,
+    lineHeight: 16,
+  },
+  disputeExcludedNotice: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+  },
+  disputeCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+  },
+  resumeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  resumeBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  pausedExpensesBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  pausedBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 6,
+  },
+  pausedBannerText: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+  },
+  pausedBannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  pausedBannerBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '800',
+    color: '#D97706',
+  },
+  disputeModalContent: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderTopWidth: 1,
+    padding: 16,
+    paddingBottom: 24,
+    maxWidth: 640,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  disputeModalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  disputeIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disputeModalTitle: {
+    fontSize: scaleFont(16),
+    fontWeight: '800',
+  },
+  disputeModalSubtitle: {
+    fontSize: scaleFont(12),
+    marginTop: 2,
+  },
+  disputePreviewCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginVertical: 10,
+  },
+  disputePreviewTitle: {
+    fontSize: scaleFont(13),
+    fontWeight: '700',
+  },
+  disputePreviewSub: {
+    fontSize: scaleFont(11),
+    marginTop: 2,
+  },
+  disputePreviewAmount: {
+    fontSize: scaleFont(14),
+    fontWeight: '800',
+  },
+  disputeSectionLabel: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  reasonChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  reasonChipText: {
+    fontSize: scaleFont(12),
+    fontWeight: '600',
+  },
+  disputeTextInput: {
+    minHeight: 65,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+    fontSize: scaleFont(13),
+    textAlignVertical: 'top',
+  },
+  disputeModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  disputeCancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  disputeCancelBtnText: {
+    fontSize: scaleFont(13),
+    fontWeight: '700',
+  },
+  disputeConfirmBtn: {
+    flex: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  disputeConfirmBtnText: {
+    fontSize: scaleFont(13),
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  pausedListModalContent: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderTopWidth: 1,
+    padding: 16,
+    paddingBottom: 28,
+    maxWidth: 640,
+    alignSelf: 'center',
+    width: '100%',
+    maxHeight: '80%',
+  },
+  pausedListHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  pausedListIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pausedListTitle: {
+    fontSize: scaleFont(16),
+    fontWeight: '800',
+  },
+  pausedCountBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  pausedCountBadgeText: {
+    fontSize: scaleFont(11),
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  pausedListSubtitle: {
+    fontSize: scaleFont(11),
+    marginTop: 2,
+  },
+  pausedEmptyBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: 20,
+  },
+  pausedEmptyTitle: {
+    fontSize: scaleFont(15),
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  pausedEmptySubtitle: {
+    fontSize: scaleFont(12),
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  pausedListItem: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  pausedListItemTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pausedListItemTitle: {
+    fontSize: scaleFont(14),
+    fontWeight: '700',
+  },
+  pausedListItemSub: {
+    fontSize: scaleFont(11),
+    marginTop: 2,
+  },
+  pausedListItemAmount: {
+    fontSize: scaleFont(15),
+    fontWeight: '800',
+  },
+  pausedReasonCallout: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 7,
+    borderRadius: 6,
+    marginTop: 8,
+  },
+  pausedReasonCalloutText: {
+    fontSize: scaleFont(11),
+    fontStyle: 'italic',
+    flex: 1,
+    lineHeight: 15,
+  },
+  pausedListItemActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 10,
+  },
+  pausedItemViewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  pausedItemViewBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+  },
+  pausedItemResumeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  pausedItemResumeBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

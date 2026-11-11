@@ -338,6 +338,18 @@ interface TripStoreState {
     reporterId: string;
     reporterName: string;
   }) => Promise<boolean>;
+  disputeExpense: (data: {
+    tripId: string;
+    expenseId: string;
+    reason: string;
+    reporterId: string;
+    reporterName: string;
+  }) => Promise<boolean>;
+  resolveExpenseDispute: (data: {
+    tripId: string;
+    expenseId: string;
+    resolverName: string;
+  }) => Promise<boolean>;
   sendMessage: (
     tripId: string,
     senderId: string,
@@ -615,8 +627,18 @@ export function normalizeExpensesForTrip(
       }));
     }
 
+    const isPaused = Boolean(exp.is_paused || (exp as any).status === 'paused' || (exp as any).is_disputed);
+    const isDisputed = Boolean(exp.is_disputed || isPaused);
+
     return {
       ...exp,
+      is_paused: isPaused,
+      is_disputed: isDisputed,
+      status: (exp.status || (isPaused ? 'paused' : 'active')) as any,
+      dispute_reason: exp.dispute_reason || null,
+      disputed_by: exp.disputed_by || null,
+      disputed_by_name: exp.disputed_by_name || null,
+      disputed_at: exp.disputed_at || null,
       paid_by: payerMember.id,
       payerName: payerMember.display_name || exp.payerName || 'Member',
       split_type: exp.split_type || metaSplitType || 'equal',
@@ -625,14 +647,18 @@ export function normalizeExpensesForTrip(
   });
 }
 
-// Compute member balances directly from loaded expenses and splits
+// Compute member balances directly from loaded expenses and splits (ignoring paused/disputed expenses)
 export function computeBalances(
   tripId: string,
   members: TripMember[],
   expenses: Expense[],
   splits?: ExpenseSplit[]
 ): TripBalanceRow[] {
-  const normalizedExps = normalizeExpensesForTrip(expenses, members);
+  // Disputed/paused expenses are frozen and excluded from group debt balances
+  const activeExpenses = (expenses || []).filter(
+    e => !e.is_paused && (e as any).status !== 'paused' && !e.is_disputed
+  );
+  const normalizedExps = normalizeExpensesForTrip(activeExpenses, members);
   const effectiveSplits: ExpenseSplit[] =
     normalizedExps.length > 0
       ? normalizedExps.flatMap((e: any) => e.splits || [])
@@ -1802,6 +1828,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         let parsedPayerName: string | null = null;
         let metaSplits: any[] = [];
         let metaSplitType: string | null = null;
+        let metaIsPaused: boolean | undefined = undefined;
+        let metaIsDisputed: boolean | undefined = undefined;
+        let metaStatus: string | undefined = undefined;
+        let metaDisputeReason: string | null = null;
+        let metaDisputedBy: string | null = null;
+        let metaDisputedByName: string | null = null;
+        let metaDisputedAt: string | null = null;
 
         if (exp.merchant_name && typeof exp.merchant_name === 'string') {
           const trimmed = exp.merchant_name.trim();
@@ -1812,6 +1845,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
               if (p.payer_name) parsedPayerName = p.payer_name;
               if (Array.isArray(p.splits) && p.splits.length > 0) metaSplits = p.splits;
               if (p.split_type) metaSplitType = p.split_type;
+              if (p.is_paused !== undefined) metaIsPaused = !!p.is_paused;
+              if (p.is_disputed !== undefined) metaIsDisputed = !!p.is_disputed;
+              if (p.status) metaStatus = p.status;
+              if (p.dispute_reason) metaDisputeReason = p.dispute_reason;
+              if (p.disputed_by) metaDisputedBy = p.disputed_by;
+              if (p.disputed_by_name) metaDisputedByName = p.disputed_by_name;
+              if (p.disputed_at) metaDisputedAt = p.disputed_at;
             } catch {}
           } else if (trimmed) {
             parsedPayerName = trimmed;
@@ -1862,8 +1902,30 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           localExp?.attachment_type ||
           (resolvedAttachmentUrl ? 'image' : null);
 
+        const isPaused = Boolean(
+          exp.is_paused !== undefined
+            ? exp.is_paused
+            : localExp?.is_paused !== undefined
+            ? localExp.is_paused
+            : metaIsPaused
+        );
+        const isDisputed = Boolean(
+          exp.is_disputed !== undefined
+            ? exp.is_disputed
+            : localExp?.is_disputed !== undefined
+            ? localExp.is_disputed
+            : metaIsDisputed || isPaused
+        );
+
         return {
           ...exp,
+          is_paused: isPaused,
+          is_disputed: isDisputed,
+          status: (exp.status || localExp?.status || metaStatus || (isPaused ? 'paused' : 'active')) as any,
+          dispute_reason: exp.dispute_reason || localExp?.dispute_reason || metaDisputeReason || null,
+          disputed_by: exp.disputed_by || localExp?.disputed_by || metaDisputedBy || null,
+          disputed_by_name: exp.disputed_by_name || localExp?.disputed_by_name || metaDisputedByName || null,
+          disputed_at: exp.disputed_at || localExp?.disputed_at || metaDisputedAt || null,
           attachment_url: resolvedAttachmentUrl,
           screenshot_path: resolvedScreenshotPath,
           attachment_name: resolvedAttachmentName,
@@ -2131,6 +2193,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           let parsedPayerName: string | null = null;
           let metaSplits: any[] = [];
           let metaSplitType: string | null = null;
+          let metaIsPaused: boolean | undefined = undefined;
+          let metaIsDisputed: boolean | undefined = undefined;
+          let metaStatus: string | undefined = undefined;
+          let metaDisputeReason: string | null = null;
+          let metaDisputedBy: string | null = null;
+          let metaDisputedByName: string | null = null;
+          let metaDisputedAt: string | null = null;
 
           if (exp.merchant_name && typeof exp.merchant_name === 'string') {
             const trimmed = exp.merchant_name.trim();
@@ -2141,6 +2210,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 if (p.payer_name) parsedPayerName = p.payer_name;
                 if (Array.isArray(p.splits) && p.splits.length > 0) metaSplits = p.splits;
                 if (p.split_type) metaSplitType = p.split_type;
+                if (p.is_paused !== undefined) metaIsPaused = !!p.is_paused;
+                if (p.is_disputed !== undefined) metaIsDisputed = !!p.is_disputed;
+                if (p.status) metaStatus = p.status;
+                if (p.dispute_reason) metaDisputeReason = p.dispute_reason;
+                if (p.disputed_by) metaDisputedBy = p.disputed_by;
+                if (p.disputed_by_name) metaDisputedByName = p.disputed_by_name;
+                if (p.disputed_at) metaDisputedAt = p.disputed_at;
               } catch {}
             } else if (trimmed) {
               parsedPayerName = trimmed;
@@ -2188,8 +2264,30 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             localExp?.attachment_type ||
             (resolvedAttachmentUrl ? 'image' : null);
 
+          const isPaused = Boolean(
+            exp.is_paused !== undefined
+              ? exp.is_paused
+              : localExp?.is_paused !== undefined
+              ? localExp.is_paused
+              : metaIsPaused
+          );
+          const isDisputed = Boolean(
+            exp.is_disputed !== undefined
+              ? exp.is_disputed
+              : localExp?.is_disputed !== undefined
+              ? localExp.is_disputed
+              : metaIsDisputed || isPaused
+          );
+
           return {
             ...exp,
+            is_paused: isPaused,
+            is_disputed: isDisputed,
+            status: (exp.status || localExp?.status || metaStatus || (isPaused ? 'paused' : 'active')) as any,
+            dispute_reason: exp.dispute_reason || localExp?.dispute_reason || metaDisputeReason || null,
+            disputed_by: exp.disputed_by || localExp?.disputed_by || metaDisputedBy || null,
+            disputed_by_name: exp.disputed_by_name || localExp?.disputed_by_name || metaDisputedByName || null,
+            disputed_at: exp.disputed_at || localExp?.disputed_at || metaDisputedAt || null,
             attachment_url: resolvedAttachmentUrl,
             screenshot_path: resolvedScreenshotPath,
             attachment_name: resolvedAttachmentName,
@@ -3671,12 +3769,120 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     return true;
   },
 
-  reportExpense: async data => {
+  disputeExpense: async data => {
     const { tripId, expenseId, reason, reporterId, reporterName } = data;
-    const exp = get().expenses.find(e => e.id === expenseId);
+    const currentExpenses = get().expenses;
+    const exp = currentExpenses.find(e => e.id === expenseId);
+    if (!exp) return false;
     const trip = get().trips.find(t => t.id === tripId);
-    const formattedAmount = exp ? formatCurrencyAmount(exp.amount, trip?.currency || 'INR') : '';
-    const disputeText = `⚠️ ${reporterName} flagged expense "${exp?.description || 'Expense'}" (${formattedAmount}) as invalid: "${reason.trim()}"`;
+    const nowIso = new Date().toISOString();
+
+    // 1. Mark expense as paused and disputed in local state
+    const updatedExpenses = currentExpenses.map(e => {
+      if (e.id === expenseId) {
+        return {
+          ...e,
+          is_paused: true,
+          is_disputed: true,
+          status: 'paused' as const,
+          dispute_reason: reason.trim(),
+          disputed_by: reporterId,
+          disputed_by_name: reporterName,
+          disputed_at: nowIso,
+        };
+      }
+      return e;
+    });
+
+    // Recompute balances with active expenses only (computeBalances filters paused expenses)
+    const tripMembers = get().members.filter(m => !m.trip_id || m.trip_id === tripId);
+    const newBalances = computeBalances(tripId, tripMembers, updatedExpenses);
+
+    set(state => ({
+      expenses: updatedExpenses,
+      balances: { ...state.balances, [tripId]: newBalances },
+    }));
+
+    // 2. Persist to AppStorage local details cache
+    try {
+      const raw = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
+      if (raw) {
+        const details = JSON.parse(raw);
+        details.expenses = (details.expenses || []).map((e: any) =>
+          e.id === expenseId
+            ? {
+                ...e,
+                is_paused: true,
+                is_disputed: true,
+                status: 'paused',
+                dispute_reason: reason.trim(),
+                disputed_by: reporterId,
+                disputed_by_name: reporterName,
+                disputed_at: nowIso,
+              }
+            : e
+        );
+        details.balances = newBalances;
+        await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+      }
+    } catch (err) {
+      console.warn('[disputeExpense] Local cache notice:', err);
+    }
+
+    // 3. Persist to Supabase
+    if (isSupabaseConfigured && isValidUUID(expenseId)) {
+      try {
+        const client = supabaseAdmin || supabase;
+        let merchantObj: any = {};
+        if (exp.merchant_name && typeof exp.merchant_name === 'string') {
+          try {
+            merchantObj = JSON.parse(exp.merchant_name);
+          } catch {
+            merchantObj = { payer_name: exp.merchant_name };
+          }
+        }
+        merchantObj.is_paused = true;
+        merchantObj.is_disputed = true;
+        merchantObj.status = 'paused';
+        merchantObj.dispute_reason = reason.trim();
+        merchantObj.disputed_by = reporterId;
+        merchantObj.disputed_by_name = reporterName;
+        merchantObj.disputed_at = nowIso;
+
+        const updateData: any = {
+          is_paused: true,
+          is_disputed: true,
+          status: 'paused',
+          dispute_reason: reason.trim(),
+          disputed_by_name: reporterName,
+          disputed_at: nowIso,
+          merchant_name: JSON.stringify(merchantObj),
+        };
+        if (isValidUUID(reporterId)) {
+          updateData.disputed_by = reporterId;
+        }
+
+        const { error: updateErr } = await client
+          .from('expenses')
+          .update(updateData)
+          .eq('id', expenseId);
+
+        if (updateErr) {
+          try {
+            await client
+              .from('expenses')
+              .update({ merchant_name: JSON.stringify(merchantObj) })
+              .eq('id', expenseId);
+          } catch {}
+        }
+      } catch (dbErr) {
+        console.warn('[disputeExpense] Supabase notice:', dbErr);
+      }
+    }
+
+    // 4. Send dispute / pause message in chat
+    const formattedAmount = formatCurrencyAmount(exp.amount, trip?.currency || 'INR');
+    const disputeText = `⏸️ Payment Paused: ${reporterName} disagreed on "${exp.description || 'Expense'}" (${formattedAmount}) - Reason: "${reason.trim()}"`;
 
     const disputePayload = JSON.stringify({
       type: 'dispute',
@@ -3684,19 +3890,180 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       expense_id: expenseId,
       expense_data: {
         id: expenseId,
-        description: exp?.description || 'Expense',
-        amount: exp?.amount || 0,
+        description: exp.description || 'Expense',
+        amount: exp.amount || 0,
         currency: trip?.currency || 'INR',
-        paid_by_name: exp?.payerName || 'Member',
-        paid_by_id: exp?.paid_by || '',
-        split_count: exp?.splits?.length || 0,
+        paid_by_name: exp.payerName || 'Member',
+        paid_by_id: exp.paid_by || '',
+        split_count: exp.splits?.length || 0,
+        is_paused: true,
         is_disputed: true,
+        status: 'paused',
         dispute_reason: reason.trim(),
         disputed_by: reporterName,
+        disputed_by_id: reporterId,
+        disputed_at: nowIso,
       },
     });
 
     await get().sendMessage(tripId, reporterId, reporterName, disputePayload);
+
+    // 5. Update friend balances if needed
+    try {
+      const { useContactsStore } = require('../contacts/useContactsStore');
+      const { useAuthStore } = require('../auth/useAuthStore');
+      const activeId = useAuthStore.getState().user?.id;
+      useContactsStore.getState().computeFriendBalances(get().trips, activeId).catch(() => {});
+      useContactsStore.getState().fetchFriendsSummary(activeId).catch(() => {});
+    } catch {}
+
+    return true;
+  },
+
+  reportExpense: async data => {
+    return get().disputeExpense(data);
+  },
+
+  resolveExpenseDispute: async data => {
+    const { tripId, expenseId, resolverName } = data;
+    const currentExpenses = get().expenses;
+    const exp = currentExpenses.find(e => e.id === expenseId);
+    if (!exp) return false;
+    const trip = get().trips.find(t => t.id === tripId);
+    const nowIso = new Date().toISOString();
+
+    // 1. Mark expense as active (unpaused) in local state
+    const updatedExpenses = currentExpenses.map(e => {
+      if (e.id === expenseId) {
+        return {
+          ...e,
+          is_paused: false,
+          is_disputed: false,
+          status: 'active' as const,
+          dispute_reason: null,
+          disputed_by: null,
+          disputed_by_name: null,
+          disputed_at: null,
+        };
+      }
+      return e;
+    });
+
+    const tripMembers = get().members.filter(m => !m.trip_id || m.trip_id === tripId);
+    const newBalances = computeBalances(tripId, tripMembers, updatedExpenses);
+
+    set(state => ({
+      expenses: updatedExpenses,
+      balances: { ...state.balances, [tripId]: newBalances },
+    }));
+
+    // 2. Persist to AppStorage
+    try {
+      const raw = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
+      if (raw) {
+        const details = JSON.parse(raw);
+        details.expenses = (details.expenses || []).map((e: any) =>
+          e.id === expenseId
+            ? {
+                ...e,
+                is_paused: false,
+                is_disputed: false,
+                status: 'active',
+                dispute_reason: null,
+                disputed_by: null,
+                disputed_by_name: null,
+                disputed_at: null,
+              }
+            : e
+        );
+        details.balances = newBalances;
+        await AppStorage.setItem(`@splityourtrip_local_details_${tripId}`, JSON.stringify(details));
+      }
+    } catch (err) {
+      console.warn('[resolveExpenseDispute] Local cache notice:', err);
+    }
+
+    // 3. Persist to Supabase
+    if (isSupabaseConfigured && isValidUUID(expenseId)) {
+      try {
+        const client = supabaseAdmin || supabase;
+        let merchantObj: any = {};
+        if (exp.merchant_name && typeof exp.merchant_name === 'string') {
+          try {
+            merchantObj = JSON.parse(exp.merchant_name);
+          } catch {
+            merchantObj = { payer_name: exp.merchant_name };
+          }
+        }
+        merchantObj.is_paused = false;
+        merchantObj.is_disputed = false;
+        merchantObj.status = 'active';
+        merchantObj.dispute_reason = null;
+        merchantObj.disputed_by = null;
+        merchantObj.disputed_by_name = null;
+        merchantObj.disputed_at = null;
+
+        const updateData: any = {
+          is_paused: false,
+          is_disputed: false,
+          status: 'active',
+          dispute_reason: null,
+          disputed_by: null,
+          disputed_by_name: null,
+          disputed_at: null,
+          merchant_name: JSON.stringify(merchantObj),
+        };
+
+        const { error: updateErr } = await client
+          .from('expenses')
+          .update(updateData)
+          .eq('id', expenseId);
+
+        if (updateErr) {
+          try {
+            await client
+              .from('expenses')
+              .update({ merchant_name: JSON.stringify(merchantObj) })
+              .eq('id', expenseId);
+          } catch {}
+        }
+      } catch (dbErr) {
+        console.warn('[resolveExpenseDispute] Supabase notice:', dbErr);
+      }
+    }
+
+    // 4. Send resume message in chat
+    const formattedAmount = formatCurrencyAmount(exp.amount, trip?.currency || 'INR');
+    const resolveText = `▶️ Dispute Resolved: "${exp.description || 'Expense'}" (${formattedAmount}) was resumed by ${resolverName} and added back to active balances.`;
+
+    const resolvePayload = JSON.stringify({
+      type: 'system',
+      text: resolveText,
+      expense_id: expenseId,
+      resolved_by: resolverName,
+      expense_data: {
+        id: expenseId,
+        description: exp.description || 'Expense',
+        amount: exp.amount || 0,
+        currency: trip?.currency || 'INR',
+        status: 'active',
+        is_paused: false,
+        is_disputed: false,
+      },
+    });
+
+    const { useAuthStore } = require('../auth/useAuthStore');
+    const currentUserId = useAuthStore.getState().user?.id || 'system';
+    await get().sendMessage(tripId, currentUserId, resolverName, resolvePayload);
+
+    // 5. Update friend balances if needed
+    try {
+      const { useContactsStore } = require('../contacts/useContactsStore');
+      const activeId = useAuthStore.getState().user?.id;
+      useContactsStore.getState().computeFriendBalances(get().trips, activeId).catch(() => {});
+      useContactsStore.getState().fetchFriendsSummary(activeId).catch(() => {});
+    } catch {}
+
     return true;
   },
 

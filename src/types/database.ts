@@ -82,6 +82,14 @@ export interface Expense {
   created_at: string;
   payerName?: string;
   splits?: ExpenseSplit[];
+  is_paused?: boolean;
+  is_disputed?: boolean;
+  dispute_reason?: string | null;
+  disputed_by?: string | null;
+  disputed_by_name?: string | null;
+  disputed_at?: string | null;
+  status?: 'active' | 'paused' | 'disputed' | 'settled';
+  merchant_name?: string | null;
 }
 
 export interface ExpenseSplit {
@@ -149,9 +157,14 @@ export interface TripMessage {
     impact_paise?: number;
     is_group_expense?: boolean;
     date?: string;
+    is_paused?: boolean;
     is_disputed?: boolean;
+    status?: string;
     dispute_reason?: string;
     disputed_by?: string;
+    disputed_by_id?: string;
+    disputed_by_name?: string;
+    disputed_at?: string;
     attachment_url?: string | null;
     screenshot_path?: string | null;
     attachment_name?: string | null;

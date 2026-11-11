@@ -124,6 +124,13 @@ ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS currency text DEFAULT 'INR'
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS date timestamptz DEFAULT now();
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS expense_date timestamptz DEFAULT now();
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id);
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS is_paused boolean DEFAULT false;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS is_disputed boolean DEFAULT false;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS dispute_reason text;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS disputed_by uuid;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS disputed_by_name text;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS disputed_at timestamptz;
+ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS status text DEFAULT 'active';
 ALTER TABLE public.expenses DROP CONSTRAINT IF EXISTS expenses_paid_by_fkey;
 
 -- 5. EXPENSE SPLITS TABLE
