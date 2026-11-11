@@ -97,6 +97,37 @@ const getFriendCacheKey = (fId?: string, phone?: string, name?: string) => {
   return fId || normPhone || cleanName || 'unknown_friend';
 };
 
+export const resolveMediaUrl = (url: string | null | undefined): string | null => {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  if (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('file://') ||
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('content://') ||
+    trimmed.startsWith('ph://')
+  ) {
+    return trimmed;
+  }
+
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+  if (supabaseUrl) {
+    const cleanBase = supabaseUrl.replace(/\/+$/, '');
+    if (trimmed.startsWith('receipts/')) {
+      return `${cleanBase}/storage/v1/object/public/${trimmed}`;
+    } else if (trimmed.startsWith('attachments/')) {
+      return `${cleanBase}/storage/v1/object/public/${trimmed}`;
+    } else {
+      return `${cleanBase}/storage/v1/object/public/attachments/${trimmed.replace(/^\/+/, '')}`;
+    }
+  }
+
+  return trimmed;
+};
+
 interface ChatViewProps {
   tripId: string;
   title: string;
@@ -217,6 +248,19 @@ export default function ChatView({
   const inputRef = useRef<TextInput>(null);
   const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState<string | null>(null);
+  const [photoPreviewLoading, setPhotoPreviewLoading] = useState(false);
+  const [photoPreviewError, setPhotoPreviewError] = useState(false);
+
+  const openPhotoPreview = useCallback((url: string | null | undefined) => {
+    const resolved = resolveMediaUrl(url);
+    if (!resolved) {
+      Alert.alert('Screenshot', 'Payment screenshot link is unavailable.');
+      return;
+    }
+    setPhotoPreviewLoading(true);
+    setPhotoPreviewError(false);
+    setSelectedPhotoPreview(resolved);
+  }, []);
   const [selectedVideoPreview, setSelectedVideoPreview] = useState<string | null>(null);
   const [outboxQueue, setOutboxQueue] = useState<OutboxMessageItem[]>([]);
   const [isNetOnline, setIsNetOnline] = useState(true);
@@ -2918,7 +2962,7 @@ export default function ChatView({
                   )}
                   <TouchableOpacity
                     activeOpacity={item.is_sent === false ? 1 : 0.9}
-                    onPress={() => item.is_sent !== false && setSelectedPhotoPreview(photoUrl || null)}
+                    onPress={() => item.is_sent !== false && openPhotoPreview(photoUrl || null)}
                     onLongPress={() => item.is_sent !== false && handleMessageLongPress(item, isMine)}
                     delayLongPress={280}
                   >
@@ -3370,7 +3414,7 @@ export default function ChatView({
                             activeOpacity={0.8}
                             onPress={() => {
                               if (!isDoc) {
-                                setSelectedPhotoPreview(cardAttachment);
+                                openPhotoPreview(cardAttachment);
                               } else {
                                 handleOpenDoc(cardAttachment);
                               }
@@ -3582,7 +3626,7 @@ export default function ChatView({
                   {screenshotUrl ? (
                     <TouchableOpacity
                       activeOpacity={0.9}
-                      onPress={() => setSelectedPhotoPreview(screenshotUrl)}
+                      onPress={() => openPhotoPreview(screenshotUrl)}
                       style={styles.settleScreenshotWrapper}
                     >
                       <Image source={{ uri: screenshotUrl }} style={styles.settleScreenshotImage} resizeMode="cover" />
@@ -4869,23 +4913,66 @@ export default function ChatView({
         visible={Boolean(selectedPhotoPreview)}
         transparent
         animationType="fade"
-        onRequestClose={() => setSelectedPhotoPreview(null)}
+        onRequestClose={() => {
+          setSelectedPhotoPreview(null);
+          setPhotoPreviewLoading(false);
+          setPhotoPreviewError(false);
+        }}
       >
-        <View style={styles.photoPreviewOverlay}>
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.photoPreviewOverlay}
+          onPress={() => {
+            setSelectedPhotoPreview(null);
+            setPhotoPreviewLoading(false);
+            setPhotoPreviewError(false);
+          }}
+        >
           <TouchableOpacity
             style={[styles.photoCloseBtn, { top: Math.max(insets.top, 24) + 16 }]}
-            onPress={() => setSelectedPhotoPreview(null)}
+            onPress={() => {
+              setSelectedPhotoPreview(null);
+              setPhotoPreviewLoading(false);
+              setPhotoPreviewError(false);
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="close-circle" size={32} color="#FFFFFF" />
+            <Ionicons name="close-circle" size={34} color="#FFFFFF" />
           </TouchableOpacity>
-          {selectedPhotoPreview && (
+
+          {photoPreviewLoading && (
+            <View style={{ position: 'absolute', alignItems: 'center', justifyContent: 'center' }}>
+              <ActivityIndicator size="large" color="#FFFFFF" />
+              <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 8, fontWeight: '500' }}>
+                Loading image...
+              </Text>
+            </View>
+          )}
+
+          {photoPreviewError ? (
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+              <Ionicons name="image-outline" size={54} color="rgba(255,255,255,0.4)" />
+              <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginTop: 12, textAlign: 'center' }}>
+                Image Unavailable
+              </Text>
+              <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, marginTop: 6, textAlign: 'center' }}>
+                Unable to load this attachment or the link has expired.
+              </Text>
+            </View>
+          ) : selectedPhotoPreview ? (
             <Image
               source={{ uri: selectedPhotoPreview }}
               style={styles.fullScreenPhoto}
               resizeMode="contain"
+              onLoadStart={() => setPhotoPreviewLoading(true)}
+              onLoadEnd={() => setPhotoPreviewLoading(false)}
+              onError={() => {
+                setPhotoPreviewLoading(false);
+                setPhotoPreviewError(true);
+              }}
             />
-          )}
-        </View>
+          ) : null}
+        </TouchableOpacity>
       </Modal>
       )}
 

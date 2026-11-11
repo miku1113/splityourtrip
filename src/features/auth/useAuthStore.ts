@@ -188,13 +188,22 @@ interface AuthState {
     country?: string;
   }) => Promise<{ error: Error | null }>;
   ensureProfile: (userId: string, nameFallback?: string) => Promise<Profile | null>;
+  lastLoginAt: number | null;
+  recordLoginTimestamp: (ts?: number) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   profile: null,
+  lastLoginAt: null,
   isLoading: true,
   isConfigured: isSupabaseConfigured,
+
+  recordLoginTimestamp: (ts?: number) => {
+    const now = ts || Date.now();
+    set({ lastLoginAt: now });
+    AppStorage.setItem('@splityourtrip_last_login_at', String(now)).catch(() => {});
+  },
 
   fetchProfile: async (userId?: string) => {
     try {
@@ -464,6 +473,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         // Trigger background data & trips fetch immediately on cold start (non-blocking)
         syncUserData(session.user.id).catch(() => {});
+
+        // Restore or initialize login timestamp for session-based welcome greeting
+        try {
+          const lastLoginRaw = await AppStorage.getItem('@splityourtrip_last_login_at');
+          if (lastLoginRaw) {
+            set({ lastLoginAt: Number(lastLoginRaw) });
+          } else {
+            const now = Date.now();
+            set({ lastLoginAt: now });
+            AppStorage.setItem('@splityourtrip_last_login_at', String(now)).catch(() => {});
+          }
+        } catch {}
       } else {
         if (!get().profile) {
           set({ user: null, profile: null, isLoading: false });
@@ -481,9 +502,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           resetUserStores();
           try {
             await AppStorage.removeItem('@splityourtrip_last_active_profile');
+            await AppStorage.removeItem('@splityourtrip_last_login_at');
           } catch {}
-          set({ user: null, profile: null, isLoading: false });
+          set({ user: null, profile: null, lastLoginAt: null, isLoading: false });
           return;
+        }
+
+        if (event === 'SIGNED_IN') {
+          const now = Date.now();
+          set({ lastLoginAt: now });
+          AppStorage.setItem('@splityourtrip_last_login_at', String(now)).catch(() => {});
         }
 
         if (newUser) {
@@ -592,6 +620,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       };
 
       set({ user: data.user, profile: initialProfile, isLoading: false });
+      get().recordLoginTimestamp();
 
       // Background non-blocking sync
       get().ensureProfile(data.user.id, fallbackName).catch(() => {});
@@ -1211,6 +1240,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       await AppStorage.removeItem('@splityourtrip_local_trips');
       await AppStorage.removeItem('@splityourtrip_cached_contacts');
+      await AppStorage.removeItem('@splityourtrip_last_login_at');
     } catch {}
     if (isSupabaseConfigured) {
       try {
@@ -1219,7 +1249,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         console.warn('Sign out error:', e);
       }
     }
-    set({ user: null, profile: null });
+    set({ user: null, profile: null, lastLoginAt: null });
   },
 
   updateProfile: async updates => {

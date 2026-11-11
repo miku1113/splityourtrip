@@ -38,10 +38,36 @@ const TRIP_PRESET_EMOJIS = ['🏖️', '🏔️', '⛺', '✈️', '🚗', '🌆
 export default function MyTripsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, profile } = useAuthStore();
+  const { user, profile, lastLoginAt } = useAuthStore();
   const { trips, fetchTrips, initTrips, createTrip, addMember, joinTripByCode, isLoading, isHydrated, setVoiceModalOpen } = useTripStore();
   const { contacts, isLoading: contactsLoading, initContacts } = useContactsStore();
   const { colors, isDark } = useTheme();
+
+  // Welcome greeting visible for 2 minutes after login, then auto-disables to free screen space
+  const WELCOME_GREETING_DURATION_MS = 2 * 60 * 1000;
+  const [showWelcomeGreeting, setShowWelcomeGreeting] = useState<boolean>(() => {
+    const last = useAuthStore.getState().lastLoginAt;
+    if (!last) return false;
+    return Date.now() - last < WELCOME_GREETING_DURATION_MS;
+  });
+
+  useEffect(() => {
+    if (!lastLoginAt) {
+      setShowWelcomeGreeting(false);
+      return;
+    }
+    const elapsed = Date.now() - lastLoginAt;
+    const remaining = WELCOME_GREETING_DURATION_MS - elapsed;
+    if (remaining <= 0) {
+      setShowWelcomeGreeting(false);
+      return;
+    }
+    setShowWelcomeGreeting(true);
+    const timer = setTimeout(() => {
+      setShowWelcomeGreeting(false);
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [lastLoginAt]);
 
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
@@ -394,34 +420,46 @@ export default function MyTripsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* User Greeting Header */}
-      <View style={styles.userGreetingHeader}>
-        <View>
-          <Text style={[styles.greetingSub, { color: colors.textSecondary }]}>YOUR TRIPS</Text>
-          <Text style={[styles.greetingName, { color: colors.text }]} numberOfLines={1}>
-            {profile?.full_name?.split(' ')[0] || profile?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'Traveler'}
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.profileAvatarMini, { backgroundColor: colors.primary, overflow: 'hidden' }]}
-          onPress={() => router.push('/(tabs)/profile')}
-        >
-          {profile?.avatar_url ? (
-            <Image
-              source={{ uri: profile.avatar_url }}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="cover"
-            />
-          ) : (
-            <Text style={[styles.avatarMiniText, { color: colors.textOnSilver || '#B5504F' }]}>
-              {(profile?.full_name || profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
+      {/* User Greeting Header - Shown for 2 minutes post-login, then automatically disabled */}
+      {showWelcomeGreeting && (
+        <View style={styles.userGreetingHeader}>
+          <View style={{ flex: 1, marginRight: moderateScale(12) }}>
+            <Text style={[styles.greetingSub, { color: colors.textSecondary }]}>WELCOME</Text>
+            <Text
+              style={[styles.greetingName, { color: colors.text }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.72}
+            >
+              {profile?.full_name?.split(' ')[0] || profile?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'Traveler'}
             </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+          </View>
+          <TouchableOpacity
+            style={[styles.profileAvatarMini, { backgroundColor: colors.primary, overflow: 'hidden' }]}
+            onPress={() => router.push('/(tabs)/profile')}
+          >
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={[styles.avatarMiniText, { color: colors.textOnSilver || '#B5504F' }]}>
+                {(profile?.full_name || profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Top Banner / Actions */}
-      <View style={styles.topActions}>
+      <View
+        style={[
+          styles.topActions,
+          { paddingTop: showWelcomeGreeting ? moderateScale(6) : moderateScale(14) },
+        ]}
+      >
         <TouchableOpacity
           style={styles.createBtnWrapper}
           activeOpacity={0.88}

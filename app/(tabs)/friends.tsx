@@ -266,7 +266,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                   {
                     backgroundColor: colors.primaryLight,
                     borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
-                    marginRight: 4,
+                    marginRight: moderateScale(6),
                   },
                 ]}
                 onPress={(e) => {
@@ -279,16 +279,23 @@ const FriendRowItem = React.memo(function FriendRowItem({
                 <Ionicons name="add" size={15} color={colors.primary} />
               </TouchableOpacity>
 
-              {!item.isRegistered && item.phoneNumber ? (
-                <TouchableOpacity
-                  style={[styles.inviteMiniBtn, { backgroundColor: '#25D366' }]}
-                  onPress={() => onInvite(item.name, item.phoneNumber)}
-                >
-                  <Ionicons name="logo-whatsapp" size={12} color="#FFFFFF" />
-                </TouchableOpacity>
-              ) : (
-                <Ionicons name="chevron-forward" size={15} color={colors.textMuted} style={{ marginLeft: 2 }} />
-              )}
+              <View style={styles.trailingActionSlot}>
+                {!item.isRegistered && item.phoneNumber ? (
+                  <TouchableOpacity
+                    style={[styles.inviteMiniBtn, { backgroundColor: '#25D366' }]}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      onInvite(item.name, item.phoneNumber);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="logo-whatsapp" size={13} color="#FFFFFF" />
+                  </TouchableOpacity>
+                ) : (
+                  <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                )}
+              </View>
             </View>
           )}
         </View>
@@ -855,7 +862,7 @@ export default function FriendsScreen() {
                         {
                           backgroundColor: colors.primaryLight,
                           borderColor: isDark ? 'rgba(129, 140, 248, 0.3)' : 'rgba(99, 102, 241, 0.2)',
-                          marginRight: 4,
+                          marginRight: moderateScale(6),
                         },
                       ]}
                       onPress={(e) => {
@@ -867,12 +874,13 @@ export default function FriendsScreen() {
                     >
                       <Ionicons name="add" size={15} color={colors.primary} />
                     </TouchableOpacity>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={15}
-                      color={colors.textMuted}
-                      style={{ marginLeft: 2 }}
-                    />
+                    <View style={styles.trailingActionSlot}>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={15}
+                        color={colors.textMuted}
+                      />
+                    </View>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -1187,7 +1195,12 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(12),
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
+  },
+  trailingActionSlot: {
+    width: moderateScale(24),
+    height: moderateScale(28),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,

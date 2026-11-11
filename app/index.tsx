@@ -726,7 +726,11 @@ export default function SplashScreen() {
             ]}
           >
             <Image
-              source={require('../assets/images/split-logo.png')}
+              source={
+                isDark
+                  ? require('../assets/images/split-logo.png')
+                  : require('../assets/images/split-logo-dark.png')
+              }
               style={styles.planeImage}
               resizeMode="contain"
             />
@@ -952,11 +956,6 @@ const styles = StyleSheet.create({
   planeImage: {
     width: 130,
     height: 130,
-    shadowColor: '#4A85B6',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 10,
   },
   flashAura: {
     position: 'absolute',
