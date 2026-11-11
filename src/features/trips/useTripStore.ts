@@ -5073,6 +5073,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         t.name.toLowerCase() === 'personal expenses'
     );
     if (existing) {
+      await AppStorage.setItem(`@splityourtrip_personal_trip_${effectiveUserId}`, existing.id).catch(() => {});
       return existing;
     }
 
@@ -5085,7 +5086,34 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       }
     } catch {}
 
-    // 3. Create personal trip
+    // 3. Query Supabase for any existing personal trip before creating a duplicate
+    if (effectiveUserId && isValidUUID(effectiveUserId)) {
+      try {
+        const sb = supabaseAdmin || supabase;
+        const { data: dbTrips } = await withTimeout(
+          sb
+            .from('trips')
+            .select('*')
+            .eq('created_by', effectiveUserId)
+            .or('trip_type.eq.personal,name.ilike.%personal%')
+            .order('created_at', { ascending: false }),
+          4000
+        ).catch(() => ({ data: null }));
+
+        if (dbTrips && dbTrips.length > 0) {
+          const dbTrip = dbTrips[0] as Trip;
+          await AppStorage.setItem(`@splityourtrip_personal_trip_${effectiveUserId}`, dbTrip.id).catch(() => {});
+          if (!get().trips.some(t => t.id === dbTrip.id)) {
+            set({ trips: [dbTrip, ...get().trips] });
+          }
+          return dbTrip;
+        }
+      } catch (err) {
+        console.warn('Notice querying existing personal trip from db:', err);
+      }
+    }
+
+    // 4. Create personal trip only if none exists anywhere
     try {
       const personalTrip = await get().createTrip(
         'Personal (You)',
@@ -5182,8 +5210,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     // 5. Query Supabase for latest up-to-date expenses
     try {
+      const sb = supabaseAdmin || supabase;
       const { data } = await withTimeout(
-        supabaseAdmin
+        sb
           .from('expenses')
           .select('id, amount, description, category, date, created_at')
           .eq('trip_id', personalTripId)

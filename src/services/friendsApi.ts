@@ -1,7 +1,7 @@
 import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
-import { FriendContact, normalizePhone, normalizeNameForMatch, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder } from '../features/contacts/useContactsStore';
+import { FriendContact, normalizePhone, normalizeNameForMatch, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder, isSelfContact } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
 import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload, deletedTripIdsSet } from '../features/trips/useTripStore';
 
@@ -335,10 +335,14 @@ interface FriendMapEntry {
 
       for (const otherMember of tMembers) {
         if (otherMember.id === myMember.id) continue;
-        if (otherMember.profile_id && otherMember.profile_id === userId) continue;
-        if ((otherMember as any).user_id && (otherMember as any).user_id === userId) continue;
-        if (myUserPhone && otherMember.phone_number && normalizePhone(otherMember.phone_number) === normalizePhone(myUserPhone)) continue;
-        if (myUserName && otherMember.display_name && normalizeNameForMatch(otherMember.display_name) === normalizeNameForMatch(myUserName)) continue;
+        if (isSelfContact({
+          id: otherMember.id,
+          profileId: otherMember.profile_id,
+          phoneNumber: otherMember.phone_number,
+          name: otherMember.display_name,
+        }, { id: userId, name: myUserName, phone: myUserPhone })) {
+          continue;
+        }
 
         const prof = otherMember.profile_id ? profilesMap.get(otherMember.profile_id) : null;
         const friendPhone = prof?.phone_number || otherMember.phone_number || undefined;
@@ -443,14 +447,11 @@ interface FriendMapEntry {
     const friendsList: FriendContact[] = [];
 
     for (const [, f] of friendMap.entries()) {
-      if (f.profileId && f.profileId === userId) continue;
-      if (myUserPhone && f.phoneNumber && normalizePhone(f.phoneNumber) === normalizePhone(myUserPhone)) continue;
-      if (myUserPhone && f.cleanPhone && normalizePhone(f.cleanPhone) === normalizePhone(myUserPhone)) continue;
-      if (myUserName && f.name && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName) && (!f.profileId || f.profileId === userId)) continue;
+      if (isSelfContact(f, { id: userId, name: myUserName, phone: myUserPhone })) continue;
 
       const prof = f.profileId ? profilesMap.get(f.profileId) : null;
       // If f.name was accidentally set to the current user's name, strip it so profileName wins!
-      const isMyName = myUserName && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName);
+      const isMyName = isSelfContact({ name: f.name }, { id: userId, name: myUserName, phone: myUserPhone });
       const safeContactName = isMyName ? null : f.name;
 
       const finalResolvedName = getEffectiveContactName({
@@ -461,6 +462,10 @@ interface FriendMapEntry {
         fallback: prof?.full_name || (prof as any)?.name || safeContactName || 'Friend',
         currentUserName: myUserName,
       });
+
+      if (isSelfContact({ ...f, name: finalResolvedName }, { id: userId, name: myUserName, phone: myUserPhone })) {
+        continue;
+      }
       const net = f.owedToYouPaise - f.youOwePaise;
       totalOwedToYouPaise += f.owedToYouPaise;
       totalYouOwePaise += f.youOwePaise;

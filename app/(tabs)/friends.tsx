@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme/useThemeStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
 import { useTripStore } from '../../src/features/trips/useTripStore';
-import { useContactsStore, FriendContact, getEffectiveContactName, normalizeNameForMatch, normalizePhone } from '../../src/features/contacts/useContactsStore';
+import { useContactsStore, FriendContact, getEffectiveContactName, normalizeNameForMatch, normalizePhone, isSelfContact } from '../../src/features/contacts/useContactsStore';
 import { formatCurrencyAmount, getUserCurrencyPreference } from '../../src/services/currency';
 import { scaleFont, moderateScale, isSmallDevice } from '../../src/theme/responsive';
 import { AppStorage } from '../../src/lib/storage';
@@ -171,7 +171,10 @@ const FriendRowItem = React.memo(function FriendRowItem({
             </Text>
             {Boolean(item.unseenMessagesCount && item.unseenMessagesCount > 0) && (
               <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
-                <Text style={[styles.unreadBadgeText, { color: colors.textOnSilver || '#B5504F' }]}>
+                <Text
+                  style={[styles.unreadBadgeText, { color: colors.textOnSilver || '#B5504F' }]}
+                  numberOfLines={1}
+                >
                   {item.unseenMessagesCount} new
                 </Text>
               </View>
@@ -188,6 +191,7 @@ const FriendRowItem = React.memo(function FriendRowItem({
                     styles.appBadgeText,
                     { color: colors.warning },
                   ]}
+                  numberOfLines={1}
                 >
                   Guest
                 </Text>
@@ -407,10 +411,7 @@ export default function FriendsScreen() {
 
     for (const c of contacts) {
       // Strictly prevent user from ever seeing themself as a friend
-      if (currentUserId && (c.profileId === currentUserId || c.id === currentUserId)) continue;
-      if (normUserPhone && c.cleanPhone && normalizePhone(c.cleanPhone) === normUserPhone) continue;
-      if (normUserPhone && c.phoneNumber && normalizePhone(c.phoneNumber) === normUserPhone) continue;
-      if (currentUserName && normalizeNameForMatch(c.name) === normalizeNameForMatch(currentUserName) && (!c.profileId || c.profileId === currentUserId)) continue;
+      if (isSelfContact(c, { id: currentUserId, name: currentUserName, phone: currentUserPhone })) continue;
 
       const cleanName = c.name.trim().toLowerCase();
       if (seenIds.has(c.id) || seenNames.has(cleanName)) continue;
@@ -1083,21 +1084,26 @@ const styles = StyleSheet.create({
   },
   friendDetails: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
+    marginRight: moderateScale(8),
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
+    flexShrink: 1,
   },
   friendName: {
     fontSize: scaleFont(14.5),
     fontWeight: '700',
+    flexShrink: 1,
   },
   appBadge: {
     paddingHorizontal: 5,
     paddingVertical: 1.5,
     borderRadius: 4,
+    flexShrink: 0,
   },
   appBadgeText: {
     fontSize: scaleFont(9.5),
@@ -1107,6 +1113,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 1.5,
     borderRadius: 6,
+    flexShrink: 0,
   },
   unreadBadgeText: {
     color: '#B5504F',
@@ -1121,6 +1128,7 @@ const styles = StyleSheet.create({
     marginLeft: moderateScale(8),
     alignItems: 'flex-end',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   balanceChevronRow: {
     flexDirection: 'row',
@@ -1128,7 +1136,9 @@ const styles = StyleSheet.create({
   },
   balancePillCol: {
     alignItems: 'flex-end',
-    marginRight: 4,
+    justifyContent: 'center',
+    marginRight: moderateScale(6),
+    minWidth: moderateScale(52),
   },
   dualBalanceWrapper: {
     alignItems: 'flex-end',

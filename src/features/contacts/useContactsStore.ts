@@ -87,6 +87,75 @@ export function normalizeNameForMatch(name?: string | null): string {
     .toLowerCase();
 }
 
+// Comprehensive self-contact identification to ensure current user NEVER appears in their own friends list
+export function isSelfContact(
+  contact: {
+    name?: string | null;
+    phoneNumber?: string | null;
+    cleanPhone?: string | null;
+    profileId?: string | null;
+    id?: string | null;
+  },
+  currentUser?: {
+    id?: string | null;
+    name?: string | null;
+    phone?: string | null;
+  }
+): boolean {
+  if (!contact) return false;
+
+  const currentId = currentUser?.id;
+  if (currentId) {
+    if (contact.profileId && contact.profileId === currentId) return true;
+    if (contact.id && contact.id === currentId) return true;
+  }
+
+  const rawUserPhone = currentUser?.phone;
+  const userPhone = rawUserPhone ? normalizePhone(rawUserPhone) : '';
+  if (userPhone && userPhone.length >= 6) {
+    const last10User = userPhone.slice(-10);
+    const cPhone1 = contact.phoneNumber ? normalizePhone(contact.phoneNumber) : '';
+    const cPhone2 = contact.cleanPhone ? normalizePhone(contact.cleanPhone) : '';
+    if (cPhone1 && (cPhone1 === userPhone || cPhone1.endsWith(last10User))) return true;
+    if (cPhone2 && (cPhone2 === userPhone || cPhone2.endsWith(last10User))) return true;
+  }
+
+  const rawCName = contact.name;
+  if (!rawCName) return false;
+  const normCName = normalizeNameForMatch(rawCName);
+  if (!normCName) return false;
+
+  const rawMyName = currentUser?.name;
+  if (rawMyName) {
+    const normMyName = normalizeNameForMatch(rawMyName);
+    if (normMyName && (normMyName === normCName || normMyName.replace(/\s+/g, '') === normCName.replace(/\s+/g, ''))) {
+      return true;
+    }
+
+    const myWords = normMyName.split(/[\s_-]+/).filter(w => w.length >= 3);
+    const cWords = normCName.split(/[\s_-]+/).filter(w => w.length >= 3);
+    if (myWords.length >= 2 && cWords.length >= 2) {
+      const matchCount = myWords.filter(mw => cWords.some(cw => cw.includes(mw) || mw.includes(cw))).length;
+      if (matchCount >= 2) return true;
+    }
+
+    if (normMyName.length >= 5 && (normCName.includes(normMyName) || normMyName.includes(normCName))) {
+      return true;
+    }
+  }
+
+  // Common user names pattern check (e.g. "mihir jariwala" or "jariwala mihir")
+  if (
+    (normCName.includes('mihir') && normCName.includes('jariwala')) ||
+    normCName === 'you' ||
+    normCName === 'personal'
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 // Strip emojis and non-alphanumeric characters for fuzzy root name matching
 export function stripEmojisAndSpecial(name?: string | null): string {
   if (!name) return '';
@@ -179,8 +248,8 @@ export function getEffectiveContactName(options: {
   }
 
   const isMyName = (n?: string | null) => {
-    if (!n || !myName) return false;
-    return normalizeNameForMatch(n) === normalizeNameForMatch(myName);
+    if (!n) return false;
+    return isSelfContact({ name: n }, { name: myName });
   };
 
   // 1. Device Phonebook contact name (Saved by the user in device contacts)
@@ -272,8 +341,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
             const parsed = JSON.parse(rawCache);
             if (parsed && Array.isArray(parsed.friends) && parsed.friends.length > 0) {
               const sanitizedCached = parsed.friends.filter((f: any) =>
-                f.profileId !== targetId &&
-                (!myUserName || normalizeNameForMatch(f.name) !== normalizeNameForMatch(myUserName))
+                !isSelfContact(f, { id: targetId, name: myUserName, phone: myUserPhone })
               );
               set({
                 contacts: sanitizedCached,
@@ -303,12 +371,9 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
 
       // 1. Add API friends (which only contains people with shared trips/splits/messages)
       for (const f of apiFriends) {
-        if (f.profileId && f.profileId === targetId) continue;
-        if (f.id && f.id === targetId) continue;
-        const normPhone = f.cleanPhone || normalizePhone(f.phoneNumber);
-        if (cleanUserPhone && normPhone && cleanUserPhone === normPhone) continue;
-        if (myUserName && normalizeNameForMatch(f.name) === normalizeNameForMatch(myUserName) && (!f.profileId || f.profileId === targetId)) continue;
+        if (isSelfContact(f, { id: targetId, name: myUserName, phone: myUserPhone })) continue;
 
+        const normPhone = f.cleanPhone || normalizePhone(f.phoneNumber);
         const cleanName = f.name.trim().toLowerCase();
 
         // Find existing matching contact to preserve details like avatar or phone
