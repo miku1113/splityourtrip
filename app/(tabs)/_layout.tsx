@@ -17,6 +17,10 @@ import { useNotificationStore } from '../../src/features/notifications/useNotifi
 import { syncWidgetSummary } from '../../src/services/widgetService';
 import { scaleFont } from '../../src/theme/responsive';
 
+// Pre-load top bar logo assets statically at module level to guarantee instant resolution
+const LOGO_DARK_MODE = require('../../assets/images/logo-transparent.png');
+const LOGO_LIGHT_MODE = require('../../assets/images/logo-dark-transparent.png');
+
 export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -90,11 +94,8 @@ export default function TabLayout() {
   const renderHeaderLeft = () => (
     <View style={styles.headerLeft}>
       <Image
-        source={
-          isDark
-            ? require('../../assets/images/logo-transparent.png')
-            : require('../../assets/images/logo-dark-transparent.png')
-        }
+        key={isDark ? 'top-logo-dark' : 'top-logo-light'}
+        source={isDark ? LOGO_DARK_MODE : LOGO_LIGHT_MODE}
         style={styles.appIcon}
         resizeMode="contain"
       />
@@ -330,6 +331,8 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   headerLeft: {
     marginLeft: 14,
+    width: 34,
+    height: 34,
     justifyContent: 'center',
     alignItems: 'center',
   },
