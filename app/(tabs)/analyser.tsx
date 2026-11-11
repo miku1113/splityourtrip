@@ -27,6 +27,7 @@ import {
   normalizeExpensesForTrip,
   findMyMember,
   normalizePhone,
+  getUserTripsStorageKey,
 } from '../../src/features/trips/useTripStore';
 import { useContactsStore } from '../../src/features/contacts/useContactsStore';
 import { useAuthStore } from '../../src/features/auth/useAuthStore';
@@ -114,6 +115,10 @@ interface DailySpendGroup {
   expenses: AnalyzedExpenseItem[];
 }
 
+// Persistent in-memory cache to guarantee zero-delay instant rendering on tab switch
+let inMemoryAnalyserCache: Record<string, TripCachedAnalytics> | null = null;
+let isPrefetchingAnalytics = false;
+
 export default function AnalyserScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
@@ -121,7 +126,7 @@ export default function AnalyserScreen() {
   const { user, profile } = useAuthStore();
   const currentUserPhone =
     profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
-  const { trips, expenses, members, initTrips } = useTripStore();
+  const { trips, expenses, members, initTrips, tripDetailsRevision } = useTripStore();
   const contacts = useContactsStore(s => s.contacts);
   const fetchFriendsSummary = useContactsStore(s => s.fetchFriendsSummary);
 
@@ -130,8 +135,26 @@ export default function AnalyserScreen() {
   const [selectedPersonFilter, setSelectedPersonFilter] = useState<string>('all');
   const [userCurrency, setUserCurrency] = useState('INR');
   const [refreshing, setRefreshing] = useState(false);
-  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [allTripsData, setAllTripsData] = useState<Record<string, TripCachedAnalytics>>({});
+  const [allTripsData, setAllTripsData] = useState<Record<string, TripCachedAnalytics>>(() => inMemoryAnalyserCache || {});
+  const [loadingAnalytics, setLoadingAnalytics] = useState<boolean>(() => !inMemoryAnalyserCache || Object.keys(inMemoryAnalyserCache).length === 0);
+
+  // Instant local cache hydration on initial mount
+  useEffect(() => {
+    if (!inMemoryAnalyserCache || Object.keys(inMemoryAnalyserCache).length === 0) {
+      AppStorage.getItem('@splityourtrip_analyser_cached_master').then(raw => {
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+              inMemoryAnalyserCache = parsed;
+              setAllTripsData(prev => Object.keys(prev).length === 0 ? parsed : prev);
+              setLoadingAnalytics(false);
+            }
+          } catch {}
+        }
+      });
+    }
+  }, []);
 
   // Search & Filter & Sort state ("filter search short")
   const [searchQuery, setSearchQuery] = useState('');
@@ -164,23 +187,53 @@ export default function AnalyserScreen() {
   const navLockRef = React.useRef(false);
 
   const loadAllTripsAnalytics = useCallback(async () => {
-    setLoadingAnalytics(true);
     try {
-      const currentTrips = useTripStore.getState().trips;
-      const result: Record<string, TripCachedAnalytics> = {};
+      let currentTrips = useTripStore.getState().trips;
+      if (!currentTrips || currentTrips.length === 0) {
+        const authUser = useAuthStore.getState().user;
+        const storageKey = getUserTripsStorageKey(authUser?.id);
+        try {
+          const raw = await AppStorage.getItem(storageKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              currentTrips = parsed;
+            }
+          }
+        } catch {}
+      }
 
-      for (const t of currentTrips) {
+      if (!currentTrips || currentTrips.length === 0) {
+        setLoadingAnalytics(false);
+        return;
+      }
+
+      // Fast parallel fetch across all trips
+      const rawDetailsArray = await Promise.all(
+        currentTrips.map(t =>
+          AppStorage.getItem(`@splityourtrip_local_details_${t.id}`).catch(() => null)
+        )
+      );
+
+      const result: Record<string, TripCachedAnalytics> = {};
+      let hasMissingDetails = false;
+
+      currentTrips.forEach((t, index) => {
+        const raw = rawDetailsArray[index];
         let tMembers: TripMember[] = [];
         let tExpenses: any[] = [];
 
-        try {
-          const raw = await AppStorage.getItem(`@splityourtrip_local_details_${t.id}`);
-          if (raw) {
+        if (raw) {
+          try {
             const parsed = JSON.parse(raw);
             tMembers = Array.isArray(parsed.members) ? parsed.members : [];
             tExpenses = Array.isArray(parsed.expenses) ? parsed.expenses : [];
-          }
-        } catch {}
+          } catch {}
+        }
+
+        if (!raw || tExpenses.length === 0) {
+          hasMissingDetails = true;
+        }
 
         const storeExpenses = useTripStore.getState().expenses.filter(e => e.trip_id === t.id);
         const storeMembers = useTripStore.getState().members.filter(m => m.trip_id === t.id);
@@ -206,9 +259,21 @@ export default function AnalyserScreen() {
           expenses: normalizedExps,
           balances: tBalances,
         };
-      }
+      });
 
+      inMemoryAnalyserCache = result;
       setAllTripsData(result);
+      AppStorage.setItem('@splityourtrip_analyser_cached_master', JSON.stringify(result)).catch(() => {});
+
+      // Background cloud sync: fetch fresh details from Supabase if missing or on fresh load
+      if (!isPrefetchingAnalytics && currentTrips.length > 0) {
+        isPrefetchingAnalytics = true;
+        useTripStore.getState().prefetchAllTripDetails(currentTrips.map(t => t.id))
+          .catch(() => {})
+          .finally(() => {
+            isPrefetchingAnalytics = false;
+          });
+      }
     } finally {
       setLoadingAnalytics(false);
     }
@@ -220,20 +285,18 @@ export default function AnalyserScreen() {
     if (user?.id) {
       fetchFriendsSummary(user.id);
     }
-  }, [trips, expenses, members, user?.id, loadAllTripsAnalytics, fetchFriendsSummary]);
+  }, [trips, expenses, members, user?.id, tripDetailsRevision, loadAllTripsAnalytics, fetchFriendsSummary]);
 
   useFocusEffect(
     useCallback(() => {
       navLockRef.current = false;
       setOpeningTripId(null);
-      const task = InteractionManager.runAfterInteractions(() => {
-        getUserCurrencyPreference().then(c => setUserCurrency(c));
-        loadAllTripsAnalytics();
-        if (user?.id) {
-          fetchFriendsSummary(user.id);
-        }
-      });
-      return () => task.cancel();
+      // Run immediately with zero delay
+      loadAllTripsAnalytics();
+      getUserCurrencyPreference().then(c => setUserCurrency(c));
+      if (user?.id) {
+        fetchFriendsSummary(user.id);
+      }
     }, [user?.id, loadAllTripsAnalytics, fetchFriendsSummary])
   );
 

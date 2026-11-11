@@ -244,6 +244,7 @@ interface TripStoreState {
   isHydrated: boolean;
   error: string | null;
   isVoiceModalOpen: boolean;
+  tripDetailsRevision: number;
 
   // Actions
   setVoiceModalOpen: (open: boolean) => void;
@@ -699,6 +700,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   isHydrated: false,
   error: null,
   isVoiceModalOpen: false,
+  tripDetailsRevision: 0,
   personalExpensesTotalPaise: 0,
   personalExpensesCount: 0,
 
@@ -716,6 +718,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       isLoading: false,
       isHydrated: false,
       error: null,
+      tripDetailsRevision: 0,
       personalExpensesTotalPaise: 0,
       personalExpensesCount: 0,
     });
@@ -2054,14 +2057,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         );
       } catch {}
 
-      set({
+      set(state => ({
         activeTrip: mergedActiveTrip,
         members: finalMembers,
         expenses: finalExpenses,
         balances: calculatedBalances,
         messages: finalMessages,
         isLoading: false,
-      });
+        tripDetailsRevision: (state.tripDetailsRevision || 0) + 1,
+      }));
     } catch (err: any) {
       console.log('loadTripDetails exception handled smoothly:', err?.message);
       set({ isLoading: false });
@@ -2083,11 +2087,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       const [membersRes, expsRes] = await Promise.all([
         withTimeout(
           supabaseAdmin.from('trip_members').select('*').in('trip_id', validIds),
-          4000
+          8000
         ).catch(() => ({ data: [] as any[] })),
         withTimeout(
           supabaseAdmin.from('expenses').select('*').in('trip_id', validIds).order('created_at', { ascending: false }),
-          4000
+          8000
         ).catch(() => ({ data: [] as any[] })),
       ]);
 
@@ -2099,7 +2103,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (expIds.length > 0) {
         const { data: spData } = await withTimeout(
           supabaseAdmin.from('expense_splits').select('*').in('expense_id', expIds),
-          4000
+          8000
         ).catch(() => ({ data: [] }));
         allSplits = spData || [];
       }
@@ -2219,6 +2223,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           );
         } catch {}
       }
+
+      set(state => ({ tripDetailsRevision: (state.tripDetailsRevision || 0) + 1 }));
     } catch (e: any) {
       console.log('prefetchAllTripDetails notice:', e?.message);
     }
