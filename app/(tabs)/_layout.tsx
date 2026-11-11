@@ -20,7 +20,7 @@ import { scaleFont } from '../../src/theme/responsive';
 export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { user, profile } = useAuthStore();
   const { trips } = useTripStore();
   const isVoiceModalOpen = useTripStore(s => s.isVoiceModalOpen);
@@ -87,6 +87,47 @@ export default function TabLayout() {
   const openSidebar = () => setSidebarOpen(true);
   const closeSidebar = () => setSidebarOpen(false);
 
+  const renderHeaderLeft = () => (
+    <View style={styles.headerLeft}>
+      <Image
+        source={
+          isDark
+            ? require('../../assets/images/logo-transparent.png')
+            : require('../../assets/images/logo-dark-transparent.png')
+        }
+        style={styles.appIcon}
+        resizeMode="contain"
+      />
+    </View>
+  );
+
+  const renderHeaderRight = () => (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <TouchableOpacity
+        style={styles.notifBtn}
+        onPress={() => setNotifModalVisible(true)}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="notifications-outline" size={23} color={colors.text} />
+        {unreadNotifCount > 0 && (
+          <View style={[styles.notifBadge, { backgroundColor: colors.danger }]}>
+            <Text style={styles.notifBadgeText}>
+              {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.hamburgerBtn}
+        onPress={openSidebar}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="menu-outline" size={26} color={colors.text} />
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <>
       <Tabs
@@ -113,41 +154,8 @@ export default function TabLayout() {
             color: colors.text,
           },
           headerShadowVisible: false,
-          headerLeft: () => (
-            <View style={styles.headerLeft}>
-              <Image
-                source={require('../../assets/images/logo-transparent.png')}
-                style={styles.appIcon}
-                resizeMode="contain"
-              />
-            </View>
-          ),
-          headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TouchableOpacity
-                style={styles.notifBtn}
-                onPress={() => setNotifModalVisible(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="notifications-outline" size={23} color={colors.text} />
-                {unreadNotifCount > 0 && (
-                  <View style={[styles.notifBadge, { backgroundColor: colors.danger }]}>
-                    <Text style={styles.notifBadgeText}>
-                      {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.hamburgerBtn}
-                onPress={openSidebar}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="menu-outline" size={26} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-          ),
+          headerLeft: renderHeaderLeft,
+          headerRight: renderHeaderRight,
         }}
       >
         {/* Tab 1: Friends (First) */}
@@ -155,6 +163,8 @@ export default function TabLayout() {
           name="friends"
           options={{
             title: 'Friends',
+            headerLeft: renderHeaderLeft,
+            headerRight: renderHeaderRight,
             tabBarIcon: ({ color, size, focused }) => (
               <Ionicons
                 name={focused ? 'people' : 'people-outline'}
@@ -170,6 +180,8 @@ export default function TabLayout() {
           name="index"
           options={{
             title: 'Trips',
+            headerLeft: renderHeaderLeft,
+            headerRight: renderHeaderRight,
             tabBarIcon: ({ color, size, focused }) => (
               <Ionicons
                 name={focused ? 'airplane' : 'airplane-outline'}
@@ -223,6 +235,8 @@ export default function TabLayout() {
           name="analyser"
           options={{
             title: 'Analyser',
+            headerLeft: renderHeaderLeft,
+            headerRight: renderHeaderRight,
             tabBarIcon: ({ color, size, focused }) => (
               <Ionicons
                 name={focused ? 'pie-chart' : 'pie-chart-outline'}

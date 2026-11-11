@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Image, StyleSheet, ViewStyle, ImageStyle } from 'react-native';
+import { useTheme } from '../theme/useThemeStore';
 
 interface AppLogoProps {
   size?: number;
@@ -14,6 +15,8 @@ export const AppLogo: React.FC<AppLogoProps> = ({
   style,
   imageStyle,
 }) => {
+  const { isDark } = useTheme();
+
   return (
     <View style={[styles.container, style]}>
       {showGlow && (
@@ -29,7 +32,11 @@ export const AppLogo: React.FC<AppLogoProps> = ({
         />
       )}
       <Image
-        source={require('../../assets/images/split-logo.png')}
+        source={
+          isDark
+            ? require('../../assets/images/split-logo.png')
+            : require('../../assets/images/split-logo-dark.png')
+        }
         style={[
           {
             width: size,

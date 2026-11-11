@@ -64,7 +64,11 @@ export default function AboutUsScreen() {
       >
         <View style={[styles.logoContainer, { backgroundColor: colors.card }]}>
           <Image
-            source={require('../assets/images/split-logo.png')}
+            source={
+              isDark
+                ? require('../assets/images/split-logo.png')
+                : require('../assets/images/split-logo-dark.png')
+            }
             style={styles.logoImage}
             resizeMode="contain"
           />
