@@ -38,46 +38,29 @@ export interface TranscriptionResponse {
 }
 
 const WHISPER_HALLUCINATIONS = new Set([
-  'the',
-  'the the',
-  'the the the',
-  'the.',
-  'the...',
-  'a',
-  'an',
-  'i',
-  "i'm",
-  "i'm.",
-  "i'm..",
-  "i'm happy to have you",
-  "i'm happy to have you.",
-  'thank you',
-  'thank you.',
-  'thank you so much',
-  'thank you for watching',
-  'thank you for watching.',
-  'thanks for watching',
-  'thanks for watching.',
-  'you',
-  'you.',
-  'bye',
-  'bye.',
-  'goodbye',
-  'subscribe',
-  'please subscribe',
   'subtitles by',
+  'subtitles by the amara.org community',
   '[music]',
   '(music)',
   '[applause]',
   '(applause)',
   '[silence]',
+  'thanks for watching',
+  'thanks for watching.',
+  'thanks for watching!',
+  'thank you for watching',
+  'thank you for watching.',
+  'thank you for watching!',
+  'please subscribe',
+  'please subscribe!',
+  'please subscribe.',
 ]);
 
 export function isWhisperHallucination(rawText: string): boolean {
   if (!rawText) return true;
   const trimmed = rawText.trim().toLowerCase();
   const stripped = trimmed.replace(/[.,!?;:…'"]/g, '').trim();
-  if (stripped.length <= 1) return true;
+  if (stripped.length === 0) return true;
   if (WHISPER_HALLUCINATIONS.has(trimmed)) return true;
   if (WHISPER_HALLUCINATIONS.has(stripped)) return true;
   return false;
@@ -343,12 +326,12 @@ Rules:
 
 Output JSON only: {"amount":number,"description":"...","category":"...","trip_id":"...","paid_by_member_id":"...","paid_by_name":"...","split_all":true,"selected_participant_ids":["..."],"payment_mode":"upi"|"cash"|"other"}`;
 
-    const candidateModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+    const candidateModels = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
 
     for (const modelName of candidateModels) {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
@@ -945,6 +928,20 @@ Rules:
       7. Navigation (e.g. "Open analyser" or "Go to friends")
     - Set action = null.
 
+- UNIVERSAL CONVERSATION & GENERAL CHAT (HANDLE ANY UTTERANCE):
+  - Users can say ANYTHING to you (casual chit-chat, greetings, questions, stories, feelings, jokes, thoughts).
+  - NEVER say "I don't have access to your personal records" or refuse to speak! You are their friendly travel buddy.
+  - If user greets you ("hello", "hi", "hey", "kem cho", "namaste", "good morning"):
+    Reply warmly and ask how you can help with their expenses or trips. Set action = null.
+  - If user shares thoughts or feelings ("I had a great time today", "Weather is nice", "I'm tired"):
+    Engage warmly and conversationally in a natural human way. Set action = null.
+  - If user thanks you ("thank you", "thanks", "dhanyawad", "aabhar", "shukriya"):
+    Reply politely: "You're very welcome! Let me know if you need any more hisaab or expense updates." Set action = null.
+  - If user says goodbye ("bye", "goodbye", "see you", "alvida"):
+    Reply cheerfully: "Goodbye! Have a great trip!" Set action = null.
+  - If user asks general questions or seeks advice:
+    Give a helpful, natural response. Set action = null.
+
 - Keep "reply" conversational, friendly, concise, natural for Text-to-Speech (TTS).
 
 Output JSON only:
@@ -997,12 +994,12 @@ Output JSON only:
   }
 };`;
 
-    const candidateModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+    const candidateModels = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
 
     for (const modelName of candidateModels) {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 7000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const conversationMessages = [
           { role: 'system', content: systemPrompt },
@@ -1652,6 +1649,32 @@ export function fallbackLocalVoiceParser(params: {
   if (/\b(what\s*can\s*you\s*do|features|help|commands|kya\s*kar\s*sakte)\b/i.test(lower)) {
     return {
       reply: 'I can add expenses, delete past expenses, split with contacts, check who owes what, settle balances, and navigate the app. Try saying "Add 500 for dinner in Goa" or "Who owes me money?".',
+      action: null,
+    };
+  }
+
+  // 8. Greetings, Casual Talk & Courtesies in Fallback
+  if (/\b(hello|hi|hey|kem\s*cho|namaste|good\s*morning|good\s*evening|kaise\s*ho)\b/i.test(lower)) {
+    return {
+      reply: "Hello! I'm your SplitYourTrip Assistant. How can I help you with your trips or expenses today?",
+      action: null,
+    };
+  }
+  if (/\b(thank\s*you|thanks|dhanyawad|aabhar|shukriya)\b/i.test(lower)) {
+    return {
+      reply: "You're very welcome! Let me know if you need any more updates or balance checks.",
+      action: null,
+    };
+  }
+  if (/\b(bye|goodbye|see\s*you|alvida|tata)\b/i.test(lower)) {
+    return {
+      reply: "Goodbye! Have a great trip!",
+      action: null,
+    };
+  }
+  if (/\b(how\s*are\s*you|kaisa\s*hai|kem\s*chho)\b/i.test(lower)) {
+    return {
+      reply: "I'm doing great and ready to help manage your trips and expenses! What would you like to do?",
       action: null,
     };
   }
