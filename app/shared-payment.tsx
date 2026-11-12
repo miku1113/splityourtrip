@@ -43,6 +43,9 @@ export default function SharedPaymentScreen() {
     receiverName?: string;
     detectedApp?: string;
     upiTxnId?: string;
+    alternativeAmount?: string;
+    rupeeOcrMisread?: string;
+    rupeeOcrReason?: string;
   }>();
   const [imageUri, setImageUri] = useState<string | null>(params.imageUri || null);
   const [sharedText, setSharedText] = useState<string | null>(params.sharedText || null);
@@ -56,6 +59,15 @@ export default function SharedPaymentScreen() {
     'super.money' | 'gpay' | 'phonepe' | 'paytm' | 'cred' | 'bhim' | 'navi' | 'amazon_pay' | 'whatsapp' | 'unknown'
   >('unknown');
   const [amountRupees, setAmountRupees] = useState(params.amount || '');
+  const [alternativeAmount, setAlternativeAmount] = useState<string | null>(
+    (params.alternativeAmount as string) || null
+  );
+  const [rupeeOcrMisread, setRupeeOcrMisread] = useState<boolean>(
+    params.rupeeOcrMisread === 'true'
+  );
+  const [rupeeOcrReason, setRupeeOcrReason] = useState<string>(
+    (params.rupeeOcrReason as string) || ''
+  );
   const [receiverName, setReceiverName] = useState(params.receiverName || '');
   const [description, setDescription] = useState(params.description || '');
   const [upiTxnId, setUpiTxnId] = useState(params.upiTxnId || '');
@@ -103,6 +115,9 @@ export default function SharedPaymentScreen() {
       // If amount was already scanned & extracted (e.g. from BillScannerModal), don't re-run OCR!
       if (params.amount) {
         setAmountRupees(params.amount);
+        if (params.alternativeAmount) setAlternativeAmount(params.alternativeAmount as string);
+        if (params.rupeeOcrMisread !== undefined) setRupeeOcrMisread(params.rupeeOcrMisread === 'true');
+        if (params.rupeeOcrReason) setRupeeOcrReason(params.rupeeOcrReason as string);
         if (params.description) setDescription(params.description);
         if (params.category) setSuggestedCategory(params.category);
         if (params.receiverName) setReceiverName(params.receiverName);
@@ -118,13 +133,23 @@ export default function SharedPaymentScreen() {
       }
     }
     checkIncoming();
-  }, [params.imageUri, params.sharedText, params.amount]);
+  }, [params.imageUri, params.sharedText, params.amount, params.alternativeAmount, params.rupeeOcrMisread]);
 
   const applyParsedPayment = (parsed: any) => {
     setDetectedApp(parsed.app);
     if (parsed.amountPaise) {
       const rupees = parsed.amountPaise / 100;
       setAmountRupees(rupees % 1 === 0 ? rupees.toString() : rupees.toFixed(2));
+    }
+    if (parsed.alternativeAmountPaise) {
+      const altRupees = parsed.alternativeAmountPaise / 100;
+      setAlternativeAmount(altRupees % 1 === 0 ? altRupees.toString() : altRupees.toFixed(2));
+    }
+    if (parsed.rupeeOcrMisreadDetected !== undefined) {
+      setRupeeOcrMisread(Boolean(parsed.rupeeOcrMisreadDetected));
+    }
+    if (parsed.rupeeOcrReason) {
+      setRupeeOcrReason(parsed.rupeeOcrReason);
     }
     if (parsed.receiverName) {
       setReceiverName(parsed.receiverName);
@@ -300,6 +325,23 @@ export default function SharedPaymentScreen() {
 
   const badge = getAppBadgeColor(detectedApp);
 
+  const effectiveAltAmount =
+    alternativeAmount ||
+    (amountRupees.startsWith('7') &&
+    parseFloat(amountRupees) >= 710 &&
+    parseFloat(amountRupees.slice(1)) >= 10
+      ? amountRupees.slice(1)
+      : null);
+
+  const handleToggleRupeeOcrAmount = () => {
+    if (!effectiveAltAmount) return;
+    const current = amountRupees;
+    const next = effectiveAltAmount;
+    setAmountRupees(next);
+    setAlternativeAmount(current);
+    setRupeeOcrMisread(prev => !prev);
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -381,6 +423,33 @@ export default function SharedPaymentScreen() {
                     {amountRupees ? `₹${amountRupees}` : '₹ --'}
                   </Text>
 
+                  {effectiveAltAmount ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.rupeeOcrChip,
+                        {
+                          backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7',
+                          borderColor: isDark ? 'rgba(245, 158, 11, 0.35)' : '#FDE68A',
+                        },
+                      ]}
+                      onPress={handleToggleRupeeOcrAmount}
+                      activeOpacity={0.75}
+                    >
+                      <Ionicons name="sparkles" size={14} color="#D97706" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.rupeeOcrChipTitle, { color: isDark ? '#FCD34D' : '#92400E' }]}>
+                          {rupeeOcrMisread
+                            ? `Rupee (₹) symbol scanned as 7 from "7${amountRupees}"`
+                            : `Did the ₹ symbol scan as 7?`}
+                        </Text>
+                        <Text style={[styles.rupeeOcrChipSubtitle, { color: isDark ? '#FDE68A' : '#B45309' }]}>
+                          Tap to switch to ₹{effectiveAltAmount}
+                        </Text>
+                      </View>
+                      <Ionicons name="swap-horizontal" size={16} color="#D97706" />
+                    </TouchableOpacity>
+                  ) : null}
+
                   {receiverName ? (
                     <Text style={[styles.detectedReceiver, { color: colors.textSecondary }]} numberOfLines={1}>
                       Paid to <Text style={{ fontWeight: '700', color: colors.text }}>{receiverName}</Text>
@@ -459,6 +528,35 @@ export default function SharedPaymentScreen() {
                     onChangeText={setAmountRupees}
                     keyboardType="numeric"
                   />
+
+                  {effectiveAltAmount ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.rupeeOcrChip,
+                        {
+                          backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7',
+                          borderColor: isDark ? 'rgba(245, 158, 11, 0.35)' : '#FDE68A',
+                          marginTop: 6,
+                          marginBottom: 8,
+                        },
+                      ]}
+                      onPress={handleToggleRupeeOcrAmount}
+                      activeOpacity={0.75}
+                    >
+                      <Ionicons name="sparkles" size={14} color="#D97706" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.rupeeOcrChipTitle, { color: isDark ? '#FCD34D' : '#92400E' }]}>
+                          {rupeeOcrMisread
+                            ? `Rupee (₹) symbol scanned as 7 from "7${amountRupees}"`
+                            : `Did the ₹ symbol scan as 7?`}
+                        </Text>
+                        <Text style={[styles.rupeeOcrChipSubtitle, { color: isDark ? '#FDE68A' : '#B45309' }]}>
+                          Tap to switch to ₹{effectiveAltAmount}
+                        </Text>
+                      </View>
+                      <Ionicons name="swap-horizontal" size={16} color="#D97706" />
+                    </TouchableOpacity>
+                  ) : null}
 
                   <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Paid To / Receiver</Text>
                   <TextInput
@@ -752,6 +850,11 @@ export default function SharedPaymentScreen() {
           }
           if (result.amount) {
             setAmountRupees(result.amount);
+          }
+          if (result.alternativeAmount) {
+            setAlternativeAmount(result.alternativeAmount);
+            setRupeeOcrMisread(Boolean(result.rupeeOcrMisread));
+            setRupeeOcrReason(result.rupeeOcrReason || '');
           }
           if (result.description) {
             setDescription(result.description);
@@ -1080,5 +1183,25 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 13,
+  },
+  rupeeOcrChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  rupeeOcrChipTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  rupeeOcrChipSubtitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 1,
   },
 });

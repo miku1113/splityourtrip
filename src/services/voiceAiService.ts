@@ -902,6 +902,16 @@ Rules:
     - Formulate reply: "Who from your contacts would you like to split with? I can start a 1-on-1 split with Rohan, Priya, or anyone from your contacts."
     - Set action.type = "NAVIGATE", action.navigation = { screen: "/(tabs)/friends" }, status = "info_only".
 
+- TRIP LISTING & INQUIRIES RULES:
+  - If user asks to list their trips, what trips they have, or show their trips (e.g. "list all my trips", "what trips do I have?", "show my trips", "mere kitne trips hai?", "mari trips batav"):
+    - If there are trips in Trips:
+      - Formulate a clear, friendly spoken reply listing all trip names:
+        "You have {count} trips: {trip_names}. Which one would you like to open or add an expense to?"
+      - Set action.type = "NAVIGATE", action.navigation = { screen: "/(tabs)" }, status = "info_only".
+    - If Trips is empty:
+      - Formulate reply: "You don't have any trips created yet. You can say 'Create Goa trip' to get started."
+      - Set action = null.
+
 - BALANCES & DEBTS RULES:
   - If user asks who owes what, how much they owe, who owes them, or their overall balance (e.g. "who owes me?", "kitne paise lene hai?", "how much do I owe in Goa?", "what is my net balance?", "hisaab batao"):
     - Answer accurately using Balances and friendsSummary context.
@@ -1483,7 +1493,23 @@ export function fallbackLocalVoiceParser(params: {
     };
   }
 
-  // 3. Balance Inquiry Intent
+  // 3. Trip Listing Inquiry Intent
+  if (/\b(list\s*(?:all\s*)?(?:my\s*)?trips|what\s*trips|show\s*(?:all\s*)?(?:my\s*)?trips|my\s*trips|ketli\s*trips|kitne\s*trips)\b/i.test(lower)) {
+    if (trips && trips.length > 0) {
+      const tripNames = trips.map(t => t.name).join(', ');
+      return {
+        reply: `You have ${trips.length} trip${trips.length === 1 ? '' : 's'}: ${tripNames}. Which one would you like to open or add an expense to?`,
+        action: { type: 'NAVIGATE', status: 'info_only', navigation: { screen: '/(tabs)' } },
+      };
+    } else {
+      return {
+        reply: "You don't have any trips created yet. You can say 'Create Goa trip' to get started.",
+        action: null,
+      };
+    }
+  }
+
+  // 4. Balance Inquiry Intent
   if (/\b(who\s*owes|balance|kitne\s*paise|hisaab|how\s*much\s*do\s*i\s*owe|owed|dues)\b/i.test(lower)) {
     let balReply = '';
     if (friendsSummary) {

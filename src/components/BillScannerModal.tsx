@@ -27,6 +27,9 @@ const SCAN_FRAME_HEIGHT = Math.min(SCREEN_WIDTH * 1.05, 420);
 
 export interface ScannedBillResult {
   amount: string;
+  alternativeAmount?: string;
+  rupeeOcrMisread?: boolean;
+  rupeeOcrReason?: string;
   description: string;
   category: string;
   paymentMode: 'upi' | 'cash' | 'other';
@@ -113,6 +116,12 @@ export default function BillScannerModal({
         amountStr = rupees % 1 === 0 ? rupees.toString() : rupees.toFixed(2);
       }
 
+      let altAmountStr = '';
+      if (parsed.alternativeAmountPaise) {
+        const altRupees = parsed.alternativeAmountPaise / 100;
+        altAmountStr = altRupees % 1 === 0 ? altRupees.toString() : altRupees.toFixed(2);
+      }
+
       let desc = '';
       if (parsed.receiverName) {
         desc = parsed.app !== 'unknown' ? `Payment to ${parsed.receiverName}` : parsed.receiverName;
@@ -126,6 +135,9 @@ export default function BillScannerModal({
 
       const result: ScannedBillResult = {
         amount: amountStr,
+        alternativeAmount: altAmountStr,
+        rupeeOcrMisread: parsed.rupeeOcrMisreadDetected,
+        rupeeOcrReason: parsed.rupeeOcrReason,
         description: desc,
         category: parsed.suggestedCategory || 'Food',
         paymentMode: parsed.app !== 'unknown' ? 'upi' : 'cash',
@@ -147,6 +159,9 @@ export default function BillScannerModal({
             params: {
               imageUri: uri,
               amount: result.amount,
+              alternativeAmount: result.alternativeAmount || '',
+              rupeeOcrMisread: result.rupeeOcrMisread ? 'true' : 'false',
+              rupeeOcrReason: result.rupeeOcrReason || '',
               description: result.description,
               category: result.category,
               receiverName: parsed.receiverName || '',

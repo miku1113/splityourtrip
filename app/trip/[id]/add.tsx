@@ -31,6 +31,7 @@ import { extractPaymentFromScreenshot } from '../../../src/services/receiptOcr';
 import { AppStorage } from '../../../src/lib/storage';
 import { sendAutomatedWhatsAppExpenseAlert } from '../../../src/services/whatsappService';
 import BillScannerModal, { ScannedBillResult } from '../../../src/components/BillScannerModal';
+import { scaleFont } from '../../../src/theme/responsive';
 
 const CATEGORIES = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
 
@@ -127,6 +128,9 @@ export default function AddExpenseScreen() {
       ? (existingExpense.amount / 100).toString()
       : prefillAmount || ''
   );
+  const [alternativeAmount, setAlternativeAmount] = useState<string | null>(null);
+  const [rupeeOcrMisread, setRupeeOcrMisread] = useState<boolean>(false);
+  const [rupeeOcrReason, setRupeeOcrReason] = useState<string>('');
   const [description, setDescription] = useState(
     existingExpense?.description || prefillDescription || ''
   );
@@ -228,6 +232,11 @@ export default function AddExpenseScreen() {
   const handleScanComplete = (scanned: ScannedBillResult) => {
     if (scanned.amount) {
       setAmountRupees(scanned.amount);
+      if (scanned.alternativeAmount) {
+        setAlternativeAmount(scanned.alternativeAmount);
+        setRupeeOcrMisread(Boolean(scanned.rupeeOcrMisread));
+        setRupeeOcrReason(scanned.rupeeOcrReason || '');
+      }
       if (splitType === 'custom' && selectedParticipants.length > 0) {
         const num = parseFloat(scanned.amount) || 0;
         const per = (num / selectedParticipants.length).toFixed(2);
@@ -257,6 +266,33 @@ export default function AddExpenseScreen() {
       setAttachmentUri(scanned.imageUri);
       setAttachmentType('image');
       setAttachmentName(`Scanned_Bill_${Date.now()}.jpg`);
+    }
+  };
+
+  const effectiveAltAmount =
+    alternativeAmount ||
+    (amountRupees.startsWith('7') &&
+    parseFloat(amountRupees) >= 710 &&
+    parseFloat(amountRupees.slice(1)) >= 10
+      ? amountRupees.slice(1)
+      : null);
+
+  const handleToggleRupeeOcrAmount = () => {
+    if (!effectiveAltAmount) return;
+    const current = amountRupees;
+    const next = effectiveAltAmount;
+    setAmountRupees(next);
+    setAlternativeAmount(current);
+    setRupeeOcrMisread(prev => !prev);
+
+    if (splitType === 'custom' && selectedParticipants.length > 0) {
+      const num = parseFloat(next) || 0;
+      const per = (num / selectedParticipants.length).toFixed(2);
+      const autoMap: Record<string, string> = {};
+      selectedParticipants.forEach(pId => {
+        autoMap[pId] = per;
+      });
+      setCustomAmounts(autoMap);
     }
   };
 
@@ -789,6 +825,34 @@ export default function AddExpenseScreen() {
           }}
         />
       </View>
+
+      {/* Smart Rupee OCR Correction Chip */}
+      {effectiveAltAmount ? (
+        <TouchableOpacity
+          style={[
+            styles.rupeeOcrChip,
+            {
+              backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7',
+              borderColor: isDark ? 'rgba(245, 158, 11, 0.35)' : '#FDE68A',
+            },
+          ]}
+          onPress={handleToggleRupeeOcrAmount}
+          activeOpacity={0.75}
+        >
+          <Ionicons name="sparkles" size={14} color="#D97706" />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.rupeeOcrChipTitle, { color: isDark ? '#FCD34D' : '#92400E' }]}>
+              {rupeeOcrMisread
+                ? `Rupee (₹) symbol scanned as 7 ("7${amountRupees}" → ₹${amountRupees})`
+                : `Did ₹ symbol scan as 7?`}
+            </Text>
+            <Text style={[styles.rupeeOcrChipSubtitle, { color: isDark ? '#FDE68A' : '#B45309' }]}>
+              Tap to switch to ₹{effectiveAltAmount}
+            </Text>
+          </View>
+          <Ionicons name="swap-horizontal" size={16} color="#D97706" />
+        </TouchableOpacity>
+      ) : null}
 
       {/* Description */}
       <View style={styles.fieldGroup}>
@@ -1401,6 +1465,26 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: theme.colors.text,
     minWidth: 120,
+  },
+  rupeeOcrChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    marginTop: -6,
+    marginBottom: theme.spacing.md,
+  },
+  rupeeOcrChipTitle: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+  },
+  rupeeOcrChipSubtitle: {
+    fontSize: scaleFont(11),
+    fontWeight: '500',
+    marginTop: 2,
   },
   fieldGroup: {
     marginBottom: theme.spacing.md,

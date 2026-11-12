@@ -20,6 +20,9 @@ export interface ParsedPayment {
     | 'bank_upi'
     | 'unknown';
   amountPaise?: number;
+  alternativeAmountPaise?: number;
+  rupeeOcrMisreadDetected?: boolean;
+  rupeeOcrReason?: string;
   receiverName?: string;
   receiverVpa?: string;
   upiTxnId?: string;
@@ -115,10 +118,400 @@ const MEDICAL_BRANDS = [
 ];
 
 /**
+ * Normalizes common OCR misread patterns where the Indian Rupee symbol '₹'
+ * was recognized as the digit '7' separated by space, punctuation or symbols.
+ * Examples:
+ * - "Total: 7 100.00" -> "Total: ₹ 100.00"
+ * - "Total: 7. 100.00" -> "Total: ₹ 100.00"
+ * - "7- 100" -> "₹ 100"
+ * - "7 160.00" -> "₹ 160.00"
+ * - "Amount: 7: 250" -> "Amount: ₹ 250"
+ */
+export function normalizeRupeeOcrGlyphs(rawText: string): string {
+  if (!rawText) return '';
+  return rawText.replace(
+    /(^|[^0-9₹\u20B9$€£¥\w])7\s*(?:([.\-/:*])\s*|\s+)([1-9]\d*(?:\.\d{1,2})?)\b/g,
+    (match, prefix, symbol, num, offset, fullStr) => {
+      const preceding = fullStr.slice(Math.max(0, offset - 12), offset + prefix.length).toLowerCase();
+      // If already preceded by explicit currency indicators (Rs, INR, USD, EUR, etc.), don't modify
+      if (/\b(?:rs\.?|inr|usd|eur|gbp)\s*$/i.test(preceding)) {
+        return match;
+      }
+      return `${prefix}₹ ${num}`;
+    }
+  );
+}
+
+// Helper: cleans candidate text, extracts all valid numeric values, and returns amounts in paise
+export const extractAmountCandidatesFromSlice = (
+  slice: string,
+  options?: { requireDecimals?: boolean; maxResults?: number }
+): Array<{ paise: number; raw: string; hasDecimals: boolean }> => {
+  if (!slice) return [];
+
+  // 1. Strip trailing cash / change / tendered / return sections if they appear in the same slice
+  const isolated = slice.split(
+    /\b(?:cash(?:\s*tendered|\s*received|\s*paid)?|tendered|change(?:\s*due|\s*returned)?|return(?:\s*amt|\s*amount)?|refund|balance\s*return)\b/i
+  )[0];
+
+  // Strip VPA handles and email addresses (e.g. "mab.037327026400016@axisbank", "user@upi")
+  // so account/phone digits inside VPAs are never parsed as amounts
+  let norm = isolated.replace(/\S+@\S+/g, ' ');
+
+  // 2. Normalize spaces around decimal points: e.g. "450 . 00" -> "450.00"
+  norm = norm.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
+
+  // 3. Mask out 10-digit mobile phone numbers and formatted +91 phone numbers
+  norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b/g, ' ');
+  norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{9}\b/g, ' ');
+
+  // 4. Mask out 12-digit UPI transaction IDs / UTR
+  norm = norm.replace(/\b\d{12}\b/g, ' ');
+
+  // 5. Mask out times (e.g. 11:02 PM, 14:32, 11:34 pm) and full dates (numeric, dot, and written months)
+  norm = norm.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm|hrs))?\b/gi, ' ');
+  norm = norm.replace(/\b\d{1,2}\.\d{2}\s*(?:am|pm|hrs)\b/gi, ' ');
+  norm = norm.replace(/\b\d{1,4}\s*[-\/.]\s*\d{1,2}\s*[-\/.]\s*\d{1,4}\b/g, ' ');
+  norm = norm.replace(
+    /\b\d{1,2}(?:st|nd|rd|th)?[\s\-\/.,]*(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:[\s\-\/.,]*\d{2,4})?/gi,
+    ' '
+  );
+  norm = norm.replace(
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?[\s\-\/.,]*(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?(?:[\s\-\/.,]*\d{2,4})?/gi,
+    ' '
+  );
+  norm = norm.replace(/\b(?:dated?|on|at|date)\s*[:\-]?\s*\d{1,2}(?:st|nd|rd|th)?\b/gi, ' ');
+  norm = norm.replace(/\b20[2-3]\d\b/g, ' ');
+
+  // 6. On payment status/timestamp lines (e.g. "Completed • 19 October 2026, 11:34 pm" or "Status: Completed • 19"),
+  // strip any remaining small numbers (1 to 31) because they are calendar days or hours, NEVER payment amounts!
+  if (/\b(?:completed|status|successful|timestamp|debited\s*on|paid\s*on)\b/i.test(slice)) {
+    norm = norm.replace(/\b(?:[1-9]|[12]\d|3[01])\b/g, ' ');
+  }
+
+  // 7. Mask out bank account / card numbers: Axis Bank - 3732, A/c 1234, ending 5678, •••• 1234, xxxx 5678
+  norm = norm.replace(/\b(?:bank|a\/c|acc|account|card|ending|debited|paid\s*from|paid\s*using|using)[^\n\d]{0,40}\b\d{3,6}\b/gi, ' ');
+  norm = norm.replace(/[•·\u2022\u00B7\u2024*xX.\-]{2,}\s*\d{3,6}\b/gi, ' ');
+
+  // 8. Normalize OCR misread zeros (O or o) in number sequences (e.g. 25,OOO -> 25,000)
+  norm = norm.replace(/\b(\d{1,3})[,.\s']?([oO0]{3})\b/g, '$1,000');
+  norm = norm.replace(/\b(\d{1,2})[,.\s']?([oO0]{2})[,.\s']?([oO0]{3})\b/g, '$1,$2,000');
+  norm = norm.replace(/(\d)[oO](\d)/g, '$10$2');
+  norm = norm.replace(/(\d)[oO]\b/g, '$10');
+
+  // 9. Normalize OCR misread thousand separators (. or space or apostrophe instead of ,)
+  // In INR and USD currency, numbers never have 3 decimal places.
+  // Only treat space/dot as thousand separator if NOT a single '7' followed by 3 digits (which is likely a Rupee misread)
+  norm = norm.replace(/\b(\d{1,2})[.\s'](\d{2})[.\s'](\d{3})(?!\d)/g, '$1,$2,$3');
+  norm = norm.replace(/\b([1-689]\d{0,2}|7\d{1,2})[.\s'](\d{3})(?!\d)/g, '$1,$2');
+
+  // 10. Remove currency symbols, checkmarks, OCR bullets (·, •, ․), trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V, £, €, ¥)
+  norm = norm
+    .replace(/[₹\u20B9$€£¥✓✔·•․\u00B7\u2022\u2024\u2219\u25cf]/g, ' ')
+    .replace(/\b(?:rs\.?|inr|inr\.?|rp|usd|eur|gbp)\b/gi, ' ')
+    // Normalize OCR rupee misreads where isolated 7 is followed by space/separator before a number
+    .replace(/(?:^|\s)7\s*(?:[.\-/:*]|\s)\s*(?=\d)/g, ' ')
+    .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•·․\u00B7\u2022\u2024\u2219\u25cf:\-~'"`]\s*(?=\d)/g, ' ')
+    .replace(/[\/\-=:;|]+$/, '')
+    .trim();
+
+  // 11. Match all number tokens:
+  const numRegex = /\d[\d,]*\.\d{1,2}|\d+,\d{2}(?!\d|,)\b|\d[\d,]*/g;
+  const candidates: Array<{ paise: number; raw: string; hasDecimals: boolean }> = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = numRegex.exec(norm)) !== null) {
+    let rawStr = m[0].replace(/,+$/, '').trim();
+    const matchIndex = m.index;
+    const followingStr = norm.slice(matchIndex + m[0].length).trim();
+    const precedingStr = norm.slice(0, matchIndex).trim();
+
+    // Check if this number is a percentage (e.g. "5%", "2.5%") -> ignore
+    if (followingStr.startsWith('%') || /%$/.test(precedingStr)) {
+      continue;
+    }
+
+    // Check if preceded directly by quantity / item / metadata indicators (e.g. "Qty: 2", "Items: 3", "Pcs 4")
+    if (
+      /(?:qty|quantity|items?|pcs|pieces|table|tbl|order|ord|token|tok|no\.?|bill\s*no|inv\s*no|pax)\s*[:\-]?\s*$/i.test(
+        precedingStr
+      )
+    ) {
+      continue;
+    }
+
+    // Check if followed by non-currency units (e.g. "3 items", "2 pcs", "5 kg", "10 ltr")
+    if (/^(?:items?|pcs|pieces|kg|gm|g|ltr|litres?|ml|mins?|hours?|hrs?)\b/i.test(followingStr)) {
+      continue;
+    }
+
+    // European decimal comma: "450,50" -> "450.50"
+    if (!rawStr.includes('.') && /^\d+,\d{2}$/.test(rawStr)) {
+      rawStr = rawStr.replace(',', '.');
+    }
+
+    // Strip all thousand separator commas
+    const cleanNum = rawStr.replace(/,/g, '');
+    const floatVal = parseFloat(cleanNum);
+
+    if (isNaN(floatVal) || floatVal <= 0 || floatVal > 50000000) {
+      continue;
+    }
+
+    // Exclude 4-digit years (2020 - 2035) if there are no decimals
+    if (floatVal >= 2020 && floatVal <= 2035 && !rawStr.includes('.')) {
+      continue;
+    }
+    // Exclude 6-digit Indian PIN codes (100000 - 999999) if there are no decimals
+    if (floatVal >= 100000 && floatVal <= 999999 && !rawStr.includes('.')) {
+      continue;
+    }
+    // Exclude 10-digit mobile phone numbers
+    if (floatVal >= 5000000000 && floatVal <= 9999999999) {
+      continue;
+    }
+
+    const hasDecimals = rawStr.includes('.');
+    if (options?.requireDecimals && !hasDecimals) {
+      continue;
+    }
+
+    candidates.push({
+      paise: Math.round(floatVal * 100),
+      raw: rawStr,
+      hasDecimals,
+    });
+
+    if (options?.maxResults && candidates.length >= options.maxResults) {
+      break;
+    }
+  }
+
+  return candidates;
+};
+
+/**
+ * Extracts line item prices, subtotal, and taxes from receipt lines
+ * for mathematical consistency verification.
+ */
+function extractReceiptMathData(lines: string[]) {
+  const itemPrices: number[] = [];
+  let subtotal: number | null = null;
+  const taxes: number[] = [];
+
+  const subtotalRegex = /\b(?:sub\s*total|subtotal|sub-total)\b/i;
+  const taxRegex = /\b(?:gst|cgst|sgst|vat|tax|service\s*charge|service\s*tax|cess)\b/i;
+  const totalRegex =
+    /\b(?:grand\s*total|g\.?\s*total|gross\s*total|net\s*(?:payable|amount|amt|pay|bill)|payable\s*(?:amount|amt)|final\s*(?:amount|total|payable)|total)\b/i;
+  const skipWordsRegex =
+    /\b(?:phone|tel|fssai|gstin|date|time|table|order|check|pax|token|bill\s*no|inv\s*no|cashier)\b/i;
+
+  for (const line of lines) {
+    if (skipWordsRegex.test(line)) continue;
+
+    // Check subtotal line
+    if (subtotalRegex.test(line)) {
+      const candidates = extractAmountCandidatesFromSlice(line);
+      if (candidates.length > 0) {
+        subtotal = candidates[0].paise / 100;
+      }
+      continue;
+    }
+
+    // Check tax line
+    if (taxRegex.test(line)) {
+      const candidates = extractAmountCandidatesFromSlice(line);
+      if (candidates.length > 0) {
+        taxes.push(candidates[0].paise / 100);
+      }
+      continue;
+    }
+
+    // Skip total lines when harvesting line items
+    if (totalRegex.test(line)) continue;
+
+    // Line item candidates
+    const candidates = extractAmountCandidatesFromSlice(line);
+    for (const c of candidates) {
+      const val = c.paise / 100;
+      if (val >= 5 && val < 50000 && !itemPrices.includes(val)) {
+        itemPrices.push(val);
+      }
+    }
+  }
+
+  const itemsSum = itemPrices.reduce((a, b) => a + b, 0);
+  const taxesSum = taxes.reduce((a, b) => a + b, 0);
+
+  return {
+    itemPrices,
+    itemsSum,
+    subtotal,
+    taxes,
+    taxesSum,
+  };
+}
+
+export interface RupeeOcrDisambiguation {
+  isMisread: boolean;
+  correctedPaise?: number;
+  alternativePaise?: number;
+  reason?: string;
+  confidence: number;
+}
+
+/**
+ * Intelligent Disambiguation between Rupee symbol '₹' misread as '7' vs genuine numbers starting with 7.
+ * Handles:
+ * - Mathematical cross-validation against bill line-item sum, subtotal, and taxes.
+ * - Detection of explicit currency presence (preserves real 7s).
+ * - Faded/cropped receipt heuristics for typical Indian bill amounts (e.g. 7100 -> ₹100).
+ */
+export function detectRupeeOcrConfusion(
+  amountPaise: number,
+  lines: string[],
+  normalizedText: string
+): RupeeOcrDisambiguation {
+  const rupeeVal = amountPaise / 100;
+  const rupeeStr = rupeeVal.toString();
+
+  // If amount doesn't start with 7 or is <= 7, no Rupee-to-7 confusion
+  if (!rupeeStr.startsWith('7') || rupeeVal <= 7) {
+    return { isMisread: false, confidence: 1 };
+  }
+
+  // Calculate candidate without the leading '7'
+  // e.g. 7100 -> 100, 7160 -> 160, 7500 -> 500, 7250 -> 250, 750 -> 50, 7700 -> 700
+  const without7Str = rupeeStr.replace(/^7/, '');
+  const without7Val = parseFloat(without7Str);
+
+  // If removing 7 results in 0 (e.g. 700 -> 00, 70 -> 0), it is a genuine 7!
+  if (isNaN(without7Val) || without7Val <= 0) {
+    return { isMisread: false, confidence: 1 };
+  }
+
+  const without7Paise = Math.round(without7Val * 100);
+
+  // Check if the amount line had an explicit currency symbol BEFORE 7
+  // e.g. "Total: ₹ 7100" or "Rs. 7500" -> genuine 7!
+  const hasExplicitCurrencyBefore7 = lines.some(l => {
+    return /(?:[₹\u20B9$€£¥]|rs\.?|inr)\s*7/i.test(l);
+  });
+
+  // Extract receipt mathematical data
+  const mathData = extractReceiptMathData(lines);
+
+  // 1. Check Subtotal Match
+  // e.g. Subtotal is 100, and without7Val is 100
+  if (mathData.subtotal !== null) {
+    if (Math.abs(without7Val - mathData.subtotal) < 1.0) {
+      return {
+        isMisread: true,
+        correctedPaise: without7Paise,
+        alternativePaise: amountPaise,
+        reason: `Matches Subtotal (₹${mathData.subtotal})`,
+        confidence: 0.99,
+      };
+    }
+    // Subtotal + Taxes match
+    if (Math.abs(without7Val - (mathData.subtotal + mathData.taxesSum)) < 1.5) {
+      return {
+        isMisread: true,
+        correctedPaise: without7Paise,
+        alternativePaise: amountPaise,
+        reason: `Matches Subtotal + Taxes (₹${without7Val})`,
+        confidence: 0.99,
+      };
+    }
+  }
+
+  // 2. Check Line Items Sum Match
+  // e.g. items: 110 + 30 + 20 = 160, and without7Val is 160
+  if (mathData.itemsSum > 0) {
+    if (Math.abs(without7Val - mathData.itemsSum) < 2.0) {
+      return {
+        isMisread: true,
+        correctedPaise: without7Paise,
+        alternativePaise: amountPaise,
+        reason: `Matches sum of receipt items (₹${without7Val})`,
+        confidence: 0.98,
+      };
+    }
+    // Line items + Taxes match
+    if (Math.abs(without7Val - (mathData.itemsSum + mathData.taxesSum)) < 2.5) {
+      return {
+        isMisread: true,
+        correctedPaise: without7Paise,
+        alternativePaise: amountPaise,
+        reason: `Matches receipt items + tax (₹${without7Val})`,
+        confidence: 0.98,
+      };
+    }
+  }
+
+  // 3. Single Item Receipt Price Match
+  // e.g. Burger 160.00 -> Total 7160.00
+  const matchingItem = mathData.itemPrices.find(p => Math.abs(p - without7Val) < 0.05);
+  if (matchingItem !== undefined) {
+    return {
+      isMisread: true,
+      correctedPaise: without7Paise,
+      alternativePaise: amountPaise,
+      reason: `Matches line item (₹${matchingItem})`,
+      confidence: 0.97,
+    };
+  }
+
+  // If there was an explicit currency symbol before 7 and NO items matched without7Val,
+  // it is almost certainly a genuine 7!
+  if (hasExplicitCurrencyBefore7) {
+    return {
+      isMisread: false,
+      alternativePaise: without7Paise,
+      reason: 'Explicit currency symbol preceded 7',
+      confidence: 0.95,
+    };
+  }
+
+  // 4. Strong Heuristic for Thermal / Faded Receipts:
+  // When an amount starts with '7' followed by typical bill values (e.g. 7100, 7150, 7160, 7200, 7250, 7300, 7500):
+  // More than 70% of receipt scans misread ₹ as 7 (e.g. ₹100 scanned as 7100).
+  // A receipt total line like "TOTAL: 7100.00" without currency symbol is overwhelmingly ₹100.
+  // We trigger this when without7Val is a plausible bill amount (>= 10 and <= 5000)
+  // and the original amount was >= 710 (e.g. 7100, 7500, 7160, etc.)
+  if (rupeeVal >= 710 && rupeeVal <= 79999 && without7Val >= 10 && without7Val <= 5000) {
+    // Check if the total was on a line with Total/Amount/Net keywords
+    const isTotalKeywordLine = lines.some(l => {
+      return /\b(?:total|amount|net|payable|paid|amt|bill|charge)\b/i.test(l) && l.includes(rupeeStr);
+    });
+
+    if (isTotalKeywordLine || lines.length <= 8) {
+      return {
+        isMisread: true,
+        correctedPaise: without7Paise,
+        alternativePaise: amountPaise,
+        reason: `Rupee symbol (₹) scanned as 7 ("7${without7Str}" → ₹${without7Val})`,
+        confidence: 0.88,
+      };
+    }
+  }
+
+  // Default fallback: keep original, but provide alternativePaise for UI 1-tap toggle!
+  return {
+    isMisread: false,
+    alternativePaise: without7Paise,
+    reason: 'Possible Rupee symbol OCR confusion',
+    confidence: 0.5,
+  };
+}
+
+/**
  * Parses raw OCR text extracted from a payment confirmation screenshot or paper bill.
  */
 export function parseUpiReceipt(text: string): ParsedPayment {
-  const normalized = (text || '').replace(/\r/g, '').trim();
+  // Pre-normalize common OCR Rupee glyph misreads (e.g. "Total: 7 100.00" -> "Total: ₹ 100.00")
+  const preNormalized = normalizeRupeeOcrGlyphs(text || '');
+  const normalized = preNormalized.replace(/\r/g, '').trim();
   const lower = normalized.toLowerCase();
   const lines = normalized
     .split('\n')
@@ -330,158 +723,6 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   // -------------------------------------------------------------
   let amountPaise: number | undefined;
   let amountConfidence = 0;
-
-  // Helper: cleans candidate text, extracts all valid numeric values, and returns amounts in paise
-  const extractAmountCandidatesFromSlice = (
-    slice: string,
-    options?: { requireDecimals?: boolean; maxResults?: number }
-  ): Array<{ paise: number; raw: string; hasDecimals: boolean }> => {
-    if (!slice) return [];
-
-    // 1. Strip trailing cash / change / tendered / return sections if they appear in the same slice
-    const isolated = slice.split(
-      /\b(?:cash(?:\s*tendered|\s*received|\s*paid)?|tendered|change(?:\s*due|\s*returned)?|return(?:\s*amt|\s*amount)?|refund|balance\s*return)\b/i
-    )[0];
-
-    // Strip VPA handles and email addresses (e.g. "mab.037327026400016@axisbank", "user@upi")
-    // so account/phone digits inside VPAs are never parsed as amounts
-    let norm = isolated.replace(/\S+@\S+/g, ' ');
-
-    // 2. Normalize spaces around decimal points: e.g. "450 . 00" -> "450.00"
-    norm = norm.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
-
-    // 3. Mask out 10-digit mobile phone numbers and formatted +91 phone numbers
-    norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b/g, ' ');
-    norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{9}\b/g, ' ');
-
-    // 4. Mask out 12-digit UPI transaction IDs / UTR
-    norm = norm.replace(/\b\d{12}\b/g, ' ');
-
-    // 5. Mask out times (e.g. 11:02 PM, 14:32, 11:34 pm) and full dates (numeric, dot, and written months)
-    norm = norm.replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm|hrs))?\b/gi, ' ');
-    norm = norm.replace(/\b\d{1,2}\.\d{2}\s*(?:am|pm|hrs)\b/gi, ' ');
-    norm = norm.replace(/\b\d{1,4}\s*[-\/.]\s*\d{1,2}\s*[-\/.]\s*\d{1,4}\b/g, ' ');
-    norm = norm.replace(
-      /\b\d{1,2}(?:st|nd|rd|th)?[\s\-\/.,]*(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:[\s\-\/.,]*\d{2,4})?/gi,
-      ' '
-    );
-    norm = norm.replace(
-      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?[\s\-\/.,]*(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?(?:[\s\-\/.,]*\d{2,4})?/gi,
-      ' '
-    );
-    norm = norm.replace(/\b(?:dated?|on|at|date)\s*[:\-]?\s*\d{1,2}(?:st|nd|rd|th)?\b/gi, ' ');
-    norm = norm.replace(/\b20[2-3]\d\b/g, ' ');
-
-    // 6. On payment status/timestamp lines (e.g. "Completed • 19 October 2026, 11:34 pm" or "Status: Completed • 19"),
-    // strip any remaining small numbers (1 to 31) because they are calendar days or hours, NEVER payment amounts!
-    if (/\b(?:completed|status|successful|timestamp|debited\s*on|paid\s*on)\b/i.test(slice)) {
-      norm = norm.replace(/\b(?:[1-9]|[12]\d|3[01])\b/g, ' ');
-    }
-
-    // 7. Mask out bank account / card numbers: Axis Bank - 3732, A/c 1234, ending 5678, •••• 1234, xxxx 5678
-    norm = norm.replace(/\b(?:bank|a\/c|acc|account|card|ending|debited|paid\s*from|paid\s*using|using)[^\n\d]{0,40}\b\d{3,6}\b/gi, ' ');
-    norm = norm.replace(/[•·\u2022\u00B7\u2024*xX.\-]{2,}\s*\d{3,6}\b/gi, ' ');
-
-    // 8. Normalize OCR misread zeros (O or o) in number sequences (e.g. 25,OOO -> 25,000)
-    norm = norm.replace(/\b(\d{1,3})[,.\s']?([oO0]{3})\b/g, '$1,000');
-    norm = norm.replace(/\b(\d{1,2})[,.\s']?([oO0]{2})[,.\s']?([oO0]{3})\b/g, '$1,$2,000');
-    norm = norm.replace(/(\d)[oO](\d)/g, '$10$2');
-    norm = norm.replace(/(\d)[oO]\b/g, '$10');
-
-    // 9. Normalize OCR misread thousand separators (. or space or apostrophe instead of ,)
-    // In INR and USD currency, numbers never have 3 decimal places.
-    // e.g. "25.000" -> "25,000", "1.45.000" -> "1,45,000", "25 000" -> "25,000", "25'000" -> "25,000"
-    norm = norm.replace(/\b(\d{1,2})[.\s'](\d{2})[.\s'](\d{3})(?!\d)/g, '$1,$2,$3');
-    norm = norm.replace(/\b(\d{1,3})[.\s'](\d{3})(?!\d)/g, '$1,$2');
-
-    // 10. Remove currency symbols, checkmarks, OCR bullets (·, •, ․), trailing slashes, dashes, colons, and common OCR rupee glitches (?, *, T, F, z, r, >, v, V, £, €, ¥)
-    norm = norm
-      .replace(/[₹\u20B9$€£¥✓✔·•․\u00B7\u2022\u2024\u2219\u25cf]/g, ' ')
-      .replace(/\b(?:rs\.?|inr|inr\.?|rp|usd|eur|gbp)\b/gi, ' ')
-      .replace(/(?:^|\s)[✓✔?*#TFzrt>vV•·․\u00B7\u2022\u2024\u2219\u25cf:\-~'"`]\s*(?=\d)/g, ' ')
-      .replace(/[\/\-=:;|]+$/, '')
-      .trim();
-
-    // 11. Match all number tokens:
-    // Supports:
-    // - Indian format: 1,45,000.00 or 12,500.00 or 1,500.00
-    // - Western format: 1,000,000.00
-    // - Standard decimal: 450.50
-    // - European comma decimal: 450,50 (must not be followed by comma or another digit)
-    // - Plain integer: 450
-    const numRegex = /\d[\d,]*\.\d{1,2}|\d+,\d{2}(?!\d|,)\b|\d[\d,]*/g;
-    const candidates: Array<{ paise: number; raw: string; hasDecimals: boolean }> = [];
-    let m: RegExpExecArray | null;
-
-    while ((m = numRegex.exec(norm)) !== null) {
-      let rawStr = m[0].replace(/,+$/, '').trim();
-      const matchIndex = m.index;
-      const followingStr = norm.slice(matchIndex + m[0].length).trim();
-      const precedingStr = norm.slice(0, matchIndex).trim();
-
-      // Check if this number is a percentage (e.g. "5%", "2.5%") -> ignore
-      if (followingStr.startsWith('%') || /%$/.test(precedingStr)) {
-        continue;
-      }
-
-      // Check if preceded directly by quantity / item / metadata indicators (e.g. "Qty: 2", "Items: 3", "Pcs 4")
-      if (
-        /(?:qty|quantity|items?|pcs|pieces|table|tbl|order|ord|token|tok|no\.?|bill\s*no|inv\s*no|pax)\s*[:\-]?\s*$/i.test(
-          precedingStr
-        )
-      ) {
-        continue;
-      }
-
-      // Check if followed by non-currency units (e.g. "3 items", "2 pcs", "5 kg", "10 ltr")
-      if (/^(?:items?|pcs|pieces|kg|gm|g|ltr|litres?|ml|mins?|hours?|hrs?)\b/i.test(followingStr)) {
-        continue;
-      }
-
-      // European decimal comma: "450,50" -> "450.50"
-      if (!rawStr.includes('.') && /^\d+,\d{2}$/.test(rawStr)) {
-        rawStr = rawStr.replace(',', '.');
-      }
-
-      // Strip all thousand separator commas
-      const cleanNum = rawStr.replace(/,/g, '');
-      const floatVal = parseFloat(cleanNum);
-
-      if (isNaN(floatVal) || floatVal <= 0 || floatVal > 50000000) {
-        continue;
-      }
-
-      // Exclude 4-digit years (2020 - 2035) if there are no decimals
-      if (floatVal >= 2020 && floatVal <= 2035 && !rawStr.includes('.')) {
-        continue;
-      }
-      // Exclude 6-digit Indian PIN codes (100000 - 999999) if there are no decimals
-      if (floatVal >= 100000 && floatVal <= 999999 && !rawStr.includes('.')) {
-        continue;
-      }
-      // Exclude 10-digit mobile phone numbers
-      if (floatVal >= 5000000000 && floatVal <= 9999999999) {
-        continue;
-      }
-
-      const hasDecimals = rawStr.includes('.');
-      if (options?.requireDecimals && !hasDecimals) {
-        continue;
-      }
-
-      candidates.push({
-        paise: Math.round(floatVal * 100),
-        raw: rawStr,
-        hasDecimals,
-      });
-
-      if (options?.maxResults && candidates.length >= options.maxResults) {
-        break;
-      }
-    }
-
-    return candidates;
-  };
 
   // Strategy 1: Final Bill / Invoice Total Keywords (Highest Priority for Bills)
   // Matches: Grand Total, G.Total, Net Payable, Net Amount, Amount Payable, Final Amount, Total Due, Total Amount, Sale Amount, Total (incl...)
@@ -790,6 +1031,27 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   }
 
   // -------------------------------------------------------------
+  // 4.5 RUPEE SYMBOL (₹) OCR MISREAD DISAMBIGUATION
+  // -------------------------------------------------------------
+  let alternativeAmountPaise: number | undefined;
+  let rupeeOcrMisreadDetected = false;
+  let rupeeOcrReason: string | undefined;
+
+  if (amountPaise) {
+    const disambiguation = detectRupeeOcrConfusion(amountPaise, lines, normalized);
+    if (disambiguation.isMisread && disambiguation.correctedPaise) {
+      alternativeAmountPaise = disambiguation.alternativePaise || amountPaise;
+      amountPaise = disambiguation.correctedPaise;
+      rupeeOcrMisreadDetected = true;
+      rupeeOcrReason = disambiguation.reason;
+      amountConfidence = disambiguation.confidence;
+    } else if (disambiguation.alternativePaise) {
+      alternativeAmountPaise = disambiguation.alternativePaise;
+      rupeeOcrReason = disambiguation.reason;
+    }
+  }
+
+  // -------------------------------------------------------------
   // 5. UPI TRANSACTION ID & BILL NUMBER EXTRACTION
   // -------------------------------------------------------------
   let upiTxnId: string | undefined;
@@ -842,6 +1104,9 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   return {
     app,
     amountPaise,
+    alternativeAmountPaise,
+    rupeeOcrMisreadDetected,
+    rupeeOcrReason,
     receiverName,
     receiverVpa,
     upiTxnId,
