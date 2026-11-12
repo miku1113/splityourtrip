@@ -75,7 +75,7 @@ import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
 import TripCoverBadge from './TripCoverBadge';
-import ChatFeedSkeleton from './ChatFeedSkeleton';
+import ChatFeedSkeleton, { ChatPaginationSkeleton } from './ChatFeedSkeleton';
 import { StandardBottomSheet } from './StandardBottomSheet';
 import { getFriendSettings } from '../services/friendSettings';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
@@ -1534,7 +1534,7 @@ export default function ChatView({
     setTimeout(() => {
       setMessagesVisibleCount(prev => Math.min(prev + PAGE_SIZE, combinedMessages.length));
       setLoadingEarlierMessages(false);
-    }, 250);
+    }, 450);
   }, [loadingEarlierMessages, messagesVisibleCount, combinedMessages.length]);
 
   // Group trip net balance for current user when isGroup === true
@@ -2984,18 +2984,13 @@ export default function ChatView({
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             onEndReached={handleLoadEarlierMessages}
-            onEndReachedThreshold={0.15}
+            onEndReachedThreshold={0.5}
             ListFooterComponent={
               combinedMessages.length > messagesVisibleCount ? (
-                <View style={styles.loadEarlierContainer}>
-                  {loadingEarlierMessages ? (
-                    <View style={styles.loadEarlierRow}>
-                      <ActivityIndicator size="small" color={colors.primary} />
-                      <Text style={[styles.loadEarlierText, { color: colors.textSecondary }]}>
-                        Loading older messages...
-                      </Text>
-                    </View>
-                  ) : (
+                loadingEarlierMessages ? (
+                  <ChatPaginationSkeleton colors={colors} isDark={isDark} />
+                ) : (
+                  <View style={styles.loadEarlierContainer}>
                     <TouchableOpacity
                       style={[
                         styles.loadEarlierBtn,
@@ -3005,11 +3000,11 @@ export default function ChatView({
                     >
                       <Ionicons name="arrow-up-circle-outline" size={16} color={colors.primary} />
                       <Text style={[styles.loadEarlierBtnText, { color: colors.primary }]}>
-                        Scroll up or tap for older messages ({combinedMessages.length - messagesVisibleCount} older)
+                        Tap or scroll up for older messages ({combinedMessages.length - messagesVisibleCount} remaining)
                       </Text>
                     </TouchableOpacity>
-                  )}
-                </View>
+                  </View>
+                )
               ) : null
             }
           renderItem={({ item, index }) => {

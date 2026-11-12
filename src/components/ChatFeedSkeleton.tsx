@@ -18,6 +18,117 @@ interface ChatFeedSkeletonProps {
   isDark?: boolean;
 }
 
+export function ChatPaginationSkeleton({ colors, isDark }: ChatFeedSkeletonProps) {
+  const pulseAnim = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.88,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.35,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseAnim]);
+
+  const blockColor = isDark ? '#2A3649' : '#E2E8F0';
+  const blockSecondary = isDark ? '#1F2937' : '#EDF2F7';
+
+  return (
+    <View style={{ width: '100%', paddingVertical: 10 }}>
+      {/* Top Status Pill */}
+      <View style={{ alignItems: 'center', marginBottom: 10 }}>
+        <View style={[styles.topStatusPill, { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}>
+          <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.72 }] }} />
+          <Text style={[styles.topStatusText, { color: colors.textSecondary }]}>
+            Loading older messages & bills...
+          </Text>
+        </View>
+      </View>
+
+      {/* Expense Card Skeleton */}
+      <View style={styles.cardContainer}>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.badgeRow}>
+            <View style={[styles.tripBadge, { backgroundColor: colors.primaryLight }]}>
+              <Ionicons name="airplane" size={11} color={colors.primary} style={{ opacity: 0.8 }} />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: colors.primary, opacity: pulseAnim, width: 68, height: 10, borderRadius: 5 },
+                ]}
+              />
+            </View>
+            <Animated.View
+              style={[
+                styles.skeletonLine,
+                { backgroundColor: blockSecondary, opacity: pulseAnim, width: 85, height: 12 },
+              ]}
+            />
+          </View>
+          <View style={styles.expenseMainRow}>
+            <View style={[styles.iconBox, { backgroundColor: colors.successBg || colors.primaryLight }]}>
+              <Ionicons name="receipt" size={20} color={colors.success || colors.primary} style={{ opacity: 0.6 }} />
+            </View>
+            <View style={{ flex: 1, gap: 5 }}>
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockColor, opacity: pulseAnim, width: '55%', height: 14 },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.skeletonLine,
+                  { backgroundColor: blockSecondary, opacity: pulseAnim, width: '75%', height: 11 },
+                ]}
+              />
+            </View>
+            <Animated.View
+              style={[
+                styles.skeletonLine,
+                { backgroundColor: blockColor, opacity: pulseAnim, width: 65, height: 18, borderRadius: 6 },
+              ]}
+            />
+          </View>
+        </View>
+      </View>
+
+      {/* Bubble Skeleton */}
+      <View style={styles.bubbleLeftContainer}>
+        <View
+          style={[
+            styles.bubbleLeft,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Animated.View
+            style={[
+              styles.skeletonLine,
+              { backgroundColor: blockColor, opacity: pulseAnim, width: 140, height: 13, marginBottom: 5 },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.skeletonLine,
+              { backgroundColor: blockSecondary, opacity: pulseAnim, width: 90, height: 11 },
+            ]}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function ChatFeedSkeleton({ colors, isDark }: ChatFeedSkeletonProps) {
   const pulseAnim = useRef(new Animated.Value(0.35)).current;
 
