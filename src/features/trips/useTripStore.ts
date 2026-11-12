@@ -337,6 +337,8 @@ interface TripStoreState {
     reason: string;
     reporterId: string;
     reporterName: string;
+    disputedAmountPaise?: number;
+    disputedDate?: string;
   }) => Promise<boolean>;
   disputeExpense: (data: {
     tripId: string;
@@ -344,6 +346,8 @@ interface TripStoreState {
     reason: string;
     reporterId: string;
     reporterName: string;
+    disputedAmountPaise?: number;
+    disputedDate?: string;
   }) => Promise<boolean>;
   resolveExpenseDispute: (data: {
     tripId: string;
@@ -3770,12 +3774,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   },
 
   disputeExpense: async data => {
-    const { tripId, expenseId, reason, reporterId, reporterName } = data;
+    const { tripId, expenseId, reason, reporterId, reporterName, disputedAmountPaise, disputedDate } = data;
     const currentExpenses = get().expenses;
     const exp = currentExpenses.find(e => e.id === expenseId);
     if (!exp) return false;
     const trip = get().trips.find(t => t.id === tripId);
     const nowIso = new Date().toISOString();
+    const effectiveDisputedDate = disputedDate || nowIso;
 
     // 1. Mark expense as paused and disputed in local state
     const updatedExpenses = currentExpenses.map(e => {
@@ -3789,6 +3794,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           disputed_by: reporterId,
           disputed_by_name: reporterName,
           disputed_at: nowIso,
+          disputed_amount_paise: disputedAmountPaise,
+          disputed_date: effectiveDisputedDate,
         };
       }
       return e;
@@ -3824,6 +3831,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 disputed_by: reporterId,
                 disputed_by_name: reporterName,
                 disputed_at: nowIso,
+                disputed_amount_paise: disputedAmountPaise,
+                disputed_date: effectiveDisputedDate,
               }
             : e
         );
@@ -3853,6 +3862,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         merchantObj.disputed_by = reporterId;
         merchantObj.disputed_by_name = reporterName;
         merchantObj.disputed_at = nowIso;
+        if (disputedAmountPaise) merchantObj.disputed_amount_paise = disputedAmountPaise;
+        if (effectiveDisputedDate) merchantObj.disputed_date = effectiveDisputedDate;
 
         const updateData: any = {
           is_paused: true,
@@ -3886,8 +3897,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     }
 
     // 4. Send dispute / pause message in chat
-    const formattedAmount = formatCurrencyAmount(exp.amount, trip?.currency || 'INR');
-    const disputeText = `⏸️ Payment Paused: ${reporterName} disagreed on "${exp.description || 'Expense'}" (${formattedAmount}) - Reason: "${reason.trim()}"`;
+    const formattedTotal = formatCurrencyAmount(exp.amount, trip?.currency || 'INR');
+    const disputedAmtStr = disputedAmountPaise
+      ? ` (Disputed: ${formatCurrencyAmount(disputedAmountPaise, trip?.currency || 'INR')})`
+      : ` (${formattedTotal})`;
+    const disputeText = `⏸️ Payment Paused: ${reporterName} disagreed on "${exp.description || 'Expense'}"${disputedAmtStr} - Reason: "${reason.trim()}"`;
 
     const disputePayload = JSON.stringify({
       type: 'dispute',
@@ -3908,6 +3922,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         disputed_by: reporterName,
         disputed_by_id: reporterId,
         disputed_at: nowIso,
+        disputed_amount_paise: disputedAmountPaise,
+        disputed_date: effectiveDisputedDate,
       },
     });
 

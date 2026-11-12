@@ -88,6 +88,8 @@ export interface Expense {
   disputed_by?: string | null;
   disputed_by_name?: string | null;
   disputed_at?: string | null;
+  disputed_amount_paise?: number | null;
+  disputed_date?: string | null;
   status?: 'active' | 'paused' | 'disputed' | 'settled';
   merchant_name?: string | null;
 }
@@ -165,6 +167,8 @@ export interface TripMessage {
     disputed_by_id?: string;
     disputed_by_name?: string;
     disputed_at?: string;
+    disputed_amount_paise?: number;
+    disputed_date?: string;
     attachment_url?: string | null;
     screenshot_path?: string | null;
     attachment_name?: string | null;

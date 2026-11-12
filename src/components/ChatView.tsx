@@ -566,6 +566,8 @@ export default function ChatView({
   } | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
   const [selectedReasonChip, setSelectedReasonChip] = useState('Wrong split share');
+  const [disputeAmountText, setDisputeAmountText] = useState('');
+  const [disputeDateText, setDisputeDateText] = useState('');
   const [isDisputing, setIsDisputing] = useState(false);
   const [pausedListVisible, setPausedListVisible] = useState(false);
 
@@ -618,6 +620,38 @@ export default function ChatView({
     }
     return undefined;
   }, [tripMembers, user?.id, currentUserPhone, isGroup, friendPhone, friendId, currentTrip?.created_by]);
+
+  const isTripAdmin = useMemo(() => {
+    if (!isGroup) return false;
+    if (user?.id && currentTrip?.created_by === user.id) return true;
+    if (currentUserId && currentTrip?.created_by === currentUserId) return true;
+    if (myMember?.role === 'admin' || (myMember as any)?.is_admin) return true;
+    return false;
+  }, [isGroup, user?.id, currentUserId, currentTrip?.created_by, myMember?.role]);
+
+  const canResumeExpense = useCallback((disputedById?: string | null, disputedByName?: string | null) => {
+    // Check if current user is the person who reported/paused the payment
+    const isDisputedByMe = Boolean(
+      (disputedById && (
+        disputedById === currentUserId ||
+        disputedById === user?.id ||
+        disputedById === myMember?.id
+      )) ||
+      (disputedByName && (
+        disputedByName.toLowerCase() === (currentUserName || '').toLowerCase() ||
+        disputedByName.toLowerCase() === (myMember?.display_name || '').toLowerCase() ||
+        disputedByName.toLowerCase() === 'you'
+      ))
+    );
+
+    if (isGroup) {
+      // In group trip: Admin OR the disagreed person can resume
+      return isTripAdmin || isDisputedByMe;
+    } else {
+      // In 1-on-1 single chat: Only the disagreed person can resume
+      return isDisputedByMe;
+    }
+  }, [isGroup, isTripAdmin, currentUserId, user?.id, myMember?.id, myMember?.display_name, currentUserName]);
 
   const resolvedSenderName = useMemo(() => {
     const pName = (profile?.full_name || profile?.name || '').trim();
@@ -736,15 +770,20 @@ export default function ChatView({
   const handleOpenDisputeModal = useCallback((expData: any, item: any) => {
     const expenseId = expData.id || item.expense_id;
     if (!expenseId) return;
+    const expAmt = expData.amount || 0;
     setSelectedExpenseForDispute({
       id: expenseId,
       description: expData.description || 'Expense',
-      amount: expData.amount || 0,
+      amount: expAmt,
       paid_by_name: resolveExpensePayerName(expData),
       currency: expData.currency || currentTrip?.currency,
     });
     setSelectedReasonChip('Wrong split share');
     setDisputeReason('');
+    const fullAmtNum = expAmt / 100;
+    setDisputeAmountText(fullAmtNum > 0 ? fullAmtNum.toString() : '');
+    const todayStr = new Date().toISOString().split('T')[0];
+    setDisputeDateText(todayStr);
     setDisputeModalVisible(true);
   }, [resolveExpensePayerName, currentTrip]);
 
@@ -759,12 +798,21 @@ export default function ChatView({
       const myId = currentUserId || user?.id || myMember?.id || 'member';
       const myName = currentUserName || myMember?.display_name || 'Member';
 
+      const parsedAmt = parseFloat(disputeAmountText);
+      const disputedAmountPaise = (!isNaN(parsedAmt) && parsedAmt > 0)
+        ? Math.round(parsedAmt * 100)
+        : selectedExpenseForDispute.amount;
+
+      const disputedDate = disputeDateText.trim() || new Date().toISOString().split('T')[0];
+
       await disputeExpense({
         tripId,
         expenseId: selectedExpenseForDispute.id,
         reason: finalReason,
         reporterId: myId,
         reporterName: myName,
+        disputedAmountPaise,
+        disputedDate,
       });
 
       setDisputeModalVisible(false);
@@ -774,7 +822,7 @@ export default function ChatView({
     } finally {
       setIsDisputing(false);
     }
-  }, [selectedExpenseForDispute, isDisputing, disputeReason, selectedReasonChip, currentUserId, user, myMember, currentUserName, disputeExpense, tripId]);
+  }, [selectedExpenseForDispute, isDisputing, disputeReason, selectedReasonChip, disputeAmountText, disputeDateText, currentUserId, user, myMember, currentUserName, disputeExpense, tripId]);
 
   const handleResolveDisputePrompt = useCallback((expenseId: string, title?: string) => {
     Alert.alert(
@@ -3915,7 +3963,7 @@ export default function ChatView({
                       </Text>
                     </View>
 
-                    {/* Reason box */}
+                    {/* Reason, Disputed Amount & Date box */}
                     <View
                       style={[
                         styles.disputeReasonBox,
@@ -3931,9 +3979,25 @@ export default function ChatView({
                         color={isDark ? '#FBBF24' : '#D97706'}
                         style={{ marginTop: 2, marginRight: 6 }}
                       />
-                      <Text style={[styles.disputeReasonText, { color: colors.text }]}>
-                        {reasonText}
-                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.disputeReasonText, { color: colors.text }]}>
+                          {reasonText}
+                        </Text>
+                        {(Boolean(expData.disputed_amount_paise || currentExp?.disputed_amount_paise) || Boolean(expData.disputed_date || currentExp?.disputed_date)) && (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 5, paddingTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: isDark ? '#374151' : '#E2E8F0' }}>
+                            {(expData.disputed_amount_paise || currentExp?.disputed_amount_paise) ? (
+                              <Text style={{ fontSize: 11, color: isDark ? '#FDE68A' : '#B45309', fontWeight: '600' }}>
+                                Disputed Amount: {formatCurrencyAmount(expData.disputed_amount_paise || currentExp?.disputed_amount_paise || 0, currency)}
+                              </Text>
+                            ) : null}
+                            {(expData.disputed_date || currentExp?.disputed_date) ? (
+                              <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                                Date: {expData.disputed_date || currentExp?.disputed_date}
+                              </Text>
+                            ) : null}
+                          </View>
+                        )}
+                      </View>
                     </View>
 
                     <Text
@@ -3975,22 +4039,40 @@ export default function ChatView({
                       </TouchableOpacity>
 
                       {isCurrentlyPaused && (
-                        <TouchableOpacity
-                          style={[
-                            styles.resumeBtn,
-                            {
-                              backgroundColor: colors.success,
-                              paddingHorizontal: 12,
+                        canResumeExpense(expData.disputed_by_id || currentExp?.disputed_by || item.sender_id, reporterName) ? (
+                          <TouchableOpacity
+                            style={[
+                              styles.resumeBtn,
+                              {
+                                backgroundColor: colors.success,
+                                paddingHorizontal: 12,
+                                paddingVertical: 5,
+                                borderRadius: 6,
+                                alignItems: 'center',
+                              },
+                            ]}
+                            onPress={() => handleResolveDisputePrompt(targetExpId, expTitle)}
+                          >
+                            <Ionicons name="play-circle-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                            <Text style={[styles.resumeBtnText, { color: '#FFFFFF' }]}>Resume</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
+                              paddingHorizontal: 8,
                               paddingVertical: 5,
                               borderRadius: 6,
-                              alignItems: 'center',
-                            },
-                          ]}
-                          onPress={() => handleResolveDisputePrompt(targetExpId, expTitle)}
-                        >
-                          <Ionicons name="play-circle-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
-                          <Text style={[styles.resumeBtnText, { color: '#FFFFFF' }]}>Resume</Text>
-                        </TouchableOpacity>
+                            }}
+                          >
+                            <Ionicons name="lock-closed-outline" size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
+                            <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                              {isGroup ? 'Admin or reporter only' : 'Reporter only'}
+                            </Text>
+                          </View>
+                        )
                       )}
                     </View>
                   </View>
@@ -5998,6 +6080,66 @@ export default function ChatView({
                 </View>
               )}
 
+              {/* Disputed Amount & Disputed Date Row */}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, marginBottom: 4 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.disputeSectionLabel, { color: colors.textSecondary, marginBottom: 5 }]}>
+                    Disputed Amount
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 10,
+                      backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                      paddingHorizontal: 10,
+                      paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#D97706', marginRight: 4 }}>
+                      {selectedExpenseForDispute?.currency === 'USD' ? '$' : '₹'}
+                    </Text>
+                    <TextInput
+                      style={{ flex: 1, fontSize: 14, color: colors.text, padding: 0 }}
+                      placeholder="Amount"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="numeric"
+                      value={disputeAmountText}
+                      onChangeText={setDisputeAmountText}
+                    />
+                  </View>
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.disputeSectionLabel, { color: colors.textSecondary, marginBottom: 5 }]}>
+                    Dispute Date
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 10,
+                      backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                      paddingHorizontal: 10,
+                      paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+                    }}
+                  >
+                    <Ionicons name="calendar-outline" size={14} color={colors.textMuted} style={{ marginRight: 6 }} />
+                    <TextInput
+                      style={{ flex: 1, fontSize: 14, color: colors.text, padding: 0 }}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={colors.textMuted}
+                      value={disputeDateText}
+                      onChangeText={setDisputeDateText}
+                    />
+                  </View>
+                </View>
+              </View>
+
               {/* Reason chips */}
               <Text style={[styles.disputeSectionLabel, { color: colors.textSecondary }]}>Select Reason</Text>
               <View style={styles.chipsRow}>
@@ -6168,13 +6310,22 @@ export default function ChatView({
                         <Text style={[styles.pausedItemViewBtnText, { color: colors.text }]}>View Bill</Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity
-                        style={[styles.pausedItemResumeBtn, { backgroundColor: colors.success }]}
-                        onPress={() => handleResolveDisputePrompt(item.id, item.description)}
-                      >
-                        <Ionicons name="play" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
-                        <Text style={styles.pausedItemResumeBtnText}>Resume Payment</Text>
-                      </TouchableOpacity>
+                      {canResumeExpense(item.disputed_by, item.disputed_by_name) ? (
+                        <TouchableOpacity
+                          style={[styles.pausedItemResumeBtn, { backgroundColor: colors.success }]}
+                          onPress={() => handleResolveDisputePrompt(item.id, item.description)}
+                        >
+                          <Ionicons name="play" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+                          <Text style={styles.pausedItemResumeBtnText}>Resume Payment</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 4 }}>
+                          <Ionicons name="lock-closed-outline" size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
+                          <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                            {isGroup ? 'Admin or reporter only' : 'Reporter only'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 )}
