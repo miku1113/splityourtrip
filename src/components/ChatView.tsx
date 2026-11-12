@@ -2984,27 +2984,18 @@ export default function ChatView({
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             onEndReached={handleLoadEarlierMessages}
-            onEndReachedThreshold={0.5}
+            onEndReachedThreshold={0.6}
+            onScroll={e => {
+              const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+              const distanceToEnd = contentSize.height - (layoutMeasurement.height + contentOffset.y);
+              if (distanceToEnd < 600 && combinedMessages.length > messagesVisibleCount) {
+                handleLoadEarlierMessages();
+              }
+            }}
+            scrollEventThrottle={16}
             ListFooterComponent={
               combinedMessages.length > messagesVisibleCount ? (
-                loadingEarlierMessages ? (
-                  <ChatPaginationSkeleton colors={colors} isDark={isDark} />
-                ) : (
-                  <View style={styles.loadEarlierContainer}>
-                    <TouchableOpacity
-                      style={[
-                        styles.loadEarlierBtn,
-                        { backgroundColor: colors.card, borderColor: colors.border },
-                      ]}
-                      onPress={handleLoadEarlierMessages}
-                    >
-                      <Ionicons name="arrow-up-circle-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.loadEarlierBtnText, { color: colors.primary }]}>
-                        Tap or scroll up for older messages ({combinedMessages.length - messagesVisibleCount} remaining)
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )
+                <ChatPaginationSkeleton colors={colors} isDark={isDark} />
               ) : null
             }
           renderItem={({ item, index }) => {
