@@ -92,7 +92,7 @@ export default function TripInfoScreen() {
     [rawExpenses, id]
   );
   const balances = React.useMemo(
-    () => rawBalances.filter(b => !b.trip_id || b.trip_id === id),
+    () => (Array.isArray(rawBalances) ? rawBalances.filter(b => !b.trip_id || b.trip_id === id) : []),
     [rawBalances, id]
   );
 

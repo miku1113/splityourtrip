@@ -3796,12 +3796,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     // Recompute balances with active expenses only (computeBalances filters paused expenses)
     const tripMembers = get().members.filter(m => !m.trip_id || m.trip_id === tripId);
-    const newBalances = computeBalances(tripId, tripMembers, updatedExpenses);
+    const newBalances = computeBalances(
+      tripId,
+      tripMembers,
+      updatedExpenses,
+      updatedExpenses.flatMap((e: any) => e.splits || [])
+    );
 
-    set(state => ({
+    set({
       expenses: updatedExpenses,
-      balances: { ...state.balances, [tripId]: newBalances },
-    }));
+      balances: newBalances,
+    });
 
     // 2. Persist to AppStorage local details cache
     try {
@@ -3950,12 +3955,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     });
 
     const tripMembers = get().members.filter(m => !m.trip_id || m.trip_id === tripId);
-    const newBalances = computeBalances(tripId, tripMembers, updatedExpenses);
+    const newBalances = computeBalances(
+      tripId,
+      tripMembers,
+      updatedExpenses,
+      updatedExpenses.flatMap((e: any) => e.splits || [])
+    );
 
-    set(state => ({
+    set({
       expenses: updatedExpenses,
-      balances: { ...state.balances, [tripId]: newBalances },
-    }));
+      balances: newBalances,
+    });
 
     // 2. Persist to AppStorage
     try {
@@ -4037,7 +4047,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const resolveText = `▶️ Dispute Resolved: "${exp.description || 'Expense'}" (${formattedAmount}) was resumed by ${resolverName} and added back to active balances.`;
 
     const resolvePayload = JSON.stringify({
-      type: 'system',
+      type: 'dispute_resolved',
       text: resolveText,
       expense_id: expenseId,
       resolved_by: resolverName,
@@ -4106,7 +4116,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       try {
         const parsed = JSON.parse(text);
         rawPayloadObj = parsed;
-        if (parsed.type) msgType = parsed.type;
+        if (parsed.type) {
+          msgType = parsed.type === 'dispute_resolved' ? 'system' : parsed.type;
+        }
         if (parsed.text) displayText = parsed.text;
         else if (parsed.type === 'payment_claim' || parsed.type === 'payment_settlement') {
           const amt = Number(parsed.amountPaise || parsed.amount_paise) || 0;
@@ -5257,6 +5269,16 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     const cleanTripId = tripId.toLowerCase();
 
+    // 1500ms debounce map to avoid rapid successive multi-table queries
+    let tripReloadTimer: NodeJS.Timeout | null = null;
+    const debouncedReload = (delayMs = 1500) => {
+      if (tripReloadTimer) clearTimeout(tripReloadTimer);
+      tripReloadTimer = setTimeout(() => {
+        tripReloadTimer = null;
+        get().loadTripDetails(tripId);
+      }, delayMs);
+    };
+
     const handleNewMessage = (newMsg: any) => {
       if (!newMsg || !newMsg.id) return;
       if (newMsg.trip_id && newMsg.trip_id.toLowerCase() !== cleanTripId) return;
@@ -5367,21 +5389,27 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'expenses', filter: `trip_id=eq.${cleanTripId}` },
         () => {
-          get().loadTripDetails(tripId);
+          debouncedReload(1500);
         }
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'expense_splits' },
-        () => {
-          get().loadTripDetails(tripId);
+        (payload: any) => {
+          // Check if this split change belongs to an expense in the currently loaded trip
+          const expId = payload?.new?.expense_id || payload?.old?.expense_id;
+          const currentExpenses = get().expenses;
+          const isRelatedToThisTrip = !expId || currentExpenses.some(e => e.id === expId);
+          if (isRelatedToThisTrip) {
+            debouncedReload(1500);
+          }
         }
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'trip_members', filter: `trip_id=eq.${cleanTripId}` },
         () => {
-          get().loadTripDetails(tripId);
+          debouncedReload(1500);
         }
       )
       .on(
@@ -5421,6 +5449,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       .subscribe();
 
     return () => {
+      if (tripReloadTimer) {
+        clearTimeout(tripReloadTimer);
+        tripReloadTimer = null;
+      }
       supabase.removeChannel(channel);
     };
   },

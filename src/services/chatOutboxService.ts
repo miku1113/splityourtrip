@@ -1,6 +1,6 @@
 import { AppState, Platform } from 'react-native';
 import { AppStorage } from '../lib/storage';
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, supabaseAdmin, isSupabaseConfigured, supabaseAnonKey } from '../lib/supabase';
 import {
   uploadImageToSupabase,
   uploadAudioToSupabase,
@@ -96,26 +96,39 @@ class ChatOutboxManager {
     }
   }
 
+  private lastOnlineResult = { status: true, checkedAt: 0 };
+
   /**
-   * Fast, reliable connectivity check against Supabase
+   * Fast, reliable connectivity check against Supabase with in-memory caching to prevent server flooding
    */
-  public async isOnline(): Promise<boolean> {
+  public async isOnline(forceCheck = false): Promise<boolean> {
     if (typeof navigator !== 'undefined' && 'onLine' in navigator && navigator.onLine === false) {
+      this.lastOnlineResult = { status: false, checkedAt: Date.now() };
       return false;
     }
+    const now = Date.now();
+    // Cache connectivity result for 20 seconds to prevent hammering Supabase with repeated HEAD requests
+    if (!forceCheck && now - this.lastOnlineResult.checkedAt < 20000) {
+      return this.lastOnlineResult.status;
+    }
+
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3500);
       const res = await fetch(`${SUPABASE_BASE_URL}/rest/v1/`, {
         method: 'HEAD',
         headers: {
-          apikey: 'anon',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
         },
         signal: controller.signal,
       });
       clearTimeout(timeout);
-      return res.status >= 200 && res.status < 500;
+      const online = res.status >= 200 && res.status < 500;
+      this.lastOnlineResult = { status: online, checkedAt: now };
+      return online;
     } catch {
+      this.lastOnlineResult = { status: false, checkedAt: now };
       return false;
     }
   }

@@ -291,6 +291,21 @@ export function getEffectiveContactName(options: {
   return (profileName && !isMyName(profileName)) ? profileName.trim() : 'Friend';
 }
 
+let activeFriendsChannel: any = null;
+let activeFriendsUserId: string | null = null;
+let friendsChannelSubscribers = 0;
+let debouncedFriendsSummaryTimer: NodeJS.Timeout | null = null;
+
+export const debouncedFetchFriendsSummary = (userId?: string, delayMs = 1500) => {
+  if (debouncedFriendsSummaryTimer) {
+    clearTimeout(debouncedFriendsSummaryTimer);
+  }
+  debouncedFriendsSummaryTimer = setTimeout(() => {
+    debouncedFriendsSummaryTimer = null;
+    useContactsStore.getState().fetchFriendsSummary(userId);
+  }, delayMs);
+};
+
 export const useContactsStore = create<ContactsState>((set, get) => ({
   contacts: [],
   deviceContacts: [],
@@ -824,8 +839,8 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
 
         return { contacts };
       } else {
-        // Contact not in local list yet, fetch summary in background
-        get().fetchFriendsSummary(currentUserId);
+        // Contact not in local list yet, fetch summary with debouncing
+        debouncedFetchFriendsSummary(currentUserId, 1500);
         return state;
       }
     });
@@ -834,8 +849,35 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
   subscribeFriendsRealtime: (userId?: string) => {
     if (!isSupabaseConfigured || !userId) return () => {};
 
-    const channel = supabase
-      .channel(`realtime:friends_dynamic:${userId}_${Date.now()}`)
+    // 1. Reuse existing channel if already registered for the same user
+    if (activeFriendsChannel && activeFriendsUserId === userId) {
+      friendsChannelSubscribers++;
+      return () => {
+        friendsChannelSubscribers--;
+        if (friendsChannelSubscribers <= 0) {
+          friendsChannelSubscribers = 0;
+          if (activeFriendsChannel) {
+            supabase.removeChannel(activeFriendsChannel);
+            activeFriendsChannel = null;
+            activeFriendsUserId = null;
+          }
+        }
+      };
+    }
+
+    // 2. Clean up old channel if user changed
+    if (activeFriendsChannel) {
+      supabase.removeChannel(activeFriendsChannel);
+      activeFriendsChannel = null;
+      activeFriendsUserId = null;
+      friendsChannelSubscribers = 0;
+    }
+
+    activeFriendsUserId = userId;
+    friendsChannelSubscribers = 1;
+
+    activeFriendsChannel = supabase
+      .channel(`realtime:friends_dynamic:${userId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'trip_messages' },
@@ -847,21 +889,30 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'trip_messages' },
         () => {
-          // Trigger dynamic summary update to recalculate amounts
-          get().fetchFriendsSummary(userId);
+          // Trigger debounced summary update to avoid burst fetches
+          debouncedFetchFriendsSummary(userId, 1500);
         }
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'expenses' },
         () => {
-          get().fetchFriendsSummary(userId);
+          // Trigger debounced summary update to avoid burst fetches
+          debouncedFetchFriendsSummary(userId, 1500);
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      friendsChannelSubscribers--;
+      if (friendsChannelSubscribers <= 0) {
+        friendsChannelSubscribers = 0;
+        if (activeFriendsChannel) {
+          supabase.removeChannel(activeFriendsChannel);
+          activeFriendsChannel = null;
+          activeFriendsUserId = null;
+        }
+      }
     };
   },
 }));

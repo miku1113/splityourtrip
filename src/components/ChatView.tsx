@@ -18,6 +18,7 @@ import {
   InteractionManager,
   StatusBar,
   Animated,
+  AppState,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -267,21 +268,44 @@ export default function ChatView({
   const [outboxQueue, setOutboxQueue] = useState<OutboxMessageItem[]>([]);
   const [isNetOnline, setIsNetOnline] = useState(true);
 
-  // Subscribe to persistent Outbox queue & network status (resilient outbox queue)
+  // Subscribe to persistent Outbox queue & passive network status (eliminates 4s polling flood)
   useEffect(() => {
     const unsub = chatOutbox.subscribe(q => {
       setOutboxQueue(q.filter(item => !item.tripId || item.tripId === tripId));
     });
 
+    // Check connectivity on mount
     chatOutbox.isOnline().then(online => setIsNetOnline(online));
+
+    // Passive listener: check when app returns to foreground
+    const appStateSub = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        chatOutbox.isOnline(true).then(online => setIsNetOnline(online));
+      }
+    });
+
+    // Web online/offline event listeners
+    const onWebOnline = () => setIsNetOnline(true);
+    const onWebOffline = () => setIsNetOnline(false);
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('online', onWebOnline);
+      window.addEventListener('offline', onWebOffline);
+    }
+
+    // Low-frequency failsafe heartbeat (30 seconds instead of 4 seconds)
     const netTimer = setInterval(async () => {
       const online = await chatOutbox.isOnline();
       setIsNetOnline(online);
-    }, 4000);
+    }, 30000);
 
     return () => {
       unsub();
+      appStateSub.remove();
       clearInterval(netTimer);
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('online', onWebOnline);
+        window.removeEventListener('offline', onWebOffline);
+      }
     };
   }, [tripId]);
   const initialCacheKey = getFriendCacheKey(friendId, friendPhone, title);
@@ -1518,7 +1542,8 @@ export default function ChatView({
     if (!isGroup) return 0;
     const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
     if (!myMember) return 0;
-    const row = balances.find(b => b.member_id === myMember.id);
+    const safeBalances = Array.isArray(balances) ? balances : [];
+    const row = safeBalances.find(b => b.member_id === myMember.id);
     return row ? row.net_balance : 0;
   }, [isGroup, tripMembers, balances, user?.id, currentUserPhone]);
 
@@ -1528,7 +1553,8 @@ export default function ChatView({
     const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
     if (!myMember) return displayTitle;
     const netRecord: Record<string, number> = {};
-    balances
+    const safeBalances = Array.isArray(balances) ? balances : [];
+    safeBalances
       .filter(b => !b.trip_id || b.trip_id === tripId)
       .forEach(b => {
         netRecord[b.member_id] = b.net_balance;
@@ -1566,7 +1592,8 @@ export default function ChatView({
     const debtMap: Record<string, number> = {};
     if (!myMember?.id) return debtMap;
     const netRecord: Record<string, number> = {};
-    balances
+    const safeBalances = Array.isArray(balances) ? balances : [];
+    safeBalances
       .filter(b => !b.trip_id || b.trip_id === tripId)
       .forEach(b => {
         netRecord[b.member_id] = b.net_balance;
@@ -2084,7 +2111,8 @@ export default function ChatView({
       } else {
         // If in group, prioritize member whom current user owes money
         const netRecord: Record<string, number> = {};
-        balances
+        const safeBalances = Array.isArray(balances) ? balances : [];
+        safeBalances
           .filter(b => !b.trip_id || b.trip_id === tripId)
           .forEach(b => {
             netRecord[b.member_id] = b.net_balance;
@@ -2108,7 +2136,8 @@ export default function ChatView({
       defaultAmount = (Math.abs(friendNetPaise) / 100).toString();
     } else if (isGroup && chosenTargetId) {
       const netRecord: Record<string, number> = {};
-      balances
+      const safeBalances = Array.isArray(balances) ? balances : [];
+      safeBalances
         .filter(b => !b.trip_id || b.trip_id === tripId)
         .forEach(b => {
           netRecord[b.member_id] = b.net_balance;
@@ -2687,20 +2716,20 @@ export default function ChatView({
           style={[
             styles.pausedExpensesBanner,
             {
-              backgroundColor: isDark ? '#422006' : '#FEF3C7',
-              borderBottomColor: '#F59E0B',
+              backgroundColor: isDark ? 'rgba(201, 161, 91, 0.16)' : '#FEF3C7',
+              borderBottomColor: isDark ? 'rgba(201, 161, 91, 0.35)' : '#FCD34D',
             },
           ]}
         >
           <View style={styles.pausedBannerLeft}>
-            <Ionicons name="pause-circle" size={17} color="#D97706" />
+            <Ionicons name="pause-circle" size={17} color={isDark ? '#FBBF24' : '#D97706'} />
             <Text style={[styles.pausedBannerText, { color: isDark ? '#FDE68A' : '#92400E' }]} numberOfLines={1}>
               {pausedExpenses.length} {pausedExpenses.length === 1 ? 'payment is' : 'payments are'} on pause (in dispute)
             </Text>
           </View>
           <View style={styles.pausedBannerBtn}>
-            <Text style={styles.pausedBannerBtnText}>View List</Text>
-            <Ionicons name="chevron-forward" size={13} color="#D97706" />
+            <Text style={[styles.pausedBannerBtnText, { color: isDark ? '#FBBF24' : '#D97706' }]}>View List</Text>
+            <Ionicons name="chevron-forward" size={13} color={isDark ? '#FBBF24' : '#D97706'} />
           </View>
         </TouchableOpacity>
       )}
@@ -3574,8 +3603,8 @@ export default function ChatView({
                     );
                     if (!isCardPaused) return null;
                     return (
-                      <View style={[styles.cardPausedNoticeBanner, { backgroundColor: isDark ? '#422006' : '#FEF3C7' }]}>
-                        <Ionicons name="pause-circle" size={13} color="#D97706" />
+                      <View style={[styles.cardPausedNoticeBanner, { backgroundColor: isDark ? 'rgba(201, 161, 91, 0.16)' : '#FEF3C7' }]}>
+                        <Ionicons name="pause-circle" size={13} color={isDark ? '#FBBF24' : '#D97706'} />
                         <Text style={[styles.cardPausedNoticeText, { color: isDark ? '#FDE68A' : '#92400E' }]} numberOfLines={1}>
                           Payment Paused (In Dispute) • Excluded from balances
                         </Text>
@@ -3600,19 +3629,19 @@ export default function ChatView({
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           {isCardPaused ? (
                             <TouchableOpacity
-                              style={[styles.pausedListBtn, { borderColor: '#F59E0B' }]}
+                              style={[styles.pausedListBtn, { borderColor: isDark ? 'rgba(245, 158, 11, 0.45)' : '#F59E0B' }]}
                               onPress={() => setPausedListVisible(true)}
                             >
-                              <Ionicons name="list" size={12} color="#D97706" />
-                              <Text style={[styles.pausedListBtnText, { color: '#D97706' }]}>Paused List</Text>
+                              <Ionicons name="list" size={12} color={isDark ? '#FBBF24' : '#D97706'} />
+                              <Text style={[styles.pausedListBtnText, { color: isDark ? '#FBBF24' : '#D97706' }]}>Paused List</Text>
                             </TouchableOpacity>
                           ) : (
                             <TouchableOpacity
-                              style={[styles.disagreeBtn, { backgroundColor: isDark ? '#422006' : '#FEF3C7', borderColor: '#F59E0B' }]}
+                              style={[styles.disagreeBtn, { backgroundColor: isDark ? 'rgba(201, 161, 91, 0.16)' : '#FEF3C7', borderColor: isDark ? 'rgba(245, 158, 11, 0.45)' : '#F59E0B' }]}
                               onPress={() => handleOpenDisputeModal(exp, item)}
                             >
-                              <Ionicons name="alert-circle-outline" size={13} color="#D97706" />
-                              <Text style={[styles.disagreeBtnText, { color: '#D97706' }]}>Disagree</Text>
+                              <Ionicons name="alert-circle-outline" size={13} color={isDark ? '#FBBF24' : '#D97706'} />
+                              <Text style={[styles.disagreeBtnText, { color: isDark ? '#FBBF24' : '#D97706' }]}>Disagree</Text>
                             </TouchableOpacity>
                           )}
                           <TouchableOpacity
@@ -3637,7 +3666,136 @@ export default function ChatView({
             );
           }
 
-          // 3.5 Dispute & Paused Expense Notification Card
+          // 3.5 Dispute Resolved Notification Card
+          const isDisputeResolvedMsg =
+            item.type === 'dispute_resolved' ||
+            (item.content && (item.content.includes('"type":"dispute_resolved"') || item.content.includes('Dispute Resolved'))) ||
+            (item.message && item.message.includes('Dispute Resolved'));
+
+          if (isDisputeResolvedMsg) {
+            let rData: any = item.expense_data || item.payload;
+            if (!rData && item.content && item.content.startsWith('{')) {
+              try { rData = JSON.parse(item.content); } catch {}
+            }
+            if (!rData && item.message && item.message.startsWith('{')) {
+              try { rData = JSON.parse(item.message); } catch {}
+            }
+            const expData = rData?.expense_data || rData || {};
+            const targetExpId = rData?.expense_id || expData.id || item.expense_id;
+            const currentExp = tripExpenses.find(e => e.id === targetExpId);
+            const resolverName = rData?.resolved_by || item.sender_name || 'Member';
+
+            let expTitle = expData.description || currentExp?.description;
+            if (!expTitle && item.message) {
+              const m = item.message.match(/Dispute Resolved:\s*"([^"]+)"/);
+              if (m && m[1]) expTitle = m[1];
+            }
+            if (!expTitle) expTitle = 'Expense';
+
+            let amountPaise = Number(expData.amount || currentExp?.amount) || 0;
+            const currency = expData.currency || currentExp?.currency || currentTrip?.currency || 'INR';
+            if (amountPaise === 0 && item.message) {
+              const m = item.message.match(/\((?:₹|Rs\.?|[$€£])\s*([0-9,.]+)\)/);
+              if (m && m[1]) {
+                const parsedNum = parseFloat(m[1].replace(/,/g, ''));
+                if (!isNaN(parsedNum)) amountPaise = Math.round(parsedNum * 100);
+              }
+            }
+            const targetTripId = expData.trip_id || currentExp?.trip_id || tripId;
+
+            return wrapWithDateHeader(
+              <View style={styles.disputeCardContainer}>
+                <View
+                  style={[
+                    styles.disputeCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: isDark ? 'rgba(94, 140, 106, 0.4)' : colors.success,
+                    },
+                  ]}
+                >
+                  {/* Header Banner */}
+                  <View
+                    style={[
+                      styles.disputeCardHeader,
+                      { backgroundColor: isDark ? 'rgba(94, 140, 106, 0.18)' : '#ECFDF5' },
+                    ]}
+                  >
+                    <Ionicons name="checkmark-circle" size={19} color={colors.success} />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.disputeCardTitle, { color: colors.success }]}>
+                        Dispute Resolved • Resumed
+                      </Text>
+                      <Text style={[styles.disputeCardSubtitle, { color: isDark ? '#D1D5DB' : '#047857' }]}>
+                        Resumed by {resolverName}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.disputeStatusPill,
+                        {
+                          backgroundColor: isDark ? 'rgba(94, 140, 106, 0.25)' : 'rgba(94, 140, 106, 0.15)',
+                          borderWidth: 1,
+                          borderColor: isDark ? 'rgba(94, 140, 106, 0.45)' : 'rgba(94, 140, 106, 0.3)',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.disputeStatusPillText, { color: colors.success }]}>
+                        Active
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Body */}
+                  <View style={styles.disputeCardBody}>
+                    <View style={styles.disputeExpenseRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.disputeExpenseName, { color: colors.text }]}>{expTitle}</Text>
+                        <Text style={[styles.disputeExpenseMeta, { color: colors.textSecondary }]}>
+                          {currentExp?.payerName ? `Paid by ${currentExp.payerName}` : 'Shared Expense'} • {currentExp?.splits?.length || expData.split_count || 2} members
+                        </Text>
+                      </View>
+                      {amountPaise > 0 && (
+                        <Text style={[styles.disputeAmountText, { color: colors.success }]}>
+                          {formatCurrencyAmount(amountPaise, currency)}
+                        </Text>
+                      )}
+                    </View>
+
+                    <Text style={[styles.disputeExcludedNotice, { color: isDark ? '#A7F3D0' : '#047857', marginTop: 8 }]}>
+                      ▶️ This expense has been restored to group balances and settlements.
+                    </Text>
+                  </View>
+
+                  {/* Footer */}
+                  <View style={[styles.disputeCardFooter, { borderTopColor: colors.borderLight }]}>
+                    <Text style={[styles.expenseTime, { color: colors.textMuted }]}>{formatTime(item.created_at)}</Text>
+                    {targetExpId ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.viewExpenseBtn,
+                          {
+                            backgroundColor: isDark ? '#3A3F49' : '#E2E8F0',
+                            paddingHorizontal: 12,
+                            paddingVertical: 5,
+                            borderRadius: 6,
+                            alignItems: 'center',
+                          },
+                        ]}
+                        onPress={() => {
+                          router.push(`/trip/${targetTripId}/expense/${targetExpId}`);
+                        }}
+                      >
+                        <Text style={[styles.viewExpenseText, { color: colors.text }]}>View Bill</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            );
+          }
+
+          // 3.6 Dispute & Paused Expense Notification Card
           const isDisputeMsg =
             item.type === 'dispute' ||
             (item.content && item.content.includes('"type":"dispute"')) ||
@@ -3666,20 +3824,83 @@ export default function ChatView({
 
             return wrapWithDateHeader(
               <View style={styles.disputeCardContainer}>
-                <View style={[styles.disputeCard, { backgroundColor: colors.card, borderColor: isCurrentlyPaused ? '#F59E0B' : colors.border }]}>
+                <View
+                  style={[
+                    styles.disputeCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: isCurrentlyPaused
+                        ? (isDark ? 'rgba(245, 158, 11, 0.45)' : '#FCD34D')
+                        : (isDark ? 'rgba(94, 140, 106, 0.4)' : colors.success),
+                    },
+                  ]}
+                >
                   {/* Header Banner */}
-                  <View style={[styles.disputeCardHeader, { backgroundColor: isDark ? '#422006' : '#FEF3C7' }]}>
-                    <Ionicons name={isCurrentlyPaused ? "pause-circle" : "checkmark-circle"} size={19} color={isCurrentlyPaused ? "#D97706" : colors.success} />
+                  <View
+                    style={[
+                      styles.disputeCardHeader,
+                      {
+                        backgroundColor: isCurrentlyPaused
+                          ? (isDark ? 'rgba(201, 161, 91, 0.16)' : '#FEF3C7')
+                          : (isDark ? 'rgba(94, 140, 106, 0.18)' : '#ECFDF5'),
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={isCurrentlyPaused ? "pause-circle" : "checkmark-circle"}
+                      size={19}
+                      color={isCurrentlyPaused ? (isDark ? '#FBBF24' : '#D97706') : colors.success}
+                    />
                     <View style={{ flex: 1, marginLeft: 8 }}>
-                      <Text style={[styles.disputeCardTitle, { color: isCurrentlyPaused ? "#B45309" : colors.success }]}>
+                      <Text
+                        style={[
+                          styles.disputeCardTitle,
+                          {
+                            color: isCurrentlyPaused
+                              ? (isDark ? '#FDE68A' : '#92400E')
+                              : colors.success,
+                          },
+                        ]}
+                      >
                         {isCurrentlyPaused ? 'Payment Paused (In Dispute)' : 'Dispute Resolved'}
                       </Text>
-                      <Text style={[styles.disputeCardSubtitle, { color: isDark ? '#FDE68A' : '#92400E' }]}>
-                        Flagged by {reporterName}
+                      <Text
+                        style={[
+                          styles.disputeCardSubtitle,
+                          {
+                            color: isCurrentlyPaused
+                              ? (isDark ? '#D1D5DB' : '#78350F')
+                              : (isDark ? '#D1D5DB' : '#047857'),
+                          },
+                        ]}
+                      >
+                        {isCurrentlyPaused ? `Flagged by ${reporterName}` : `Resumed by ${reporterName}`}
                       </Text>
                     </View>
-                    <View style={[styles.disputeStatusPill, { backgroundColor: isCurrentlyPaused ? '#FDE68A' : colors.successBg }]}>
-                      <Text style={[styles.disputeStatusPillText, { color: isCurrentlyPaused ? '#92400E' : colors.success }]}>
+                    <View
+                      style={[
+                        styles.disputeStatusPill,
+                        {
+                          backgroundColor: isCurrentlyPaused
+                            ? (isDark ? 'rgba(245, 158, 11, 0.22)' : 'rgba(217, 119, 6, 0.15)')
+                            : (isDark ? 'rgba(94, 140, 106, 0.25)' : 'rgba(94, 140, 106, 0.15)'),
+                          borderWidth: 1,
+                          borderColor: isCurrentlyPaused
+                            ? (isDark ? 'rgba(245, 158, 11, 0.45)' : 'rgba(217, 119, 6, 0.3)')
+                            : (isDark ? 'rgba(94, 140, 106, 0.45)' : 'rgba(94, 140, 106, 0.3)'),
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.disputeStatusPillText,
+                          {
+                            color: isCurrentlyPaused
+                              ? (isDark ? '#FDE68A' : '#B45309')
+                              : colors.success,
+                          },
+                        ]}
+                      >
                         {isCurrentlyPaused ? 'On Hold' : 'Active'}
                       </Text>
                     </View>
@@ -3694,20 +3915,51 @@ export default function ChatView({
                           {currentExp?.payerName ? `Paid by ${currentExp.payerName}` : 'Shared Expense'} • {currentExp?.splits?.length || expData.split_count || 2} members
                         </Text>
                       </View>
-                      <Text style={[styles.disputeAmountText, { color: isCurrentlyPaused ? '#D97706' : colors.text }]}>
+                      <Text
+                        style={[
+                          styles.disputeAmountText,
+                          {
+                            color: isCurrentlyPaused
+                              ? (isDark ? '#FBBF24' : '#D97706')
+                              : colors.text,
+                          },
+                        ]}
+                      >
                         {formatCurrencyAmount(amountPaise, currency)}
                       </Text>
                     </View>
 
                     {/* Reason box */}
-                    <View style={[styles.disputeReasonBox, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.border }]}>
-                      <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.textSecondary} style={{ marginTop: 2, marginRight: 6 }} />
+                    <View
+                      style={[
+                        styles.disputeReasonBox,
+                        {
+                          backgroundColor: isDark ? 'rgba(0, 0, 0, 0.22)' : '#F8FAFC',
+                          borderColor: isDark ? '#3E4450' : '#E2E8F0',
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="chatbubble-ellipses-outline"
+                        size={14}
+                        color={isDark ? '#FBBF24' : '#D97706'}
+                        style={{ marginTop: 2, marginRight: 6 }}
+                      />
                       <Text style={[styles.disputeReasonText, { color: colors.text }]}>
                         {reasonText}
                       </Text>
                     </View>
 
-                    <Text style={[styles.disputeExcludedNotice, { color: colors.textMuted }]}>
+                    <Text
+                      style={[
+                        styles.disputeExcludedNotice,
+                        {
+                          color: isCurrentlyPaused
+                            ? (isDark ? '#FDE68A' : '#B45309')
+                            : (isDark ? '#A7F3D0' : '#047857'),
+                        },
+                      ]}
+                    >
                       {isCurrentlyPaused
                         ? '⏸️ This expense is excluded from group balances and settlements.'
                         : '▶️ This expense has been restored to group balances.'}
@@ -3715,31 +3967,42 @@ export default function ChatView({
                   </View>
 
                   {/* Actions Row */}
-                  <View style={[styles.disputeCardFooter, { borderTopColor: colors.border }]}>
+                  <View style={[styles.disputeCardFooter, { borderTopColor: colors.borderLight }]}>
                     <Text style={[styles.expenseTime, { color: colors.textMuted }]}>{formatTime(item.created_at)}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <TouchableOpacity
-                        style={[styles.pausedListBtn, { borderColor: '#F59E0B' }]}
-                        onPress={() => setPausedListVisible(true)}
-                      >
-                        <Ionicons name="list" size={13} color="#D97706" />
-                        <Text style={[styles.pausedListBtnText, { color: '#D97706' }]}>Paused List</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.viewExpenseBtn, { backgroundColor: isDark ? '#334155' : '#E2E8F0', minWidth: 68, alignItems: 'center' }]}
+                        style={[
+                          styles.viewExpenseBtn,
+                          {
+                            backgroundColor: isDark ? '#3A3F49' : '#E2E8F0',
+                            paddingHorizontal: 12,
+                            paddingVertical: 5,
+                            borderRadius: 6,
+                            alignItems: 'center',
+                          },
+                        ]}
                         onPress={() => {
                           if (targetExpId) router.push(`/trip/${targetTripId}/expense/${targetExpId}`);
                         }}
                       >
-                        <Text style={[styles.viewExpenseText, { color: colors.text }]}>View</Text>
+                        <Text style={[styles.viewExpenseText, { color: colors.text }]}>View Bill</Text>
                       </TouchableOpacity>
 
                       {isCurrentlyPaused && (
                         <TouchableOpacity
-                          style={[styles.resumeBtn, { backgroundColor: colors.success, minWidth: 74, alignItems: 'center' }]}
+                          style={[
+                            styles.resumeBtn,
+                            {
+                              backgroundColor: colors.success,
+                              paddingHorizontal: 12,
+                              paddingVertical: 5,
+                              borderRadius: 6,
+                              alignItems: 'center',
+                            },
+                          ]}
                           onPress={() => handleResolveDisputePrompt(targetExpId, expTitle)}
                         >
+                          <Ionicons name="play-circle-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
                           <Text style={[styles.resumeBtnText, { color: '#FFFFFF' }]}>Resume</Text>
                         </TouchableOpacity>
                       )}

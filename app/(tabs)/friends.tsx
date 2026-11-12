@@ -357,7 +357,7 @@ export default function FriendsScreen() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [user?.id, fetchFriendsSummary, fetchPersonalExpensesTotal, subscribeFriendsRealtime, contacts.length]);
+  }, [user?.id, fetchFriendsSummary, fetchPersonalExpensesTotal, subscribeFriendsRealtime]);
 
   useFocusEffect(
     useCallback(() => {

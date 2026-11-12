@@ -99,52 +99,57 @@ export default function SplashScreen() {
   // Smooth color transitions (0 = Dark, 1 = Light)
   const containerBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#151B25', '#F4F6F8'],
+    outputRange: ['#2B2F36', '#F1F3F7'],
   });
 
   const cardBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#242D3B', '#FFFFFF'],
+    outputRange: ['#323740', '#FFFFFF'],
   });
 
   const cardBorder = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#2E3A4B', '#D7DEE8'],
+    outputRange: ['#3E4450', '#D0D5DD'],
   });
 
   const titleTextColor = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#F0F2E9', '#151B25'],
+    outputRange: ['#F8FAFC', '#1E2126'],
   });
 
   const subtitleTextColor = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#A3AFC2', '#556274'],
+    outputRange: ['#A0A7B5', '#64748B'],
   });
 
   const glowTopBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(129, 140, 248, 0.15)', 'rgba(99, 102, 241, 0.12)'],
+    outputRange: ['rgba(232, 236, 242, 0.08)', 'rgba(43, 47, 54, 0.05)'],
   });
 
   const glowBottomBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(245, 158, 11, 0.10)', 'rgba(245, 158, 11, 0.08)'],
+    outputRange: ['rgba(181, 80, 79, 0.08)', 'rgba(181, 80, 79, 0.05)'],
   });
 
   const badgeBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(226, 232, 240, 0.18)', 'rgba(30, 34, 41, 0.10)'],
+    outputRange: ['rgba(232, 236, 242, 0.12)', 'rgba(43, 47, 54, 0.06)'],
   });
 
   const badgeBorder = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(226, 232, 240, 0.40)', 'rgba(30, 34, 41, 0.30)'],
+    outputRange: ['rgba(232, 236, 242, 0.28)', 'rgba(43, 47, 54, 0.18)'],
   });
 
   const continueBtnBg = themeAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#E2E8F0', '#1E2229'],
+    outputRange: ['#E8ECF2', '#2B2F36'],
+  });
+
+  const continueBtnTextColor = themeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#1E2126', '#FFFFFF'],
   });
 
   useEffect(() => {
@@ -483,6 +488,10 @@ export default function SplashScreen() {
     // Only show prompt for first-time unauthenticated users who have never selected a theme
     if (!hasChosenTheme && !user) {
       setShowThemePrompt(true);
+      if (splashTimerRef.current) {
+        clearTimeout(splashTimerRef.current);
+        splashTimerRef.current = null;
+      }
       return;
     }
 
@@ -491,7 +500,7 @@ export default function SplashScreen() {
       completeThemeOnboarding(themeMode || 'dark').catch(() => {});
     }
 
-    // Automatically transition after logo presentation
+    // Automatically transition after logo presentation ONLY for returning/authenticated users
     splashTimerRef.current = setTimeout(() => {
       proceedNext();
     }, 2400);
@@ -504,18 +513,20 @@ export default function SplashScreen() {
     };
   }, [user, authLoading, isHydrated, hasChosenTheme]);
 
-  // Failsafe timer: If auth loading or hydration takes longer than 4 seconds, force transition to prevent infinite loading
+  // Failsafe timer: ONLY for returning / authenticated users if auth takes longer than 4 seconds
   useEffect(() => {
+    // If first-time user (theme prompt shown or theme unselected), NEVER auto-navigate! Wait for user input!
+    if (showThemePrompt || navigatingRef.current || (!hasChosenTheme && !user)) return;
+
     const failsafeTimer = setTimeout(() => {
-      if (!navigatingRef.current) {
+      if (!navigatingRef.current && !showThemePrompt) {
         console.log('[SplashScreen] Failsafe timer triggered after 4s');
-        completeThemeOnboarding(selectedMode).catch(() => {});
         proceedNext();
       }
     }, 4000);
 
     return () => clearTimeout(failsafeTimer);
-  }, [selectedMode]);
+  }, [showThemePrompt, hasChosenTheme, user]);
 
   const handleSelectMode = (mode: ThemeMode) => {
     if (selectedMode === mode) return;
@@ -775,21 +786,26 @@ export default function SplashScreen() {
                 style={[
                   styles.themeOptionBtn,
                   {
-                    backgroundColor: '#151926',
-                    borderColor: selectedMode === 'dark' ? '#818CF8' : '#1E2235',
+                    backgroundColor: isDark ? '#24272D' : '#323740',
+                    borderColor: selectedMode === 'dark' ? '#E8ECF2' : '#3E4450',
                   },
                   selectedMode === 'dark' && [
                     styles.themeOptionActive,
-                    { borderColor: '#818CF8', shadowColor: '#818CF8' },
+                    { borderColor: '#E8ECF2', shadowColor: '#E8ECF2' },
                   ],
                 ]}
                 onPress={() => handleSelectMode('dark')}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>🌙</Text>
-                <Text style={[styles.themeOptionTitle, { color: '#F3F4F6' }]}>Dark Theme</Text>
-                <Text style={[styles.themeOptionBadge, selectedMode === 'dark' ? { color: '#34D399', fontWeight: '700' } : { color: '#94A3B8' }]}>
-                  {selectedMode === 'dark' ? '✓ Active' : 'Default'}
+                <Text style={[styles.themeOptionTitle, { color: '#F8FAFC' }]}>Dark Theme</Text>
+                <Text
+                  style={[
+                    styles.themeOptionBadge,
+                    selectedMode === 'dark' ? { color: '#5E8C6A', fontWeight: '700' } : { color: '#A0A7B5' },
+                  ]}
+                >
+                  {selectedMode === 'dark' ? '✓ Selected' : 'Charcoal'}
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -801,20 +817,25 @@ export default function SplashScreen() {
                   styles.themeOptionBtn,
                   {
                     backgroundColor: '#FFFFFF',
-                    borderColor: selectedMode === 'light' ? '#4A85B6' : '#E3DFEC',
+                    borderColor: selectedMode === 'light' ? '#2B2F36' : '#D0D5DD',
                   },
                   selectedMode === 'light' && [
                     styles.themeOptionActive,
-                    { borderColor: '#4A85B6', shadowColor: '#4A85B6' },
+                    { borderColor: '#2B2F36', shadowColor: '#2B2F36' },
                   ],
                 ]}
                 onPress={() => handleSelectMode('light')}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>☀️</Text>
-                <Text style={[styles.themeOptionTitle, { color: '#1A1A24' }]}>Light Theme</Text>
-                <Text style={[styles.themeOptionSub, selectedMode === 'light' ? { color: '#4A85B6', fontWeight: '700' } : { color: '#6B6D82' }]}>
-                  {selectedMode === 'light' ? '✓ Active' : 'Classic'}
+                <Text style={[styles.themeOptionTitle, { color: '#1E2126' }]}>Light Theme</Text>
+                <Text
+                  style={[
+                    styles.themeOptionSub,
+                    selectedMode === 'light' ? { color: '#5E8C6A', fontWeight: '700' } : { color: '#64748B' },
+                  ]}
+                >
+                  {selectedMode === 'light' ? '✓ Selected' : 'Silver'}
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -830,9 +851,11 @@ export default function SplashScreen() {
               style={[styles.continueBtn, { backgroundColor: continueBtnBg, opacity: isConfirming ? 0.75 : 1 }]}
             >
               {isConfirming ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={selectedMode === 'dark' ? '#1E2126' : '#FFFFFF'} />
               ) : (
-                <Text style={styles.continueBtnText}>Continue →</Text>
+                <Animated.Text style={[styles.continueBtnText, { color: continueBtnTextColor }]}>
+                  {selectedMode === 'dark' ? 'Continue with Dark Theme →' : 'Continue with Light Theme →'}
+                </Animated.Text>
               )}
             </Animated.View>
           </TouchableOpacity>
@@ -1023,9 +1046,9 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   themeOptionActive: {
-    shadowColor: '#4A85B6',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },

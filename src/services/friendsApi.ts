@@ -12,28 +12,64 @@ export interface FriendsApiResult {
   friends: FriendContact[];
 }
 
+interface MemoryCacheEntry {
+  timestamp: number;
+  data: FriendsApiResult;
+}
+
+const memoryCache = new Map<string, MemoryCacheEntry>();
+const inFlightPromises = new Map<string, Promise<FriendsApiResult>>();
+const MEMORY_CACHE_TTL_MS = 5000; // 5-second cache window to eliminate rapid bursts
+
+export function invalidateFriendsSummaryCache(userId?: string) {
+  if (userId) {
+    memoryCache.delete(userId);
+    inFlightPromises.delete(userId);
+  } else {
+    memoryCache.clear();
+    inFlightPromises.clear();
+  }
+}
+
 /**
  * Dedicated database-driven Friends API.
  * Accurately calculates total owed/owe across ALL friends in database (not just the paginated 10-20),
  * and returns the full list of friends with pending settlements sorted to the very top.
  */
-export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApiResult> {
-  const cacheKey = `@splityourtrip_friends_summary_${userId}`;
-
-  // 1. Check local cache first for instant UI response
-  let cachedResult: FriendsApiResult | null = null;
-  try {
-    const rawCache = await AppStorage.getItem(cacheKey);
-    if (rawCache) {
-      cachedResult = JSON.parse(rawCache);
-    }
-  } catch {}
-
+export async function fetchFriendsSummaryApi(
+  userId: string,
+  options?: { forceRefresh?: boolean }
+): Promise<FriendsApiResult> {
   if (!userId) {
-    return cachedResult || { totalOwedToYouPaise: 0, totalYouOwePaise: 0, netOverallPaise: 0, friends: [] };
+    return { totalOwedToYouPaise: 0, totalYouOwePaise: 0, netOverallPaise: 0, friends: [] };
   }
 
-  let myUserPhone: string | null = null;
+  // 0. Check 5-second in-memory cache first if not explicitly force-refreshing
+  if (!options?.forceRefresh) {
+    const memoryHit = memoryCache.get(userId);
+    if (memoryHit && Date.now() - memoryHit.timestamp < MEMORY_CACHE_TTL_MS) {
+      return memoryHit.data;
+    }
+    // Deduplicate in-flight requests: attach to existing promise if already executing
+    const existingPromise = inFlightPromises.get(userId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+  }
+
+  const executionPromise = (async (): Promise<FriendsApiResult> => {
+    const cacheKey = `@splityourtrip_friends_summary_${userId}`;
+
+    // 1. Check local cache first for instant UI response
+    let cachedResult: FriendsApiResult | null = null;
+    try {
+      const rawCache = await AppStorage.getItem(cacheKey);
+      if (rawCache) {
+        cachedResult = JSON.parse(rawCache);
+      }
+    } catch {}
+
+    let myUserPhone: string | null = null;
   let myUserName: string | null = null;
   try {
     const { useAuthStore } = require('../features/auth/useAuthStore');
@@ -166,13 +202,18 @@ export async function fetchFriendsSummaryApi(userId: string): Promise<FriendsApi
       if (t.created_by && t.created_by !== userId) allProfileIds.add(t.created_by);
     });
 
+    // Filter strictly to valid UUIDs to prevent PostgreSQL 400 Bad Request: invalid input syntax for type uuid: "910"
+    const validProfileIds = Array.from(allProfileIds).filter(
+      id => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    );
+
     const profilesMap = new Map<string, any>();
-    if (allProfileIds.size > 0) {
+    if (validProfileIds.length > 0) {
       try {
         const { data: profs } = await sb
           .from('profiles')
           .select('id, full_name, phone_number, avatar_url')
-          .in('id', Array.from(allProfileIds));
+          .in('id', validProfileIds);
         if (profs) {
           profs.forEach((p: any) => profilesMap.set(p.id, p));
         }
@@ -539,5 +580,15 @@ interface FriendMapEntry {
   } catch (err: any) {
     console.warn('fetchFriendsSummaryApi notice:', err?.message);
     return cachedResult || { totalOwedToYouPaise: 0, totalYouOwePaise: 0, netOverallPaise: 0, friends: [] };
+  }
+  })();
+
+  inFlightPromises.set(userId, executionPromise);
+  try {
+    const finalResult = await executionPromise;
+    memoryCache.set(userId, { timestamp: Date.now(), data: finalResult });
+    return finalResult;
+  } finally {
+    inFlightPromises.delete(userId);
   }
 }
