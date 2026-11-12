@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { AppStorage } from '../lib/storage';
 import { TripMember, TripBalanceRow } from '../types/database';
+import { parseVoiceExpense } from './voiceExpenseParser';
 
 // Supported language codes for speech recognition
 export type VoiceLanguage = 'auto' | 'en' | 'hi' | 'gu';
@@ -342,7 +343,7 @@ Rules:
 
 Output JSON only: {"amount":number,"description":"...","category":"...","trip_id":"...","paid_by_member_id":"...","paid_by_name":"...","split_all":true,"selected_participant_ids":["..."],"payment_mode":"upi"|"cash"|"other"}`;
 
-    const candidateModels = ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'];
+    const candidateModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
 
     for (const modelName of candidateModels) {
       try {
@@ -637,6 +638,7 @@ export async function runVoiceCopilot(params: {
   friendsSummary?: any;
   recentExpenses?: CopilotRecentExpense[];
   contacts?: CopilotContactSummary[];
+  pendingAction?: CopilotAction | null;
 }): Promise<CopilotTurnResult> {
   const {
     userPrompt,
@@ -650,14 +652,60 @@ export async function runVoiceCopilot(params: {
     friendsSummary,
     recentExpenses = [],
     contacts = [],
+    pendingAction,
   } = params;
 
-  const groqApiKey = (await getSavedGroqApiKey()) || process.env.EXPO_PUBLIC_GROQ_API_KEY;
-  if (!groqApiKey || !userPrompt.trim() || isWhisperHallucination(userPrompt.trim())) {
+  if (!userPrompt.trim() || isWhisperHallucination(userPrompt.trim())) {
     return {
       reply: "I didn't catch that. Tap the mic or type your request below.",
       action: null,
     };
+  }
+
+  // Fast-path for direct confirmation/cancellation of pending action
+  const cleanPrompt = userPrompt.trim();
+  const lowerPromptDirect = cleanPrompt.toLowerCase();
+  const isAffirmative = /^(yes|yeah|yep|sure|ok|okay|confirm|add\s*it|do\s*it|go\s*ahead|haan|ha|sahi\s*hai|done|kar\s*do|theek\s*hai|chale|hata\s*do|delete\s*it)\b/i.test(lowerPromptDirect);
+  const isNegative = /^(no|nope|nah|cancel|don'?t|stop|nahi|na|rehne\s*do|nakho|mat\s*karo)\b/i.test(lowerPromptDirect);
+
+  if (pendingAction) {
+    if (isAffirmative) {
+      if (pendingAction.type === 'ADD_EXPENSE' || pendingAction.type === 'CONFIRM_ADD_EXPENSE') {
+        return {
+          reply: `Confirmed! I've added ₹${pendingAction.expense?.amountRupees} for ${pendingAction.expense?.description} to ${pendingAction.expense?.tripName || 'your trip'}.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+      if (pendingAction.type === 'DELETE_EXPENSE') {
+        return {
+          reply: `Confirmed! I have removed the ₹${pendingAction.deleteExpense?.amountRupees} ${pendingAction.deleteExpense?.description} expense.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+      if (pendingAction.type === 'UPDATE_EXPENSE') {
+        return {
+          reply: `Confirmed! I have updated the ${pendingAction.updateExpense?.description} expense.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+      if (pendingAction.type === 'SETTLE_UP') {
+        return {
+          reply: `Confirmed settlement of ₹${pendingAction.settle?.amountRupees} with ${pendingAction.settle?.toMemberName || 'Member'}.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+    } else if (isNegative) {
+      return {
+        reply: "Okay, cancelled. What else can I help with?",
+        action: null,
+      };
+    }
+  }
+
+  const groqApiKey = (await getSavedGroqApiKey()) || process.env.EXPO_PUBLIC_GROQ_API_KEY;
+  if (!groqApiKey) {
+    console.log('[voiceAiService] No Groq API key configured; running intelligent local fallback engine.');
+    return fallbackLocalVoiceParser(params);
   }
 
   try {
@@ -722,6 +770,7 @@ ActiveTrip: ${activeTrip ? JSON.stringify({ id: activeTrip.id, name: activeTrip.
 Speaker(You): ${defaultPayer ? JSON.stringify({ id: defaultPayer.id, name: defaultPayer.display_name }) : 'Unknown'}
 Trips: ${JSON.stringify(candidateTrips)}
 MembersByTrip: ${JSON.stringify(membersSummary)}
+PendingAction: ${pendingAction ? JSON.stringify(pendingAction) : 'None'}
 RecentExpenses: ${JSON.stringify(
   recentExpenses.slice(0, 15).map(e => ({
     id: e.id,
@@ -745,7 +794,13 @@ Rules:
 - Understand English, Hindi, Gujarati, Hinglish, and spoken slang ("2k" -> 2000, "dedh sau" -> 150, "jamvanu 850" -> 850, "paune teen sau" -> 275).
 - CRITICAL INTEGRITY: NEVER claim or pretend that you added, updated, or deleted an expense unless you actually return the corresponding action object (ADD_EXPENSE, UPDATE_EXPENSE, DELETE_EXPENSE). If you cannot find the expense or need more information, answer honestly and ask the user.
 
-- INTENT CLASSIFICATION RULES (ABSOLUTE PRIORITY):
+- MULTI-TURN CONTEXT & CONVERSATIONAL SLOT-FILLING (ABSOLUTE PRIORITY):
+  - Always remember and combine details from previous turns in the conversation history!
+  - If a user provides an expense in parts (e.g. Turn 1: "Add an expense", Turn 2: "500 for lunch", Turn 3: "Goa trip"), MERGE ALL SLOTS into a complete ADD_EXPENSE action (Amount: 500, Description: "Lunch", Trip: Goa) with status="confirmed"!
+  - If user modifies an expense just discussed (e.g. "Actually make it 600", "Change it to dinner", "Split with Rohan instead"), update that slot and output the updated action with status="confirmed"!
+  - If user replies affirmatively ("yes", "confirm", "add it", "go ahead", "haan", "kar do", "sure", "ok") to a PendingAction, output that exact action with status="confirmed"!
+
+- INTENT CLASSIFICATION RULES:
   - If user uses words of removal, deletion, or cancellation ("remove", "delete", "cancel", "erase", "drop", "hatao", "hata do", "nikalo", "nikal do", "delete kar", "kadhi nakho"):
     You MUST classify this as DELETE_EXPENSE! NEVER output ADD_EXPENSE under ANY circumstances, even if expense categories like "petrol", "dinner", "fuel", "food" or amounts are present!
   - If user uses words of modification ("update", "change", "edit", "modify", "50-50 kar do", "badal do", "badli ne"):
@@ -764,6 +819,22 @@ Rules:
   - If user explicitly says "only [Name]" (e.g. "only for Khushi", "pure Khushi ka hai") or "split between Khushi and Isha without me", do NOT include Speaker(You).
   - If user specifies "everyone", "all", "all members", "sab me", "split equally", or does not specify members:
     Include ALL member IDs of the trip in participantMemberIds. Set splitAll = true.
+
+- ADD EXPENSE RULES:
+  - When user gives a direct imperative command to record an expense (e.g. "Add 500 for dinner in Goa", "Coffee 150 split 50-50 with Khushi", "Dinner 800", "Petrol 500 maine diya", "100 each for 4 in Goa"):
+    SET status = "confirmed"! Do NOT ask for confirmation!
+    Formulate reply: "I have added ₹{amountRupees} for {description} to {tripName}."
+  - If trip is ambiguous (e.g. 2 trips named Goa), ASK for clarification politely: "Which Goa trip do you mean: Goa Friends or Goa Family?". Set status="needs_clarification".
+  - If user specifies splitting with specific members (e.g. "split with Rohan", "split between Rohan and me", "split it with 2 members: Rohan and me", "only Khushi and Isha"):
+    Match their member IDs from MembersByTrip for that trip. If the speaker/user is one of the participants, include speaker's ID too.
+    Set splitAll=false and include ONLY those member IDs in participantMemberIds.
+  - If user specifies "everyone", "all", "all members", "sab me", "split equally", or does not specify members:
+    Include ALL member IDs of the trip in participantMemberIds. Set splitAll=true.
+  - Only set status = "pending_confirmation" if user tentatively asks (e.g. "Should we add...", "Can you check adding...") without direct instruction.
+
+- RECENT EXPENSES & SPENDING INQUIRIES:
+  - If user asks about recent expenses, past transactions, or category spending (e.g. "What did we spend on food?", "What was our last expense?", "How much did we spend in Goa?", "Show recent expenses", "Did you add dinner?"):
+    Answer conversationally and accurately using RecentExpenses. Keep reply natural for voice readout. Set action = null.
 
 - UPDATE EXPENSE RULES:
   - If user wants to update, edit, modify, or change an existing expense (e.g. "update this expense and split it with me and Khushi", "change last expense to 50-50", "update expense to 500 rupees", "Khushi aur mere me 50-50 split kar do", "change description to Lunch"):
@@ -830,20 +901,6 @@ Rules:
   - If user says "add an expense with a contact" or "find people from my contact and start a split" without naming a specific contact:
     - Formulate reply: "Who from your contacts would you like to split with? I can start a 1-on-1 split with Rohan, Priya, or anyone from your contacts."
     - Set action.type = "NAVIGATE", action.navigation = { screen: "/(tabs)/friends" }, status = "info_only".
-
-- ADD EXPENSE RULES:
-  - If user mentions adding an expense to a trip:
-    - If trip is ambiguous (e.g. 2 trips named Goa), ASK for clarification politely: "Which Goa trip do you mean: Goa Friends or Goa Family?". Set status="needs_clarification".
-    - If user specifies splitting with specific members (e.g. "split with Rohan", "split between Rohan and me", "split it with 2 members: Rohan and me", "only Khushi and Isha"):
-      Match their member IDs from MembersByTrip for that trip. If the speaker/user is one of the participants, include speaker's ID too.
-      Set splitAll=false and include ONLY those member IDs in participantMemberIds.
-    - If user says "split with 2 members" without naming them:
-      Ask for clarification: "Which 2 members would you like to split with?". Set status="needs_clarification".
-    - If user specifies "everyone", "all", "all members", "sab me", "split equally", or does not specify members:
-      Include ALL member IDs of the trip in participantMemberIds. Set splitAll=true.
-    - When details are ready:
-      Ask for user confirmation politely: "Should I confirm adding ₹{amountRupees} for {description} to {tripName}?". Set status="pending_confirmation".
-    - ONLY set status="confirmed" if user has explicitly confirmed ("yes", "confirm", "add it", "go ahead").
 
 - BALANCES & DEBTS RULES:
   - If user asks who owes what, how much they owe, who owes them, or their overall balance (e.g. "who owes me?", "kitne paise lene hai?", "how much do I owe in Goa?", "what is my net balance?", "hisaab batao"):
@@ -930,7 +987,7 @@ Output JSON only:
   }
 };`;
 
-    const candidateModels = ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'];
+    const candidateModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
 
     for (const modelName of candidateModels) {
       try {
@@ -1329,9 +1386,253 @@ Output JSON only:
     console.warn('[voiceAiService] Copilot turn error:', err);
   }
 
-  // Graceful fallback response
+  // Graceful fallback to local rule-based intent engine
+  console.log('[voiceAiService] Falling back to intelligent local voice parser for:', userPrompt);
+  return fallbackLocalVoiceParser(params);
+}
+
+/**
+ * Intelligent Local Rule-Based Voice Fallback Engine
+ * Runs with 0ms latency when Groq API is offline, key is not present, or network is interrupted.
+ * Accurately extracts amounts, categories, members, trips, deletions, balances, and navigations.
+ */
+export function fallbackLocalVoiceParser(params: {
+  userPrompt: string;
+  trips: Array<{ id: string; name: string; currency?: string; trip_type?: string }>;
+  tripMembersMap?: Record<string, TripMember[] | any[]>;
+  balances?: TripBalanceRow[] | any[];
+  currentUserId?: string;
+  currentUserPhone?: string | null;
+  activeTripId?: string | null;
+  friendsSummary?: any;
+  recentExpenses?: CopilotRecentExpense[];
+  contacts?: CopilotContactSummary[];
+  pendingAction?: CopilotAction | null;
+}): CopilotTurnResult {
+  const {
+    userPrompt,
+    trips,
+    tripMembersMap = {},
+    currentUserId,
+    currentUserPhone,
+    activeTripId,
+    friendsSummary,
+    recentExpenses = [],
+    contacts = [],
+    pendingAction,
+  } = params;
+
+  const clean = userPrompt.trim();
+  const lower = clean.toLowerCase();
+
+  // 1. Check affirmative or rejection response to pending action
+  if (pendingAction) {
+    const isAffirmative = /^(yes|yeah|yep|sure|ok|okay|confirm|add\s*it|do\s*it|go\s*ahead|haan|ha|sahi\s*hai|done|kar\s*do|theek\s*hai|chale|hata\s*do|delete\s*it)\b/i.test(lower);
+    const isNegative = /^(no|nope|nah|cancel|don'?t|stop|nahi|na|rehne\s*do|nakho|mat\s*karo)\b/i.test(lower);
+
+    if (isAffirmative) {
+      if (pendingAction.type === 'ADD_EXPENSE' || pendingAction.type === 'CONFIRM_ADD_EXPENSE') {
+        return {
+          reply: `Confirmed! I've added ₹${pendingAction.expense?.amountRupees} for ${pendingAction.expense?.description} to ${pendingAction.expense?.tripName || 'your trip'}.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+      if (pendingAction.type === 'DELETE_EXPENSE') {
+        return {
+          reply: `Confirmed! I have removed the ₹${pendingAction.deleteExpense?.amountRupees} ${pendingAction.deleteExpense?.description} expense.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+      if (pendingAction.type === 'UPDATE_EXPENSE') {
+        return {
+          reply: `Confirmed! I have updated the ${pendingAction.updateExpense?.description} expense.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+      if (pendingAction.type === 'SETTLE_UP') {
+        return {
+          reply: `Confirmed settlement of ₹${pendingAction.settle?.amountRupees}.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
+    } else if (isNegative) {
+      return {
+        reply: "Okay, cancelled.",
+        action: null,
+      };
+    }
+  }
+
+  // 2. Navigation Intent
+  if (/\b(analyser|analysis|analytics|trends|spending\s*chart|spending\s*trends)\b/i.test(lower)) {
+    return {
+      reply: 'Opening spending analyser.',
+      action: { type: 'NAVIGATE', status: 'info_only', navigation: { screen: '/(tabs)/analyser' } },
+    };
+  }
+  if (/\b(friends?|1-on-1|contact\s*splits?|settle\s*friends?)\b/i.test(lower)) {
+    return {
+      reply: 'Opening friends and 1-on-1 splits.',
+      action: { type: 'NAVIGATE', status: 'info_only', navigation: { screen: '/(tabs)/friends' } },
+    };
+  }
+  if (/\b(profile|settings|account|my\s*profile)\b/i.test(lower)) {
+    return {
+      reply: 'Opening profile settings.',
+      action: { type: 'NAVIGATE', status: 'info_only', navigation: { screen: '/(tabs)/profile' } },
+    };
+  }
+
+  // 3. Balance Inquiry Intent
+  if (/\b(who\s*owes|balance|kitne\s*paise|hisaab|how\s*much\s*do\s*i\s*owe|owed|dues)\b/i.test(lower)) {
+    let balReply = '';
+    if (friendsSummary) {
+      const owed = Math.round((friendsSummary.totalOwedToYouPaise || 0) / 100);
+      const owe = Math.round((friendsSummary.totalYouOwePaise || 0) / 100);
+      if (owed > 0 && owe > 0) {
+        balReply = `You are owed ₹${owed} across friends, and you owe ₹${owe}.`;
+      } else if (owed > 0) {
+        balReply = `Friends owe you a total of ₹${owed}.`;
+      } else if (owe > 0) {
+        balReply = `You owe a total of ₹${owe} to friends.`;
+      } else {
+        balReply = 'All your balances are currently settled!';
+      }
+    } else {
+      balReply = 'All balances appear settled up!';
+    }
+    return { reply: balReply, action: null };
+  }
+
+  // 4. Delete Expense Intent
+  if (/\b(remove|delete|cancel|erase|drop|hatao|hata\s*do|nikal\s*do|nikalo|delete\s*karo|kadhi\s*nakho)\b/i.test(lower)) {
+    let matched = recentExpenses.find(
+      e => e.description && lower.includes(e.description.toLowerCase())
+    );
+    if (!matched && (lower.includes('petrol') || lower.includes('fuel'))) {
+      matched = recentExpenses.find(
+        e => e.category === 'Fuel' || (e.description && e.description.toLowerCase().includes('petrol'))
+      );
+    }
+    if (!matched && (lower.includes('food') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('coffee') || lower.includes('chai'))) {
+      matched = recentExpenses.find(
+        e => e.category === 'Food' || (e.description && /dinner|lunch|food|coffee|chai/i.test(e.description))
+      );
+    }
+    if (!matched && (lower.includes('last') || lower.includes('latest') || lower.includes('recent') || lower.includes('expense') || lower.includes('kharcha'))) {
+      matched = recentExpenses[0];
+    }
+
+    if (matched) {
+      return {
+        reply: `I have removed the ₹${matched.amountRupees} ${matched.description} expense from ${matched.tripName}.`,
+        action: {
+          type: 'DELETE_EXPENSE',
+          status: 'confirmed',
+          deleteExpense: {
+            tripId: matched.tripId,
+            tripName: matched.tripName,
+            expenseId: matched.id,
+            description: matched.description,
+            amountRupees: matched.amountRupees,
+            amountPaise: matched.amountPaise,
+          },
+        },
+      };
+    } else {
+      return {
+        reply: "I couldn't find that expense in your recent expenses to remove.",
+        action: null,
+      };
+    }
+  }
+
+  // 5. 1-on-1 Contact Split Intent
+  if (/\b(split\s*with|sathe|ke\s*saath|ke\s*sath)\b/i.test(lower)) {
+    let matchedContact: CopilotContactSummary | undefined = undefined;
+    for (const c of contacts) {
+      if (c.name) {
+        const firstName = c.name.toLowerCase().split(/\s+/)[0];
+        if (firstName && firstName.length > 2 && lower.includes(firstName)) {
+          matchedContact = c;
+          break;
+        }
+      }
+    }
+
+    if (matchedContact) {
+      const parsed = parseVoiceExpense(clean, trips as any, currentUserId, currentUserPhone, tripMembersMap as any);
+      return {
+        reply: parsed.amountPaise > 0
+          ? `Starting a 1-on-1 split with ${matchedContact.name} for ₹${parsed.amountRupees} (${parsed.description}).`
+          : `Starting a 1-on-1 split with ${matchedContact.name}.`,
+        action: {
+          type: 'START_CONTACT_SPLIT',
+          status: 'confirmed',
+          contactSplit: {
+            contactId: matchedContact.id,
+            contactName: matchedContact.name,
+            phoneNumber: matchedContact.phoneNumber,
+            amountRupees: parsed.amountRupees || '0',
+            amountPaise: parsed.amountPaise || 0,
+            description: parsed.description || 'Expense',
+            category: (parsed.category as any) || 'General',
+          },
+        },
+      };
+    }
+  }
+
+  // 6. Expense Intent with parseVoiceExpense
+  const parsed = parseVoiceExpense(clean, trips as any, currentUserId, currentUserPhone, tripMembersMap as any);
+  if (parsed.amountPaise > 0) {
+    const targetTrip = parsed.matchedTrip || trips.find(t => t.id === activeTripId) || trips[0];
+    const tripMembers = targetTrip && tripMembersMap ? tripMembersMap[targetTrip.id] || [] : [];
+    const myMember = tripMembers.find(
+      m =>
+        (currentUserId && (m.user_id === currentUserId || m.profile_id === currentUserId)) ||
+        (currentUserPhone && m.phone_number && m.phone_number.includes(currentUserPhone.slice(-8))) ||
+        (m.display_name && m.display_name.toLowerCase().includes('you'))
+    ) || tripMembers[0];
+
+    const paidBy = parsed.paidByMemberId || myMember?.id || tripMembers[0]?.id || '';
+    const participantIds = parsed.selectedParticipantIds.length > 0
+      ? parsed.selectedParticipantIds
+      : tripMembers.map(m => m.id);
+
+    return {
+      reply: `I have added ₹${parsed.amountRupees} for ${parsed.description} to ${targetTrip?.name || 'your trip'}.`,
+      action: {
+        type: 'ADD_EXPENSE',
+        status: 'confirmed',
+        expense: {
+          amountPaise: parsed.amountPaise,
+          amountRupees: parsed.amountRupees,
+          description: parsed.description,
+          category: parsed.category,
+          tripId: targetTrip ? targetTrip.id : '',
+          tripName: targetTrip ? targetTrip.name : 'Trip',
+          paidByMemberId: paidBy,
+          paidByMemberName: parsed.paidByMemberName || 'You',
+          participantMemberIds: participantIds,
+          splitAll: parsed.splitAll,
+          paymentMode: parsed.paymentMode,
+        },
+      },
+    };
+  }
+
+  // 7. General Inquiry / Help
+  if (/\b(what\s*can\s*you\s*do|features|help|commands|kya\s*kar\s*sakte)\b/i.test(lower)) {
+    return {
+      reply: 'I can add expenses, delete past expenses, split with contacts, check who owes what, settle balances, and navigate the app. Try saying "Add 500 for dinner in Goa" or "Who owes me money?".',
+      action: null,
+    };
+  }
+
+  // Context-aware fallback confirming what was heard
   return {
-    reply: "I couldn't catch that clearly. Tap the mic or type your request below.",
+    reply: `I heard: "${clean}". You can ask me to add an expense (e.g. "Add ₹500 for lunch in Goa"), check balances ("Who owes me?"), or split with a friend.`,
     action: null,
   };
 }

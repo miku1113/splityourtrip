@@ -200,22 +200,25 @@ export default function VoiceExpenseModal({
     return Array.from(map.values());
   }, [contacts, deviceContacts]);
 
-  // Contextual names for Whisper domain conditioning (current members, trips, top contacts)
+  // Contextual names for Whisper domain conditioning (members across all trips, trips, top contacts)
   const contextNames = useMemo<string[]>(() => {
     const set = new Set<string>();
-    if (selectedTripId && tripMembersMap[selectedTripId]) {
-      tripMembersMap[selectedTripId].forEach(m => {
+    Object.values(tripMembersMap).forEach(members => {
+      members.forEach(m => {
         if (m.display_name) set.add(m.display_name.trim());
       });
-    }
+    });
+    rawMembers.forEach(m => {
+      if (m.display_name) set.add(m.display_name.trim());
+    });
     trips.forEach(t => {
       if (t.name) set.add(t.name.trim());
     });
-    contactsSummary.slice(0, 15).forEach(c => {
+    contactsSummary.slice(0, 20).forEach(c => {
       if (c.name) set.add(c.name.trim());
     });
-    return Array.from(set).slice(0, 20);
-  }, [selectedTripId, tripMembersMap, trips, contactsSummary]);
+    return Array.from(set).slice(0, 30);
+  }, [tripMembersMap, rawMembers, trips, contactsSummary]);
 
   // Idempotency & Concurrency Guards to prevent duplicate/triplicate submissions
   const isStoppingListeningRef = useRef(false);
@@ -313,6 +316,16 @@ export default function VoiceExpenseModal({
                   }
                 });
               }
+            } else if (!fullMembersMap[trip.id] || fullMembersMap[trip.id].length === 0) {
+              // Lazy load members into cache if not in AppStorage
+              loadTripDetails(trip.id)
+                .then(() => {
+                  const freshlyLoaded = useTripStore.getState().members.filter(m => m.trip_id === trip.id);
+                  if (freshlyLoaded.length > 0) {
+                    setTripMembersMap(prev => ({ ...prev, [trip.id]: freshlyLoaded }));
+                  }
+                })
+                .catch(() => {});
             }
           } catch {}
         }
@@ -967,6 +980,7 @@ export default function VoiceExpenseModal({
           friendsSummary,
           recentExpenses,
           contacts: contactsSummary,
+          pendingAction,
         });
 
         setIsAnalyzing(false);
@@ -1089,6 +1103,7 @@ export default function VoiceExpenseModal({
       friendsSummary,
       recentExpenses,
       contactsSummary,
+      pendingAction,
       executeSubmitExpense,
       executeUpdateExpense,
       executeDeleteExpense,
@@ -1196,9 +1211,9 @@ export default function VoiceExpenseModal({
           setRecordingSeconds(Math.round(duration / 100) / 10);
 
           // Calibrated voice detection threshold:
-          // Background room noise is -60 to -48 dB.
-          // Real human voice at normal phone distance: -44 dB to -15 dB.
-          if (currentMetering > -44) {
+          // Background room noise is -65 to -52 dB.
+          // Real human voice at normal phone distance: -50 dB to -15 dB.
+          if (currentMetering > -50) {
             speechFrameCountRef.current += 1;
             // Require at least 2 frames (200ms) of sustained audio to confirm user speech
             if (speechFrameCountRef.current >= 2) {
@@ -1206,17 +1221,17 @@ export default function VoiceExpenseModal({
               lastSpokenTimestampRef.current = Date.now();
               setIsSpeaking(true);
             }
-          } else if (Date.now() - lastSpokenTimestampRef.current > 700) {
+          } else if (Date.now() - lastSpokenTimestampRef.current > 900) {
             setIsSpeaking(false);
           }
 
           // Auto silence timeout: only if user has actually spoken, recording is at least 1.8s long,
-          // and user has been silent for 3.2 seconds (prevents cutting off normal conversational pauses)
+          // and user has been silent for 4.2 seconds (prevents cutting off normal conversational pauses)
           if (
             hasSpokenRef.current &&
             duration > 1800 &&
             lastSpokenTimestampRef.current > 0 &&
-            Date.now() - lastSpokenTimestampRef.current > 3200
+            Date.now() - lastSpokenTimestampRef.current > 4200
           ) {
             if (!isStoppingListeningRef.current) {
               isStoppingListeningRef.current = true;
@@ -1329,7 +1344,13 @@ export default function VoiceExpenseModal({
       } else {
         setIsAnalyzing(false);
         setSpeechStatusType('info');
-        setSpeechStatusMessage('No speech detected. Tap the mic to speak.');
+        if (result.error === 'NO_API_KEY') {
+          setSpeechStatusMessage('No Speech API key configured. You can type below or set a free Groq key.');
+        } else if (result.error === 'NETWORK_ERROR') {
+          setSpeechStatusMessage('Network connection error. Please check your internet connection.');
+        } else {
+          setSpeechStatusMessage('No speech detected. Tap the mic to speak.');
+        }
       }
     }
   }, [handleProcessUserTurn, selectedLanguage, contextNames]);
