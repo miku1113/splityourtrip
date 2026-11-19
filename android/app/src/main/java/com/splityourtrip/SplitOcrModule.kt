@@ -27,13 +27,30 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
 
     companion object {
         const val NAME = "SplitOcr"
+        const val PREFS_NAME = "SplitSharedData"
+        const val KEY_IMAGE_URI = "shared_image_uri"
+        const val KEY_SHARED_TEXT = "shared_text"
+
         var sharedImageUri: String? = null
         var sharedText: String? = null
         private var instance: SplitOcrModule? = null
 
-        fun notifySharedDataReceived(uri: String?, text: String?) {
+        fun notifySharedDataReceived(context: android.content.Context?, uri: String?, text: String?) {
             sharedImageUri = uri
             sharedText = text
+
+            if (context != null) {
+                try {
+                    val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putString(KEY_IMAGE_URI, uri)
+                        .putString(KEY_SHARED_TEXT, text)
+                        .apply()
+                } catch (e: Exception) {
+                    android.util.Log.e("SplitOcrModule", "Error saving shared data to SharedPreferences", e)
+                }
+            }
+
             instance?.sendSharedDataEvent()
         }
     }
@@ -45,6 +62,25 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
     init {
         instance = this
         reactContext.addActivityEventListener(this)
+
+        if (sharedImageUri == null && sharedText == null) {
+            try {
+                val prefs = reactContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                sharedImageUri = prefs.getString(KEY_IMAGE_URI, null)
+                sharedText = prefs.getString(KEY_SHARED_TEXT, null)
+            } catch (e: Exception) {
+                android.util.Log.e("SplitOcrModule", "Error restoring shared data", e)
+            }
+        }
+    }
+
+    override fun initialize() {
+        super.initialize()
+        if (sharedImageUri != null || sharedText != null) {
+            reactContext.runOnJSQueueThread {
+                sendSharedDataEvent()
+            }
+        }
     }
 
     override fun getName(): String = NAME
@@ -192,18 +228,33 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    private fun ensureSharedDataLoaded() {
+        if (sharedImageUri == null && sharedText == null) {
+            try {
+                val prefs = reactContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                sharedImageUri = prefs.getString(KEY_IMAGE_URI, null)
+                sharedText = prefs.getString(KEY_SHARED_TEXT, null)
+            } catch (e: Exception) {
+                android.util.Log.e("SplitOcrModule", "Error reading SharedPreferences in ensureSharedDataLoaded", e)
+            }
+        }
+    }
+
     @ReactMethod
     fun getSharedImageUri(promise: Promise) {
+        ensureSharedDataLoaded()
         promise.resolve(sharedImageUri)
     }
 
     @ReactMethod
     fun getSharedText(promise: Promise) {
+        ensureSharedDataLoaded()
         promise.resolve(sharedText)
     }
 
     @ReactMethod
     fun getSharedData(promise: Promise) {
+        ensureSharedDataLoaded()
         val map: WritableMap = Arguments.createMap()
         map.putString("imageUri", sharedImageUri)
         map.putString("sharedText", sharedText)
@@ -214,7 +265,23 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
     fun clearSharedData(promise: Promise) {
         sharedImageUri = null
         sharedText = null
+        try {
+            val prefs = reactContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            prefs.edit().clear().apply()
+        } catch (e: Exception) {
+            android.util.Log.e("SplitOcrModule", "Error clearing SharedPreferences in clearSharedData", e)
+        }
         promise.resolve(null)
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Required for RN built-in NativeEventEmitter
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Required for RN built-in NativeEventEmitter
     }
 
     @ReactMethod
@@ -236,29 +303,62 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
     }
 
     fun handleIntent(intent: Intent) {
-        if (Intent.ACTION_SEND == intent.action) {
-            val type = intent.type
+        val action = intent.action
+        if (Intent.ACTION_SEND == action || Intent.ACTION_SEND_MULTIPLE == action) {
             var newImageUri: String? = null
-            var newText: String? = null
+            var newText: String? = intent.getStringExtra(Intent.EXTRA_TEXT)
 
-            if (type != null && type.startsWith("image/")) {
+            // 1. Try single extra stream
+            if (Intent.ACTION_SEND == action) {
                 val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
                 } else {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                 }
-                if (uri != null) {
-                    newImageUri = uri.toString()
+                newImageUri = uri?.toString()
+            }
+
+            // 2. Try multiple extra stream
+            if (newImageUri == null && Intent.ACTION_SEND_MULTIPLE == action) {
+                val list = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
                 }
-            } else if (type == "text/plain") {
-                newText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                if (!list.isNullOrEmpty()) {
+                    newImageUri = list[0]?.toString()
+                }
+            }
+
+            // 3. Try ClipData
+            if (newImageUri == null && intent.clipData != null && intent.clipData!!.itemCount > 0) {
+                for (i in 0 until intent.clipData!!.itemCount) {
+                    val item = intent.clipData!!.getItemAt(i)
+                    val clipUri = item.uri
+                    if (clipUri != null) {
+                        newImageUri = clipUri.toString()
+                        break
+                    }
+                }
+            }
+
+            // 4. Try intent.data
+            if (newImageUri == null && intent.data != null) {
+                newImageUri = intent.data?.toString()
+            }
+
+            // 5. Try text
+            if (newText == null && intent.clipData != null && intent.clipData!!.itemCount > 0) {
+                val itemText = intent.clipData!!.getItemAt(0).text
+                if (!itemText.isNullOrBlank()) {
+                    newText = itemText.toString()
+                }
             }
 
             if (newImageUri != null || newText != null) {
-                sharedImageUri = newImageUri
-                sharedText = newText
-                sendSharedDataEvent()
+                notifySharedDataReceived(reactContext, newImageUri, newText)
             }
         }
     }
@@ -268,9 +368,13 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
             val map = Arguments.createMap()
             map.putString("imageUri", sharedImageUri)
             map.putString("sharedText", sharedText)
-            reactContext
-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                .emit("onSharedDataReceived", map)
+            try {
+                reactContext
+                    .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                    .emit("onSharedDataReceived", map)
+            } catch (e: Exception) {
+                android.util.Log.e("SplitOcrModule", "Error emitting onSharedDataReceived event", e)
+            }
         }
     }
 }

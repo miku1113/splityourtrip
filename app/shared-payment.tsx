@@ -20,7 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useContactsStore, FriendContact } from '../src/features/contacts/useContactsStore';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
-import { extractPaymentFromScreenshot, getNativeSharedImageUri, getNativeSharedData, clearNativeSharedData } from '../src/services/receiptOcr';
+import { extractPaymentFromScreenshot, getNativeSharedImageUri, getNativeSharedData, clearNativeSharedData, subscribeToSharedData } from '../src/services/receiptOcr';
 import { theme } from '../src/theme/colors';
 import { useTheme } from '../src/theme/useThemeStore';
 import BillScannerModal, { ScannedBillResult } from '../src/components/BillScannerModal';
@@ -105,6 +105,20 @@ export default function SharedPaymentScreen() {
     const sub = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
     return () => sub.remove();
   }, [router]);
+
+  // Subscribe to shared data events if another image is shared while this screen is open
+  useEffect(() => {
+    const unsub = subscribeToSharedData(data => {
+      if (data.imageUri) {
+        setImageUri(data.imageUri);
+        runOcrOnUri(data.imageUri, data.sharedText);
+      }
+      if (data.sharedText) {
+        setSharedText(data.sharedText);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Check for shared image or text from Android SEND Intent or route params
   useEffect(() => {

@@ -31,12 +31,14 @@ class MainActivity : ReactActivity() {
 
   private fun handleIncomingIntent(intent: Intent?) {
     if (intent == null) return
-    if (Intent.ACTION_SEND == intent.action) {
+    val action = intent.action
+    if (Intent.ACTION_SEND == action || Intent.ACTION_SEND_MULTIPLE == action) {
       val type = intent.type
       var uriStr: String? = null
-      var textStr: String? = null
+      var textStr: String? = intent.getStringExtra(Intent.EXTRA_TEXT)
 
-      if (type != null && type.startsWith("image/")) {
+      // 1. Try single extra stream (Uri)
+      if (Intent.ACTION_SEND == action) {
         val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
           intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
         } else {
@@ -44,12 +46,50 @@ class MainActivity : ReactActivity() {
           intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
         }
         uriStr = uri?.toString()
-      } else if (type == "text/plain") {
-        textStr = intent.getStringExtra(Intent.EXTRA_TEXT)
       }
 
+      // 2. Try multiple extra stream (ArrayList<Uri>)
+      if (uriStr == null && Intent.ACTION_SEND_MULTIPLE == action) {
+        val list = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+          @Suppress("DEPRECATION")
+          intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+        if (!list.isNullOrEmpty()) {
+          uriStr = list[0]?.toString()
+        }
+      }
+
+      // 3. Try ClipData (frequently used by Google Photos, Google Pay, Samsung Gallery on Android 10-15)
+      if (uriStr == null && intent.clipData != null && intent.clipData!!.itemCount > 0) {
+        for (i in 0 until intent.clipData!!.itemCount) {
+          val item = intent.clipData!!.getItemAt(i)
+          val clipUri = item.uri
+          if (clipUri != null) {
+            uriStr = clipUri.toString()
+            break
+          }
+        }
+      }
+
+      // 4. Try intent.data (direct URI)
+      if (uriStr == null && intent.data != null) {
+        uriStr = intent.data?.toString()
+      }
+
+      // 5. Try shared text
+      if (textStr == null && intent.clipData != null && intent.clipData!!.itemCount > 0) {
+        val itemText = intent.clipData!!.getItemAt(0).text
+        if (!itemText.isNullOrBlank()) {
+          textStr = itemText.toString()
+        }
+      }
+
+      android.util.Log.d("MainActivity", "handleIncomingIntent: action=$action type=$type uri=$uriStr text=$textStr")
+
       if (uriStr != null || textStr != null) {
-        SplitOcrModule.notifySharedDataReceived(uriStr, textStr)
+        SplitOcrModule.notifySharedDataReceived(this, uriStr, textStr)
       }
     }
   }

@@ -23,7 +23,7 @@ import { useRouter, usePathname } from 'expo-router';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, ThemeMode } from '../src/theme/useThemeStore';
-import { getNativeSharedData } from '../src/services/receiptOcr';
+import { getNativeSharedData, subscribeToSharedData } from '../src/services/receiptOcr';
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -178,6 +178,26 @@ export default function SplashScreen() {
       } catch {}
     }).catch(() => {});
 
+    // Also listen for incoming shared data events (covers warm launches and delayed cold initializations)
+    const unsubShared = subscribeToSharedData(shared => {
+      if (isCancelled) return;
+      if (shared.imageUri || shared.sharedText) {
+        console.log('[SplashScreen] Shared data received via event listener:', shared);
+        navigatingRef.current = true;
+        if (splashTimerRef.current) {
+          clearTimeout(splashTimerRef.current);
+          splashTimerRef.current = null;
+        }
+        router.replace({
+          pathname: '/shared-payment',
+          params: {
+            imageUri: shared.imageUri || undefined,
+            sharedText: shared.sharedText || undefined,
+          },
+        });
+      }
+    });
+
     // Register device push token with Supabase profiles for closed-app notifications
     try {
       const { registerForPushNotificationsAsync } = require('../src/services/pushNotificationService');
@@ -323,6 +343,7 @@ export default function SplashScreen() {
 
     return () => {
       isCancelled = true;
+      unsubShared();
       clearTimeout(foldTimeout);
       clearTimeout(textTimeout);
       if (splashTimerRef.current) {
@@ -469,6 +490,10 @@ export default function SplashScreen() {
         useNativeDriver: true,
       }),
     ]).start(() => {
+      if (navigatingRef.current) {
+        console.log('[SplashScreen] Navigation already redirected, cancelling /(tabs) fallback');
+        return;
+      }
       try {
         const currentUser = useAuthStore.getState().user;
         if (currentUser) {

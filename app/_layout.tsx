@@ -8,7 +8,7 @@ import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, useThemeStore } from '../src/theme/useThemeStore';
 import { useContactsStore } from '../src/features/contacts/useContactsStore';
-import { subscribeToSharedData } from '../src/services/receiptOcr';
+import { subscribeToSharedData, getNativeSharedData } from '../src/services/receiptOcr';
 import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native';
 import * as Linking from 'expo-linking';
 
@@ -146,7 +146,23 @@ export default function RootLayout() {
       if (initialUrl) handleDeepLink({ url: initialUrl });
     }).catch(() => {});
 
-    // Listen for incoming share intents (e.g. screenshot or text shared into Split Your Trip)
+    // Check if app was launched directly via Android/iOS share intent (cold launch)
+    getNativeSharedData().then(shared => {
+      if (shared.imageUri || shared.sharedText) {
+        console.log('[RootLayout] Cold launch shared data detected:', shared);
+        setTimeout(() => {
+          router.push({
+            pathname: '/shared-payment',
+            params: {
+              imageUri: shared.imageUri || undefined,
+              sharedText: shared.sharedText || undefined,
+            },
+          });
+        }, 120);
+      }
+    }).catch(() => {});
+
+    // Listen for incoming share intents while app is running (warm launch)
     const unsubscribeShared = subscribeToSharedData(shared => {
       if (shared.imageUri || shared.sharedText) {
         console.log('[RootLayout] Shared data event received:', shared);
