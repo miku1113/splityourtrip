@@ -33,6 +33,7 @@ import { AppStorage } from '../../../src/lib/storage';
 import { sendAutomatedWhatsAppExpenseAlert } from '../../../src/services/whatsappService';
 import BillScannerModal, { ScannedBillResult } from '../../../src/components/BillScannerModal';
 import { scaleFont } from '../../../src/theme/responsive';
+import { ChangeEntityModal, SelectedEntity } from '../../../src/components/ChangeEntityModal';
 
 const CATEGORIES = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
 
@@ -74,15 +75,27 @@ export default function AddExpenseScreen() {
   const { user, profile } = useAuthStore();
   const currentUserPhone =
     profile?.phone_number || (user as any)?.phone || (user as any)?.user_metadata?.phone_number;
-  const { trips, members: rawMembers, expenses, addExpense, updateExpense, loadTripDetails } = useTripStore();
+  const {
+    trips,
+    members: rawMembers,
+    expenses,
+    addExpense,
+    updateExpense,
+    moveExpenseToTrip,
+    findOrCreateFriendSplitTrip,
+    loadTripDetails,
+  } = useTripStore();
   const { colors, isDark } = useTheme();
 
+  const [targetTripId, setTargetTripId] = useState<string>(id as string);
+  const [showChangeEntityModal, setShowChangeEntityModal] = useState(false);
   const [localTripMembers, setLocalTripMembers] = useState<TripMember[]>([]);
 
   React.useEffect(() => {
-    if (id) {
+    const activeId = targetTripId || id;
+    if (activeId) {
       const { AppStorage } = require('../../../src/lib/storage');
-      AppStorage.getItem(`@splityourtrip_local_details_${id}`).then((raw: string | null) => {
+      AppStorage.getItem(`@splityourtrip_local_details_${activeId}`).then((raw: string | null) => {
         if (raw) {
           try {
             const parsed = JSON.parse(raw);
@@ -92,18 +105,34 @@ export default function AddExpenseScreen() {
           } catch {}
         }
       });
-      loadTripDetails(id);
+      loadTripDetails(activeId);
     }
-  }, [id]);
+  }, [targetTripId, id]);
+
+  const handleSelectNewEntity = async (entity: SelectedEntity) => {
+    setShowChangeEntityModal(false);
+    let newTripId = entity.type === 'trip' ? entity.id : '';
+    if (entity.type === 'friend' && entity.friend) {
+      const friendTrip = await findOrCreateFriendSplitTrip(entity.friend);
+      if (friendTrip) {
+        newTripId = friendTrip.id;
+      }
+    }
+    if (newTripId && newTripId !== targetTripId) {
+      setTargetTripId(newTripId);
+      loadTripDetails(newTripId).catch(() => {});
+    }
+  };
 
   // Only use members belonging to THIS trip so stale members from a previous trip are never selected
   const members = React.useMemo(() => {
-    const fromStore = rawMembers.filter(m => m.trip_id === id);
+    const activeId = targetTripId || id;
+    const fromStore = rawMembers.filter(m => m.trip_id === activeId);
     if (fromStore.length > 0) return fromStore;
     return localTripMembers;
-  }, [rawMembers, localTripMembers, id]);
+  }, [rawMembers, localTripMembers, targetTripId, id]);
 
-  const currentTrip = trips.find(t => t.id === id);
+  const currentTrip = trips.find(t => t.id === targetTripId) || trips.find(t => t.id === id);
   const currencyInfo = getCurrencyInfo(currentTrip?.currency);
 
   const myMember = React.useMemo(() => {
@@ -635,9 +664,18 @@ export default function AddExpenseScreen() {
     setErrorMsg(null);
 
     let success = false;
+    const finalTripId = targetTripId || (id as string);
     if (expenseId) {
-      success = await updateExpense({
-        tripId: id as string,
+      if (targetTripId && targetTripId !== id) {
+        success = await moveExpenseToTrip({
+          fromTripId: id as string,
+          toTripId: targetTripId,
+          expenseId,
+          userId: activeUserId,
+        });
+      }
+      const updateOk = await updateExpense({
+        tripId: finalTripId,
         expenseId,
         amountPaise,
         description: description.trim(),
@@ -657,9 +695,10 @@ export default function AddExpenseScreen() {
         editorName:
           profile?.full_name || profile?.name || user?.email?.split('@')[0] || 'You',
       });
+      success = (targetTripId && targetTripId !== id) ? (success || updateOk) : updateOk;
     } else {
       success = await addExpense({
-        tripId: id as string,
+        tripId: finalTripId,
         paidByMemberId: targetPaidBy,
         amountPaise,
         description: description.trim(),
@@ -682,7 +721,7 @@ export default function AddExpenseScreen() {
     setSaving(false);
     if (success) {
       // Automatically dispatch WhatsApp notification in background without leaving the app
-      const trip = currentTrip || trips.find(t => t.id === id);
+      const trip = currentTrip || trips.find(t => t.id === finalTripId);
       const payerMem = members.find(m => m.id === targetPaidBy);
       const payerName = payerMem?.display_name || 'You';
       const tripTitle = trip?.name || 'Split Your Trip';
@@ -697,7 +736,7 @@ export default function AddExpenseScreen() {
       });
 
       sendAutomatedWhatsAppExpenseAlert({
-        tripId: id as string,
+        tripId: finalTripId,
         tripName: tripTitle,
         expenseDescription: description.trim(),
         amountPaise,
@@ -709,7 +748,7 @@ export default function AddExpenseScreen() {
       }).catch(() => {});
 
       setTimeout(() => {
-        const trip = currentTrip || trips.find(t => t.id === id);
+        const trip = currentTrip || trips.find(t => t.id === finalTripId);
         const isSingleSplit =
           trip?.trip_type === 'friend_split' ||
           trip?.name?.toLowerCase().startsWith('split with ');
@@ -730,7 +769,7 @@ export default function AddExpenseScreen() {
           router.replace({
             pathname: '/chat/[id]',
             params: {
-              id: id as string,
+              id: finalTripId,
               friendName: friendDisplayName,
               friendPhone: otherMember?.phone_number || '',
               friendId: otherMember?.id || trip?.friend_id,
@@ -738,7 +777,7 @@ export default function AddExpenseScreen() {
           });
         } else {
           // Group trip chat / details
-          router.replace(`/trip/${id}`);
+          router.replace(`/trip/${finalTripId}`);
         }
       }, 80);
     } else {
@@ -788,42 +827,40 @@ export default function AddExpenseScreen() {
         </View>
       )}
 
-      {/* Option to change target entity when arriving from shared screenshot */}
-      {fromShare === 'true' && (
-        <View
-          style={[
-            styles.fromShareBannerCard,
-            {
-              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#EEF2FF',
-              borderColor: isDark ? 'rgba(129, 140, 248, 0.35)' : '#C7D2FE',
-            },
-          ]}
-        >
-          <View style={{ flex: 1, marginRight: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-              <Ionicons name="people-outline" size={15} color={colors.primary} />
-              <Text style={[styles.fromShareBannerLabel, { color: colors.textSecondary }]}>
-                Splitting with
-              </Text>
-            </View>
-            <Text
-              style={[styles.fromShareBannerTarget, { color: colors.text }]}
-              numberOfLines={1}
-            >
-              {currentTrip?.name ? currentTrip.name.replace(/^split with\s+/i, '') : (prefillReceiver || 'Selected Entity')}
+      {/* Option to change target entity / person */}
+      <View
+        style={[
+          styles.fromShareBannerCard,
+          {
+            backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#EEF2FF',
+            borderColor: isDark ? 'rgba(129, 140, 248, 0.35)' : '#C7D2FE',
+          },
+        ]}
+      >
+        <View style={{ flex: 1, marginRight: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <Ionicons name="people-outline" size={15} color={colors.primary} />
+            <Text style={[styles.fromShareBannerLabel, { color: colors.textSecondary }]}>
+              Splitting with
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={handleBackAction}
-            style={[styles.fromShareChangeBtn, { backgroundColor: colors.primary }]}
-            activeOpacity={0.8}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          <Text
+            style={[styles.fromShareBannerTarget, { color: colors.text }]}
+            numberOfLines={1}
           >
-            <Ionicons name="swap-horizontal" size={14} color="#FFF" style={{ marginRight: 4 }} />
-            <Text style={styles.fromShareChangeBtnText}>Change Entity</Text>
-          </TouchableOpacity>
+            {currentTrip?.name ? currentTrip.name.replace(/^split with\s+/i, '') : (prefillReceiver || 'Selected Entity')}
+          </Text>
         </View>
-      )}
+        <TouchableOpacity
+          onPress={() => setShowChangeEntityModal(true)}
+          style={[styles.fromShareChangeBtn, { backgroundColor: colors.primary }]}
+          activeOpacity={0.8}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="swap-horizontal" size={14} color="#FFF" style={{ marginRight: 4 }} />
+          <Text style={styles.fromShareChangeBtnText}>Change Person / Trip</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Voice Auto-filled Review Banner */}
       {Boolean(voicePrompt) && (
@@ -1538,6 +1575,14 @@ export default function AddExpenseScreen() {
       visible={showBillScanner}
       onClose={() => setShowBillScanner(false)}
       onScanComplete={handleScanComplete}
+    />
+    <ChangeEntityModal
+      visible={showChangeEntityModal}
+      onClose={() => setShowChangeEntityModal(false)}
+      onSelectEntity={handleSelectNewEntity}
+      title="Change Person or Trip"
+      subtitle="Select who you want to split this expense with"
+      currentEntityId={targetTripId}
     />
     </KeyboardAvoidingView>
   );

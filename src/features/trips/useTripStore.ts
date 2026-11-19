@@ -331,6 +331,12 @@ interface TripStoreState {
     editorName: string;
   }) => Promise<boolean>;
   deleteExpense: (tripId: string, expenseId: string, deleterName?: string) => Promise<boolean>;
+  moveExpenseToTrip: (params: {
+    fromTripId: string;
+    toTripId: string;
+    expenseId: string;
+    userId?: string;
+  }) => Promise<boolean>;
   reportExpense: (data: {
     tripId: string;
     expenseId: string;
@@ -3802,6 +3808,116 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     } catch {}
 
     return !cloudDeleteFailed;
+  },
+
+  moveExpenseToTrip: async (params: {
+    fromTripId: string;
+    toTripId: string;
+    expenseId: string;
+    userId?: string;
+  }): Promise<boolean> => {
+    const { fromTripId, toTripId, expenseId, userId } = params;
+    if (!fromTripId || !toTripId || !expenseId || fromTripId === toTripId) return false;
+
+    try {
+      // 1. Locate existing expense
+      let existingExpense = get().expenses.find(e => e.id === expenseId);
+      if (!existingExpense) {
+        try {
+          const raw = await AppStorage.getItem(`@splityourtrip_local_details_${fromTripId}`);
+          if (raw) {
+            const details = JSON.parse(raw);
+            existingExpense = (details.expenses || []).find((e: any) => e.id === expenseId);
+          }
+        } catch {}
+      }
+      if (!existingExpense) {
+        console.warn('[moveExpenseToTrip] Source expense not found:', expenseId);
+        return false;
+      }
+
+      // 2. Ensure members for toTripId are loaded
+      let toTripMembers = get().members.filter(m => m.trip_id === toTripId);
+      if (toTripMembers.length === 0) {
+        try {
+          const raw = await AppStorage.getItem(`@splityourtrip_local_details_${toTripId}`);
+          if (raw) {
+            const details = JSON.parse(raw);
+            if (Array.isArray(details.members) && details.members.length > 0) {
+              toTripMembers = details.members;
+              set(state => ({
+                members: [...state.members.filter(m => m.trip_id !== toTripId), ...toTripMembers],
+              }));
+            }
+          }
+        } catch {}
+      }
+
+      if (toTripMembers.length === 0 && isSupabaseConfigured && isValidUUID(toTripId)) {
+        try {
+          const { data } = await supabase.from('trip_members').select('*').eq('trip_id', toTripId);
+          if (data && data.length > 0) {
+            toTripMembers = data as TripMember[];
+            set(state => ({
+              members: [...state.members.filter(m => m.trip_id !== toTripId), ...toTripMembers],
+            }));
+          }
+        } catch {}
+      }
+
+      // 3. Resolve user identity and active member in toTripId
+      const { useAuthStore } = require('../auth/useAuthStore');
+      const authState = useAuthStore.getState();
+      const currentUserId = userId || authState.user?.id || authState.profile?.id || 'local_user';
+      const currentUserPhone = authState.profile?.phone_number || authState.user?.phone || (authState.user as any)?.user_metadata?.phone_number;
+
+      const myMemberInToTrip = findMyMember(toTripMembers, currentUserId, currentUserPhone) || toTripMembers[0];
+      const paidByMemberId = myMemberInToTrip?.id || (toTripMembers[0]?.id ?? '');
+      const participantMemberIds = toTripMembers.length > 0
+        ? toTripMembers.map(m => m.id)
+        : [paidByMemberId];
+
+      // 4. Add expense to destination trip
+      const addOk = await get().addExpense({
+        tripId: toTripId,
+        paidByMemberId,
+        amountPaise: existingExpense.amount,
+        description: existingExpense.description,
+        category: existingExpense.category || 'General',
+        paymentMode: existingExpense.payment_mode || 'upi',
+        splitType: 'equal',
+        participantMemberIds,
+        location: existingExpense.location,
+        latitude: existingExpense.latitude,
+        longitude: existingExpense.longitude,
+        attachmentUrl: existingExpense.attachment_url,
+        attachmentName: existingExpense.attachment_name,
+        attachmentType: existingExpense.attachment_type,
+        userId: currentUserId,
+      });
+
+      if (!addOk) {
+        console.warn('[moveExpenseToTrip] Failed to add expense to target trip:', toTripId);
+        return false;
+      }
+
+      // 5. Delete from source trip
+      await get().deleteExpense(fromTripId, expenseId);
+
+      // 6. Refresh summary and trips
+      try {
+        const { useContactsStore } = require('../contacts/useContactsStore');
+        if (currentUserId) {
+          useContactsStore.getState().fetchFriendsSummary(currentUserId).catch(() => {});
+          get().fetchTrips(currentUserId);
+        }
+      } catch {}
+
+      return true;
+    } catch (err) {
+      console.warn('[moveExpenseToTrip] Error moving expense:', err);
+      return false;
+    }
   },
 
   disputeExpense: async data => {

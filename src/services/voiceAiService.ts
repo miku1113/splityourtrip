@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { AppStorage } from '../lib/storage';
 import { TripMember, TripBalanceRow } from '../types/database';
-import { matchVoiceTrip, parseSpokenAmount, parseVoiceExpense } from './voiceExpenseParser';
+import { matchVoiceTrip, parseSpokenAmount, parseVoiceExpense, matchesContactName, normalizePhonetic } from './voiceExpenseParser';
 
 // Supported language codes for speech recognition
 export type VoiceLanguage = 'auto' | 'en' | 'hi' | 'gu';
@@ -500,6 +500,7 @@ export type CopilotActionType =
   | 'DELETE_EXPENSE'
   | 'START_CONTACT_SPLIT'
   | 'UPDATE_EXPENSE'
+  | 'MOVE_EXPENSE'
   | 'NONE';
 
 export type CopilotActionStatus =
@@ -556,6 +557,19 @@ export interface CopilotContactSplitPayload {
   category?: string;
 }
 
+export interface CopilotMoveExpensePayload {
+  fromTripId: string;
+  expenseId: string;
+  targetContactId?: string;
+  targetContactName: string;
+  targetPhoneNumber?: string;
+  targetTripId?: string;
+  targetTripName?: string;
+  amountRupees?: string;
+  amountPaise?: number;
+  description?: string;
+}
+
 export interface CopilotAction {
   type: CopilotActionType;
   status: CopilotActionStatus;
@@ -563,6 +577,7 @@ export interface CopilotAction {
   updateExpense?: CopilotUpdateExpensePayload;
   deleteExpense?: CopilotDeleteExpensePayload;
   contactSplit?: CopilotContactSplitPayload;
+  moveExpense?: CopilotMoveExpensePayload;
   settle?: {
     tripId: string;
     fromMemberId: string;
@@ -671,6 +686,12 @@ export async function runVoiceCopilot(params: {
           action: { ...pendingAction, status: 'confirmed' },
         };
       }
+      if (pendingAction.type === 'MOVE_EXPENSE') {
+        return {
+          reply: `Confirmed! I have moved the expense to split with ${pendingAction.moveExpense?.targetContactName || 'contact'}.`,
+          action: { ...pendingAction, status: 'confirmed' },
+        };
+      }
       if (pendingAction.type === 'SETTLE_UP') {
         return {
           reply: `Confirmed settlement of ₹${pendingAction.settle?.amountRupees} with ${pendingAction.settle?.toMemberName || 'Member'}.`,
@@ -685,9 +706,131 @@ export async function runVoiceCopilot(params: {
     }
   }
 
+  // 0. Fast-path: Update / Change Person Intent for an expense
+  const changePersonMatch = cleanPrompt.match(
+    /\b(?:change|update|move|switch)\s*(?:the\s*)?(?:person|friend|member|trip|contact|who)?\s*(?:to|with|into)\s+([A-Za-z]+)\b/i
+  ) || cleanPrompt.match(
+    /\b(?:split\s*with|with)\s+([A-Za-z]+)\s*(?:instead|not\s+[A-Za-z]+)\b/i
+  ) || cleanPrompt.match(
+    /\b(?:it\s*was\s*(?:with|for))\s+([A-Za-z]+)\b/i
+  ) || cleanPrompt.match(
+    /\b([A-Za-z]+)\s*(?:ke\s*saath|sathe)\s*(?:karna\s*tha|karvano\s*hato|karo)\b/i
+  );
+
+  if (changePersonMatch && changePersonMatch[1]) {
+    const rawTargetName = changePersonMatch[1].trim();
+    if (!/^(?:all|everyone|members|me|us|cash|upi|online|card|bill|expense|here)$/i.test(rawTargetName)) {
+      let matchedContact = contacts.find(c => matchesContactName(rawTargetName, c.name));
+      if (!matchedContact) {
+        const matchedTrip = trips.find(t => matchesContactName(rawTargetName, t.name.replace(/^split with\s+/i, '')));
+        if (matchedTrip) {
+          matchedContact = {
+            id: matchedTrip.id,
+            name: matchedTrip.name.replace(/^split with\s+/i, ''),
+            phoneNumber: '',
+          };
+        }
+      }
+      if (!matchedContact && rawTargetName.length >= 2) {
+        matchedContact = {
+          id: '',
+          name: rawTargetName.charAt(0).toUpperCase() + rawTargetName.slice(1),
+          phoneNumber: '',
+        };
+      }
+
+      if (matchedContact) {
+        const targetExp = pendingAction?.expense || (recentExpenses && recentExpenses.length > 0 ? recentExpenses[0] : null);
+        if (targetExp) {
+          return {
+            reply: `I have updated the expense to split with ${matchedContact.name} instead.`,
+            action: {
+              type: 'MOVE_EXPENSE',
+              status: 'confirmed',
+              moveExpense: {
+                fromTripId: targetExp.tripId,
+                expenseId: (targetExp as any).id || (targetExp as any).expenseId || '',
+                targetContactId: matchedContact.id,
+                targetContactName: matchedContact.name,
+                targetPhoneNumber: matchedContact.phoneNumber,
+                amountRupees: targetExp.amountRupees,
+                amountPaise: targetExp.amountPaise || (Number(targetExp.amountRupees) * 100),
+                description: targetExp.description,
+              },
+            },
+          };
+        }
+      }
+    }
+  }
+
+  // 1-on-1 Contact Split Intent check (e.g. "with Kushi", "split with Khushi", "Khushi ke sath")
+  const withPersonMatch = cleanPrompt.match(
+    /\b(?:split\s*with|contact\s*split|friend\s*split|with|sathe|ke\s*saath|ke\s*sath)\s+([A-Za-z]+)\b/i
+  );
+  let matchedPersonContact: CopilotContactSummary | undefined;
+  if (withPersonMatch && withPersonMatch[1]) {
+    const candidateName = withPersonMatch[1].trim();
+    if (!/^(?:all|everyone|members|me|us|cash|upi|card|online|bill|expense|my|our)$/i.test(candidateName)) {
+      matchedPersonContact = contacts.find(c => matchesContactName(candidateName, c.name));
+      if (!matchedPersonContact) {
+        const friendTrip = trips.find(t => matchesContactName(candidateName, t.name.replace(/^split with\s+/i, '')));
+        if (friendTrip) {
+          matchedPersonContact = {
+            id: friendTrip.id,
+            name: friendTrip.name.replace(/^split with\s+/i, ''),
+            phoneNumber: '',
+          };
+        }
+      }
+      if (!matchedPersonContact && candidateName.length >= 2) {
+        matchedPersonContact = {
+          id: '',
+          name: candidateName.charAt(0).toUpperCase() + candidateName.slice(1),
+          phoneNumber: '',
+        };
+      }
+    }
+  }
+
+  if (matchedPersonContact) {
+    const parsedAmount = parseSpokenAmount(cleanPrompt);
+    const parsed = parseVoiceExpense(
+      cleanPrompt,
+      trips as any,
+      currentUserId,
+      currentUserPhone,
+      tripMembersMap as any
+    );
+    const amtRupees = parsedAmount.amountRupees || parsed.amountRupees || '0';
+    const amtPaise = parsedAmount.amountPaise || parsed.amountPaise || 0;
+    const desc = parsed.description && parsed.description !== 'Voice Expense' ? parsed.description : 'Expense';
+    const cat = parsed.category || 'General';
+
+    return {
+      reply: amtPaise > 0
+        ? `I have added ₹${amtRupees} for ${desc} to split with ${matchedPersonContact.name}.`
+        : `Starting a 1-on-1 split with ${matchedPersonContact.name}.`,
+      action: {
+        type: 'START_CONTACT_SPLIT',
+        status: 'confirmed',
+        contactSplit: {
+          contactId: matchedPersonContact.id,
+          contactName: matchedPersonContact.name,
+          phoneNumber: matchedPersonContact.phoneNumber,
+          amountRupees: amtRupees,
+          amountPaise: amtPaise,
+          description: desc,
+          category: cat,
+        },
+      },
+    };
+  }
+
   // Deterministic path for explicit expense additions. This keeps common add
   // commands consistent when Groq is unavailable or gives device-dependent output.
-  const startsExpenseAdd = /^(?:please\s+)?(?:add|record|log|track|save|enter)\b/i.test(cleanPrompt) ||
+  const startsExpenseAdd = /^(?:please\s+)?(?:add|record|log|track|save|enter|at|had|got|put)\b/i.test(cleanPrompt) ||
+    /\b(?:add|record|log|track|save|enter|at|had|got|put)\s+(?:an?\s+)?expense\b/i.test(cleanPrompt) ||
     /\b(?:add|record|log|track|save|enter)\s+(?:kar\s+do|karo|do)\b/i.test(cleanPrompt) ||
     /(?:जोड़\s*दो|दर्ज\s*करो|लिख\s*दो|ઉમેરો|નોંધો)\s*$/u.test(cleanPrompt);
   const reportsPaidExpense = /^(?:(?:i|we)\s+)?(?:have\s+)?(?:spent|paid|bought|used)\b/i.test(cleanPrompt) ||
@@ -1170,12 +1313,19 @@ Output JSON only:
           // Check if a contact from contactsSummary matches
           let matchedContact: CopilotContactSummary | undefined = undefined;
           for (const c of contacts) {
-            if (c.name) {
-              const firstName = c.name.toLowerCase().split(/\s+/)[0];
-              if (firstName && firstName.length > 2 && lowerPrompt.includes(firstName)) {
-                matchedContact = c;
-                break;
-              }
+            if (c.name && matchesContactName(lowerPrompt, c.name)) {
+              matchedContact = c;
+              break;
+            }
+          }
+          if (!matchedContact) {
+            const friendTrip = trips.find(t => matchesContactName(lowerPrompt, t.name.replace(/^split with\s+/i, '')));
+            if (friendTrip) {
+              matchedContact = {
+                id: friendTrip.id,
+                name: friendTrip.name.replace(/^split with\s+/i, ''),
+                phoneNumber: '',
+              };
             }
           }
 
@@ -1648,15 +1798,22 @@ export function fallbackLocalVoiceParser(params: {
   }
 
   // 5. 1-on-1 Contact Split Intent
-  if (/\b(split\s*with|sathe|ke\s*saath|ke\s*sath)\b/i.test(lower)) {
+  if (/\b(split\s*with|contact\s*split|friend\s*split|with|sathe|ke\s*saath|ke\s*sath)\b/i.test(lower)) {
     let matchedContact: CopilotContactSummary | undefined = undefined;
     for (const c of contacts) {
-      if (c.name) {
-        const firstName = c.name.toLowerCase().split(/\s+/)[0];
-        if (firstName && firstName.length > 2 && lower.includes(firstName)) {
-          matchedContact = c;
-          break;
-        }
+      if (c.name && matchesContactName(lower, c.name)) {
+        matchedContact = c;
+        break;
+      }
+    }
+    if (!matchedContact) {
+      const friendTrip = trips.find(t => matchesContactName(lower, t.name.replace(/^split with\s+/i, '')));
+      if (friendTrip) {
+        matchedContact = {
+          id: friendTrip.id,
+          name: friendTrip.name.replace(/^split with\s+/i, ''),
+          phoneNumber: '',
+        };
       }
     }
 

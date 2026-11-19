@@ -35,8 +35,10 @@ import {
   CopilotAction,
   CopilotRecentExpense,
   CopilotContactSummary,
+  CopilotMoveExpensePayload,
   SMART_VOICE_SUGGESTIONS,
 } from '../services/voiceAiService';
+import { ChangeEntityModal, SelectedEntity } from './ChangeEntityModal';
 import {
   speakAssistantReply,
   stopSpeaking,
@@ -106,6 +108,7 @@ export default function VoiceExpenseModal({
     addExpense,
     updateExpense,
     deleteExpense,
+    moveExpenseToTrip,
     balances,
     findOrCreateFriendSplitTrip,
   } = useTripStore();
@@ -127,6 +130,15 @@ export default function VoiceExpenseModal({
   // TTS audio speech readout state
   const [isTtsActive, setIsTtsActive] = useState<boolean>(isTtsEnabled());
   const [pendingAction, setPendingAction] = useState<CopilotAction | null>(null);
+
+  // Change Entity / Person Modal State
+  const [showChangeEntityModal, setShowChangeEntityModal] = useState(false);
+  const [selectedExpenseToChange, setSelectedExpenseToChange] = useState<{
+    fromTripId: string;
+    expenseId: string;
+    amountRupees?: string;
+    description?: string;
+  } | null>(null);
 
   // Automatic Listening & Status states
   const [isListening, setIsListening] = useState(false);
@@ -553,7 +565,8 @@ export default function VoiceExpenseModal({
       isSubmittingExpenseRef.current = true;
       setIsExecutingAction(true);
 
-      const expenseId = generateUUID();
+      const expenseId = (targetData as any).expenseId || generateUUID();
+      (targetData as any).expenseId = expenseId;
 
       try {
         const success = await addExpense({
@@ -925,6 +938,117 @@ export default function VoiceExpenseModal({
     }
   };
 
+  // Move expense to another friend or trip
+  const executeMoveExpense = useCallback(
+    async (movePayload: CopilotMoveExpensePayload): Promise<boolean> => {
+      setIsExecutingAction(true);
+      try {
+        let destTripId = movePayload.targetTripId;
+        let destTripName = movePayload.targetTripName;
+
+        if (!destTripId && movePayload.targetContactName) {
+          const friendTrip = await findOrCreateFriendSplitTrip({
+            id: movePayload.targetContactId || generateUUID(),
+            name: movePayload.targetContactName,
+            phoneNumber: movePayload.targetPhoneNumber || null,
+          });
+          if (friendTrip) {
+            destTripId = friendTrip.id;
+            destTripName = friendTrip.name;
+          }
+        }
+
+        if (!destTripId) {
+          Alert.alert('Error', `Could not find destination trip for ${movePayload.targetContactName || 'contact'}.`);
+          return false;
+        }
+
+        let targetExpId = movePayload.expenseId;
+        if (!targetExpId) {
+          const recent = recentExpenses.find(e => e.tripId === movePayload.fromTripId);
+          if (recent) targetExpId = recent.id;
+        }
+
+        if (!targetExpId) {
+          const tripExpenses = useTripStore.getState().expenses.filter(e => e.trip_id === movePayload.fromTripId);
+          if (tripExpenses.length > 0) targetExpId = tripExpenses[0].id;
+        }
+
+        if (!targetExpId) {
+          console.warn('[VoiceModal] No expenseId found to move');
+          return false;
+        }
+
+        const success = await moveExpenseToTrip({
+          fromTripId: movePayload.fromTripId,
+          toTripId: destTripId,
+          expenseId: targetExpId,
+          userId: user?.id,
+        });
+
+        if (success) {
+          const cleanDestName = (destTripName || 'new split').replace(/^split with\s+/i, '');
+          useNotificationStore.getState().showToast({
+            id: `toast_moved_${targetExpId}`,
+            type: 'expense',
+            title: 'Expense Moved!',
+            message: `Expense moved to split with ${cleanDestName}.`,
+            timestamp: new Date().toISOString(),
+            read: true,
+            tripId: destTripId,
+          });
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.warn('[VoiceModal] Move expense error:', err);
+        return false;
+      } finally {
+        setIsExecutingAction(false);
+      }
+    },
+    [findOrCreateFriendSplitTrip, moveExpenseToTrip, recentExpenses, user?.id]
+  );
+
+  const handleSelectNewEntityForExpense = async (entity: SelectedEntity) => {
+    if (!selectedExpenseToChange) return;
+    const { fromTripId, expenseId } = selectedExpenseToChange;
+
+    let targetTripId = entity.type === 'trip' ? entity.id : '';
+    let targetName = entity.name;
+
+    if (entity.type === 'friend' && entity.friend) {
+      const friendTrip = await findOrCreateFriendSplitTrip(entity.friend);
+      if (friendTrip) {
+        targetTripId = friendTrip.id;
+        targetName = friendTrip.name.replace(/^split with\s+/i, '');
+      }
+    }
+
+    if (targetTripId && expenseId) {
+      const ok = await moveExpenseToTrip({
+        fromTripId,
+        toTripId: targetTripId,
+        expenseId,
+        userId: user?.id,
+      });
+      if (ok) {
+        const movedMsg: CopilotMessage = {
+          id: generateUUID(),
+          role: 'assistant',
+          content: `I've moved the expense to split with ${targetName}!`,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, movedMsg]);
+        speakAssistantReply(`Moved to split with ${targetName}!`);
+      } else {
+        Alert.alert('Error', 'Could not move expense. Please try again.');
+      }
+    }
+    setSelectedExpenseToChange(null);
+    setShowChangeEntityModal(false);
+  };
+
   // Process a user message turn through the conversational Copilot
   const handleProcessUserTurn = useCallback(
     async (inputText: string) => {
@@ -1040,6 +1164,9 @@ export default function VoiceExpenseModal({
             } else if (result.action.type === 'START_CONTACT_SPLIT' && result.action.contactSplit) {
               setPendingAction(null);
               await executeStartContactSplit(result.action.contactSplit);
+            } else if (result.action.type === 'MOVE_EXPENSE' && result.action.moveExpense) {
+              setPendingAction(null);
+              await executeMoveExpense(result.action.moveExpense);
             } else if (result.action.type === 'SETTLE_UP' && result.action.settle) {
               setPendingAction(null);
               const s = result.action.settle;
@@ -1377,8 +1504,7 @@ export default function VoiceExpenseModal({
         paddingHorizontal: moderateScale(16),
       }}
     >
-      {() => (
-        <View style={{ flex: 1, paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom, 12) : 0 }}>
+      <View style={{ flex: 1, paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom, 12) : 0 }}>
           {/* Top Bar Header: AI Copilot Title + Voice Readout Toggle + Close Button */}
           <View style={styles.topBar}>
             <View style={styles.titleRow}>
@@ -1655,9 +1781,91 @@ export default function VoiceExpenseModal({
                             </TouchableOpacity>
                           </View>
                         ) : (
-                          <View style={styles.confirmedBadgeRow}>
-                            <Ionicons name="checkmark-circle" size={15} color="#10B981" />
-                            <Text style={styles.confirmedBadgeText}>Saved to Trip</Text>
+                          <View style={styles.confirmedCardFooter}>
+                            <View style={styles.confirmedBadgeRow}>
+                              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                              <Text style={styles.confirmedBadgeText}>
+                                Saved to {item.action.expense.tripName || 'Trip'}
+                              </Text>
+                            </View>
+
+                            <View style={styles.confirmedActionsRow}>
+                              <TouchableOpacity
+                                style={[
+                                  styles.confirmedActionBtn,
+                                  {
+                                    borderColor: colors.primary,
+                                    backgroundColor: colors.primaryLight,
+                                  },
+                                ]}
+                                onPress={() => {
+                                  setSelectedExpenseToChange({
+                                    fromTripId: item.action?.expense?.tripId || '',
+                                    expenseId:
+                                      (item.action?.expense as any)?.expenseId ||
+                                      recentExpenses.find(e => e.tripId === item.action?.expense?.tripId)?.id ||
+                                      '',
+                                    amountRupees: item.action?.expense?.amountRupees,
+                                    description: item.action?.expense?.description,
+                                  });
+                                  setShowChangeEntityModal(true);
+                                }}
+                                activeOpacity={0.8}
+                                disabled={isExecutingAction}
+                              >
+                                <Ionicons name="swap-horizontal" size={13} color={colors.primary} />
+                                <Text style={[styles.confirmedActionBtnText, { color: colors.primary }]}>
+                                  Change Person
+                                </Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                style={[styles.confirmedActionBtn, { borderColor: colors.border }]}
+                                onPress={() => {
+                                  const tId = item.action?.expense?.tripId;
+                                  const eId =
+                                    (item.action?.expense as any)?.expenseId ||
+                                    recentExpenses.find(e => e.tripId === tId)?.id;
+                                  if (tId && eId) {
+                                    handleModalClose();
+                                    router.push(`/trip/${tId}/expense/${eId}` as any);
+                                  }
+                                }}
+                                activeOpacity={0.8}
+                                disabled={isExecutingAction}
+                              >
+                                <Ionicons name="pencil-outline" size={13} color={colors.textSecondary} />
+                                <Text style={[styles.confirmedActionBtnText, { color: colors.textSecondary }]}>
+                                  Edit
+                                </Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                style={[
+                                  styles.confirmedActionBtn,
+                                  {
+                                    borderColor: isDark ? '#7F1D1D' : '#FEE2E2',
+                                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
+                                  },
+                                ]}
+                                onPress={() => {
+                                  const tId = item.action?.expense?.tripId;
+                                  const eId =
+                                    (item.action?.expense as any)?.expenseId ||
+                                    recentExpenses.find(e => e.tripId === tId)?.id;
+                                  if (tId && eId) {
+                                    handleUndoExpense(tId, eId);
+                                  }
+                                }}
+                                activeOpacity={0.8}
+                                disabled={isExecutingAction}
+                              >
+                                <Ionicons name="arrow-undo-outline" size={13} color={colors.danger} />
+                                <Text style={[styles.confirmedActionBtnText, { color: colors.danger }]}>
+                                  Undo
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
                         )}
                       </View>
@@ -2259,7 +2467,17 @@ export default function VoiceExpenseModal({
             )}
           </View>
         </View>
-      )}
+
+      <ChangeEntityModal
+        visible={showChangeEntityModal}
+        onClose={() => {
+          setShowChangeEntityModal(false);
+          setSelectedExpenseToChange(null);
+        }}
+        onSelectEntity={handleSelectNewEntityForExpense}
+        title="Change Person or Trip"
+        subtitle="Select who you want to split this expense with"
+      />
     </DraggableBottomSheet>
   );
 }
@@ -2583,6 +2801,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 6,
+  },
+  confirmedCardFooter: {
+    marginTop: 8,
+    gap: 8,
+  },
+  confirmedActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  confirmedActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  confirmedActionBtnText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
   },
   confirmedBadgeRow: {
     flexDirection: 'row',

@@ -35,6 +35,78 @@ export function normalizeDigits(str: string): string {
   return str.replace(/[०-९૦-૯]/g, d => DEVANAGARI_DIGITS[d] || d);
 }
 
+export function normalizePhonetic(name: string): string {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '')
+    // Normalize aspirated consonants common in Indian speech-to-text
+    .replace(/kh/g, 'k')
+    .replace(/gh/g, 'g')
+    .replace(/ch/g, 'c')
+    .replace(/jh/g, 'j')
+    .replace(/th/g, 't')
+    .replace(/dh/g, 'd')
+    .replace(/ph/g, 'f')
+    .replace(/bh/g, 'b')
+    .replace(/sh/g, 's')
+    // Normalize vowels
+    .replace(/ee/g, 'i')
+    .replace(/oo/g, 'u')
+    .replace(/aa/g, 'a')
+    .replace(/v/g, 'w');
+}
+
+export function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+export function matchesContactName(spokenName: string, contactName: string): boolean {
+  if (!spokenName || !contactName) return false;
+  const sClean = spokenName.toLowerCase().trim();
+  const cClean = contactName.toLowerCase().trim();
+  const cFirst = cClean.split(/\s+/)[0];
+
+  if (sClean === cClean || sClean === cFirst) return true;
+  if (sClean.includes(cClean) || cClean.includes(sClean)) return true;
+  if (cFirst.length >= 2 && (sClean.includes(cFirst) || cFirst.includes(sClean))) return true;
+
+  const sNorm = normalizePhonetic(spokenName);
+  const cNorm = normalizePhonetic(contactName);
+  const cFirstNorm = normalizePhonetic(cFirst);
+
+  if (sNorm === cNorm || sNorm === cFirstNorm) return true;
+  if (sNorm.includes(cNorm) || cNorm.includes(sNorm)) return true;
+  if (cFirstNorm.length >= 2 && (sNorm.includes(cFirstNorm) || cFirstNorm.includes(sNorm))) return true;
+
+  if (cFirstNorm.length >= 3 && sNorm.length >= 3) {
+    const dist = levenshteinDistance(sNorm, cFirstNorm);
+    if (dist <= 1) return true;
+  }
+
+  return false;
+}
+
 const SPECIFIC_CATEGORIES: Record<string, string[]> = {
   Food: [
     'food', 'dinner', 'lunch', 'breakfast', 'snack', 'snacks', 'coffee', 'tea', 'cafe',
@@ -84,8 +156,10 @@ const SPECIFIC_CATEGORIES: Record<string, string[]> = {
   ],
   Shopping: [
     'shopping', 'gift', 'gifts', 'souvenir', 'souvenirs', 'clothes', 'dress', 'tshirt',
-    'footwear', 'sunglasses', 'bazaar', 'market', 'handicrafts',
-    'कपड़े', 'खरीदारी', 'શોપિંગ', 'કપડાં',
+    't-shirt', 't shirt', 'shirt', 'shirts', 'clothing', 'cloth', 'top', 'pant', 'pants',
+    'jeans', 'trousers', 'shoes', 'footwear', 'sunglasses', 'bazaar', 'market', 'handicrafts',
+    'jacket', 'hoodie', 'kurta', 'saree',
+    'कपड़े', 'खरीदारी', 'શોપિંગ', 'કપડાં', 'ટીશર્ટ', 'શર્ટ',
   ],
   Medical: [
     'medical', 'medicine', 'medicines', 'pharmacy', 'chemist', 'doctor', 'clinic',
@@ -95,7 +169,7 @@ const SPECIFIC_CATEGORIES: Record<string, string[]> = {
 };
 
 const GENERAL_KEYWORDS = [
-  'shopping', 'gift', 'souvenir', 'clothes', 'tip', 'medical', 'medicine', 'misc', 'general',
+  'tip', 'misc', 'general',
   'bill', 'expense', 'kharch', 'kharcha', 'hisab', 'payment', 'charge', 'chukaavani',
   'खर्च', 'खर्चा', 'बिल', 'પેમેન્ટ', 'ખર્ચ', 'બિલ',
 ];
@@ -465,20 +539,41 @@ export function parseVoiceExpense(
   let category = 'General';
   let description = '';
 
+  // Extract explicit item description phrases:
+  // e.g. "for a t-shirt with Kushi", "for coffee in Goa", "of 990 for lunch"
+  const forMatch = clean.match(/\b(?:for|ke\s*liye|maate|mate)\s+(?:an?\s+|the\s+)?([a-z0-9\s'-]+?)(?:\s+(?:with|in|at|on|using|by|ke\s*saath|ke\s*sath|sathe|from|via)|\s*$)/i);
+  if (forMatch && forMatch[1]) {
+    const candidate = forMatch[1].trim();
+    if (!/^(?:expense|bill|kharch|kharcha|hisab|payment)$/i.test(candidate) && candidate.length >= 2) {
+      description = candidate.charAt(0).toUpperCase() + candidate.slice(1);
+    }
+  }
+
+  if (!description) {
+    const ofForMatch = clean.match(/(?:of|worth)\s+(?:₹|rs\.?|inr)?\s*\d+\s+for\s+(?:an?\s+|the\s+)?([a-z0-9\s'-]+?)(?:\s+(?:with|in|at|on|by)|\s*$)/i);
+    if (ofForMatch && ofForMatch[1]) {
+      const candidate = ofForMatch[1].trim();
+      if (!/^(?:expense|bill|kharch|kharcha|hisab)$/i.test(candidate) && candidate.length >= 2) {
+        description = candidate.charAt(0).toUpperCase() + candidate.slice(1);
+      }
+    }
+  }
+
   const matchesKeyword = (text: string, textLower: string, kw: string): boolean => {
     const kwLower = kw.toLowerCase();
-    if (/^[a-z0-9\s]+$/i.test(kw)) {
+    if (/^[a-z0-9\s-]+$/i.test(kw)) {
       const escaped = kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+      const regex = new RegExp(`(?:^|[^a-z0-9-])${escaped}(?:[^a-z0-9-]|$)`, 'i');
       return regex.test(textLower);
     }
     return text.includes(kw) || textLower.includes(kwLower);
   };
 
   let matchedSpecificCategory = false;
+  const descLower = description.toLowerCase();
   for (const [catName, keywords] of Object.entries(SPECIFIC_CATEGORIES)) {
     for (const kw of keywords) {
-      if (matchesKeyword(clean, cleanLower, kw)) {
+      if (matchesKeyword(clean, cleanLower, kw) || (descLower && matchesKeyword(description, descLower, kw))) {
         category = catName;
         matchedSpecificCategory = true;
         if (!description) {

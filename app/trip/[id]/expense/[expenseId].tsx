@@ -33,6 +33,8 @@ import { useTheme } from '../../../../src/theme/useThemeStore';
 import { AppStorage } from '../../../../src/lib/storage';
 import { formatCurrencyAmount, getCurrencyInfo } from '../../../../src/services/currency';
 import { PaymentMode, SplitType, TripMember } from '../../../../src/types/database';
+import { ChangeEntityModal, SelectedEntity } from '../../../../src/components/ChangeEntityModal';
+import { useNotificationStore } from '../../../../src/features/notifications/useNotificationStore';
 
 const PAGE_SIZE = 10;
 const CATEGORIES = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
@@ -61,6 +63,8 @@ export default function BillDetailScreen() {
     loadTripDetails,
     updateExpense,
     deleteExpense,
+    moveExpenseToTrip,
+    findOrCreateFriendSplitTrip,
     disputeExpense,
     resolveExpenseDispute,
   } = useTripStore();
@@ -68,6 +72,7 @@ export default function BillDetailScreen() {
   const [localMembers, setLocalMembers] = useState<TripMember[]>([]);
   const [localExpenses, setLocalExpenses] = useState<any[]>([]);
   const [loadingBill, setLoadingBill] = useState(true);
+  const [showChangeEntityModal, setShowChangeEntityModal] = useState(false);
 
   // Dispute & Pause state
   const [disputeModalOpen, setDisputeModalOpen] = useState(false);
@@ -483,6 +488,70 @@ export default function BillDetailScreen() {
     );
   };
 
+  const handleMoveExpenseToNewEntity = async (entity: SelectedEntity) => {
+    setShowChangeEntityModal(false);
+    if (!expense || !tripId) return;
+
+    let targetTripId = entity.type === 'trip' ? entity.id : '';
+    let targetName = entity.name;
+
+    if (entity.type === 'friend' && entity.friend) {
+      const friendTrip = await findOrCreateFriendSplitTrip(entity.friend);
+      if (friendTrip) {
+        targetTripId = friendTrip.id;
+        targetName = friendTrip.name.replace(/^split with\s+/i, '');
+      }
+    }
+
+    if (!targetTripId || targetTripId === tripId) {
+      if (targetTripId === tripId) {
+        Alert.alert('Notice', `This bill is already in ${targetName}.`);
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Move Bill / Change Person',
+      `Move this ${formatCurrencyAmount(expense.amount, currencyCode)} bill to split with ${targetName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Move Bill',
+          style: 'default',
+          onPress: async () => {
+            setSaving(true);
+            const ok = await moveExpenseToTrip({
+              fromTripId: tripId as string,
+              toTripId: targetTripId,
+              expenseId: expense.id,
+              userId: user?.id,
+            });
+            setSaving(false);
+            if (ok) {
+              try {
+                useNotificationStore.getState().showToast({
+                  id: `toast_move_${expense.id}`,
+                  type: 'expense',
+                  title: 'Bill Moved!',
+                  message: `Moved to split with ${targetName}.`,
+                  timestamp: new Date().toISOString(),
+                  read: true,
+                  tripId: targetTripId,
+                });
+              } catch {}
+              router.replace({
+                pathname: '/trip/[id]',
+                params: { id: targetTripId },
+              });
+            } else {
+              Alert.alert('Error', 'Could not move bill to the selected entity. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   if (loadingBill && !expense) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -885,6 +954,42 @@ export default function BillDetailScreen() {
                 </Text>
               </View>
             </View>
+
+            {/* Entity Split Banner with Change Person button */}
+            <View
+              style={[
+                styles.entityBannerCard,
+                {
+                  backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#EEF2FF',
+                  borderColor: isDark ? 'rgba(129, 140, 248, 0.35)' : '#C7D2FE',
+                },
+              ]}
+            >
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <Ionicons name="people-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.entityBannerLabel, { color: colors.textSecondary }]}>
+                    Splitting with
+                  </Text>
+                </View>
+                <Text style={[styles.entityBannerTarget, { color: colors.text }]} numberOfLines={1}>
+                  {currentTrip?.name
+                    ? currentTrip.name.replace(/^split with\s+/i, '')
+                    : 'Current Trip'}
+                </Text>
+              </View>
+              {canEdit && (
+                <TouchableOpacity
+                  onPress={() => setShowChangeEntityModal(true)}
+                  style={[styles.entityChangeBtn, { backgroundColor: colors.primary }]}
+                  activeOpacity={0.8}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="swap-horizontal" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                  <Text style={styles.entityChangeBtnText}>Change Person / Move</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           {/* Expense Location Card if attached */}
@@ -1223,6 +1328,42 @@ export default function BillDetailScreen() {
             { backgroundColor: colors.card, borderColor: colors.border },
           ]}
         >
+          {/* Entity Split Banner with Change Person button in Edit Mode */}
+          <View
+            style={[
+              styles.entityBannerCard,
+              {
+                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#EEF2FF',
+                borderColor: isDark ? 'rgba(129, 140, 248, 0.35)' : '#C7D2FE',
+                marginTop: 0,
+                marginBottom: 14,
+              },
+            ]}
+          >
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                <Ionicons name="people-outline" size={15} color={colors.primary} />
+                <Text style={[styles.entityBannerLabel, { color: colors.textSecondary }]}>
+                  Splitting with
+                </Text>
+              </View>
+              <Text style={[styles.entityBannerTarget, { color: colors.text }]} numberOfLines={1}>
+                {currentTrip?.name
+                  ? currentTrip.name.replace(/^split with\s+/i, '')
+                  : 'Current Trip'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowChangeEntityModal(true)}
+              style={[styles.entityChangeBtn, { backgroundColor: colors.primary }]}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="swap-horizontal" size={14} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.entityChangeBtnText}>Change Person / Move</Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
             Amount ({currencyInfo.symbol})
           </Text>
@@ -1843,6 +1984,15 @@ export default function BillDetailScreen() {
           </KeyboardAvoidingView>
         </Modal>
       )}
+
+      <ChangeEntityModal
+        visible={showChangeEntityModal}
+        onClose={() => setShowChangeEntityModal(false)}
+        onSelectEntity={handleMoveExpenseToNewEntity}
+        title="Move Bill to Another Person or Trip"
+        subtitle="Select who you want to move this bill to"
+        currentEntityId={tripId}
+      />
     </View>
   );
 }
@@ -1904,6 +2054,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 10,
+  },
+  entityBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  entityBannerLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  entityBannerTarget: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 1,
+  },
+  entityChangeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 9,
+  },
+  entityChangeBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   deleteExpenseBtnContent: {
     flexDirection: 'row',
