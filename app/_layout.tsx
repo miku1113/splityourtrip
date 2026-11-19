@@ -8,7 +8,7 @@ import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, useThemeStore } from '../src/theme/useThemeStore';
 import { useContactsStore } from '../src/features/contacts/useContactsStore';
-import { subscribeToSharedData, getNativeSharedData } from '../src/services/receiptOcr';
+import { subscribeToSharedData } from '../src/services/receiptOcr';
 import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native';
 import * as Linking from 'expo-linking';
 
@@ -144,22 +144,6 @@ export default function RootLayout() {
     const urlSub = Linking.addEventListener('url', handleDeepLink);
     Linking.getInitialURL().then(initialUrl => {
       if (initialUrl) handleDeepLink({ url: initialUrl });
-    }).catch(() => {});
-
-    // Check if app was launched directly via Android/iOS share intent (cold launch)
-    getNativeSharedData().then(shared => {
-      if (shared.imageUri || shared.sharedText) {
-        console.log('[RootLayout] Cold launch shared data detected:', shared);
-        setTimeout(() => {
-          router.push({
-            pathname: '/shared-payment',
-            params: {
-              imageUri: shared.imageUri || undefined,
-              sharedText: shared.sharedText || undefined,
-            },
-          });
-        }, 120);
-      }
     }).catch(() => {});
 
     // Listen for incoming share intents while app is running (warm launch)

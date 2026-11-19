@@ -39,6 +39,7 @@ export default function SplashScreen() {
   const [isConfirming, setIsConfirming] = useState(false);
 
   const navigatingRef = useRef(false);
+  const hasRedirectedRef = useRef(false);
   const splashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
@@ -63,6 +64,7 @@ export default function SplashScreen() {
   // If already navigated to another route (e.g. /shared-payment from intent), cancel splash redirect immediately
   useEffect(() => {
     if (pathname && pathname !== '/') {
+      hasRedirectedRef.current = true;
       navigatingRef.current = true;
       if (splashTimerRef.current) {
         clearTimeout(splashTimerRef.current);
@@ -161,6 +163,7 @@ export default function SplashScreen() {
       try {
         if (shared.imageUri || shared.sharedText) {
           console.log('[SplashScreen] Native shared launch detected on mount:', shared);
+          hasRedirectedRef.current = true;
           navigatingRef.current = true;
           if (splashTimerRef.current) {
             clearTimeout(splashTimerRef.current);
@@ -183,6 +186,7 @@ export default function SplashScreen() {
       if (isCancelled) return;
       if (shared.imageUri || shared.sharedText) {
         console.log('[SplashScreen] Shared data received via event listener:', shared);
+        hasRedirectedRef.current = true;
         navigatingRef.current = true;
         if (splashTimerRef.current) {
           clearTimeout(splashTimerRef.current);
@@ -212,6 +216,7 @@ export default function SplashScreen() {
       if (isCancelled) return;
       if (isExternalSource(initialUrl)) {
         console.log('[SplashScreen] External launch detected on mount:', initialUrl);
+        hasRedirectedRef.current = true;
         navigatingRef.current = true;
         if (splashTimerRef.current) {
           clearTimeout(splashTimerRef.current);
@@ -354,12 +359,12 @@ export default function SplashScreen() {
   }, []);
 
   const proceedNext = async () => {
-    if (navigatingRef.current) return;
+    if (hasRedirectedRef.current) return;
 
     // If current route is not splash ('/'), user has already been routed elsewhere - DO NOT replace!
     if (pathnameRef.current && pathnameRef.current !== '/') {
       console.log('[SplashScreen] Route is already outside splash:', pathnameRef.current);
-      navigatingRef.current = true;
+      hasRedirectedRef.current = true;
       return;
     }
 
@@ -368,6 +373,7 @@ export default function SplashScreen() {
       const shared = await getNativeSharedData();
       if (shared.imageUri || shared.sharedText) {
         console.log('[SplashScreen] Native shared data detected in proceedNext, routing to /shared-payment:', shared);
+        hasRedirectedRef.current = true;
         navigatingRef.current = true;
         if (splashTimerRef.current) {
           clearTimeout(splashTimerRef.current);
@@ -386,6 +392,7 @@ export default function SplashScreen() {
       const initialUrl = await Linking.getInitialURL();
       if (isExternalSource(initialUrl)) {
         console.log('[SplashScreen] External launch in proceedNext, routing to target:', initialUrl);
+        hasRedirectedRef.current = true;
         navigatingRef.current = true;
         if (splashTimerRef.current) {
           clearTimeout(splashTimerRef.current);
@@ -490,8 +497,8 @@ export default function SplashScreen() {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      if (navigatingRef.current) {
-        console.log('[SplashScreen] Navigation already redirected, cancelling /(tabs) fallback');
+      if (hasRedirectedRef.current) {
+        console.log('[SplashScreen] Navigation already redirected externally, cancelling /(tabs) fallback');
         return;
       }
       try {
@@ -508,7 +515,7 @@ export default function SplashScreen() {
   };
 
   useEffect(() => {
-    if (!isHydrated || authLoading || navigatingRef.current) return;
+    if (!isHydrated || authLoading || hasRedirectedRef.current) return;
 
     // Only show prompt for first-time unauthenticated users who have never selected a theme
     if (!hasChosenTheme && !user) {
@@ -541,10 +548,10 @@ export default function SplashScreen() {
   // Failsafe timer: ONLY for returning / authenticated users if auth takes longer than 4 seconds
   useEffect(() => {
     // If first-time user (theme prompt shown or theme unselected), NEVER auto-navigate! Wait for user input!
-    if (showThemePrompt || navigatingRef.current || (!hasChosenTheme && !user)) return;
+    if (showThemePrompt || hasRedirectedRef.current || (!hasChosenTheme && !user)) return;
 
     const failsafeTimer = setTimeout(() => {
-      if (!navigatingRef.current && !showThemePrompt) {
+      if (!hasRedirectedRef.current && !showThemePrompt) {
         console.log('[SplashScreen] Failsafe timer triggered after 4s');
         proceedNext();
       }

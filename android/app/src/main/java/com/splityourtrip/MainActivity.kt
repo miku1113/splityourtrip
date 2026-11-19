@@ -91,6 +91,8 @@ class MainActivity : ReactActivity() {
       if (uriStr != null || textStr != null) {
         SplitOcrModule.notifySharedDataReceived(this, uriStr, textStr)
       }
+    } else {
+      SplitOcrModule.clearSharedDataSync(this)
     }
   }
 

@@ -53,6 +53,19 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
 
             instance?.sendSharedDataEvent()
         }
+
+        fun clearSharedDataSync(context: android.content.Context?) {
+            sharedImageUri = null
+            sharedText = null
+            if (context != null) {
+                try {
+                    val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                    prefs.edit().clear().apply()
+                } catch (e: Exception) {
+                    android.util.Log.e("SplitOcrModule", "Error clearing shared data in clearSharedDataSync", e)
+                }
+            }
+        }
     }
 
     private val recognizer by lazy {
