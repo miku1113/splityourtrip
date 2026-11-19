@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
-import { supabase, supabaseAdmin, isSupabaseConfigured, SUPABASE_SERVICE_ROLE_KEY } from '../lib/supabase';
+import { supabase, supabaseAnonKey, isSupabaseConfigured } from '../lib/supabase';
 import { decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 
 const SUPABASE_BASE_URL = 'https://hpjizujbzvwkxvfsoqqd.supabase.co';
@@ -52,7 +52,7 @@ export async function uploadImageToSupabase(
 
     if (cleanB64) {
       const arrayBuffer = decodeBase64ToArrayBuffer(cleanB64);
-      const client = supabaseAdmin || supabase;
+      const client = supabase;
       const { data: upData, error: upErr } = await client.storage
         .from(bucket)
         .upload(storagePath, arrayBuffer, {
@@ -80,8 +80,8 @@ export async function uploadImageToSupabase(
         httpMethod: 'POST',
         uploadType: (FileSystem as any).FileSystemUploadType?.BINARY_CONTENT ?? 0,
         headers: {
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ''}`,
+          apikey: supabaseAnonKey,
           'Content-Type': mimeType,
           'x-upsert': 'true',
         },

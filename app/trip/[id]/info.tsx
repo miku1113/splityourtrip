@@ -29,7 +29,7 @@ import {
   findMyMember,
   isValidUUID,
 } from '../../../src/features/trips/useTripStore';
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../../../src/lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../../src/lib/supabase';
 import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import {
   useContactsStore,
@@ -666,6 +666,7 @@ export default function TripInfoScreen() {
     paymentMode: 'cash' | 'upi'
   ) => {
     try {
+      let settlementRowSyncFailed = false;
       const fromName = effectiveMemberNamesMap[fromMemberId] || 'Member';
       const toName = effectiveMemberNamesMap[toMemberId] || 'Member';
       const desc = `${paymentMode === 'cash' ? '💵 Cash' : '📱 UPI'} Settlement: ${fromName} paid ${toName}`;
@@ -685,8 +686,8 @@ export default function TripInfoScreen() {
 
       if (isSupabaseConfigured && isValidUUID(id)) {
         try {
-          const client = supabaseAdmin || supabase;
-          await client.from('settlement_payments').insert({
+          const client = supabase;
+          const { error: settlementError } = await client.from('settlement_payments').insert({
             trip_id: id,
             from_member: fromMemberId,
             to_member: toMemberId,
@@ -695,7 +696,12 @@ export default function TripInfoScreen() {
             note: paymentMode === 'cash' ? 'Settled in cash' : 'Paid via UPI',
             paid_at: new Date().toISOString(),
           });
+          if (settlementError) {
+            settlementRowSyncFailed = true;
+            console.warn('settlement_payments insert failed:', settlementError.message);
+          }
         } catch (spErr) {
+          settlementRowSyncFailed = true;
           console.log('settlement_payments insert notice:', spErr);
         }
       }
@@ -730,8 +736,10 @@ export default function TripInfoScreen() {
       useTripStore.getState().fetchTrips(user?.id);
 
       Alert.alert(
-        'Settled! 🎉',
-        `${formatCurrencyAmount(amountPaise, trip.currency)} settlement from ${fromName} to ${toName} has been recorded and deducted from balances!`
+        settlementRowSyncFailed ? 'Settlement saved locally' : 'Settled! 🎉',
+        settlementRowSyncFailed
+          ? `${formatCurrencyAmount(amountPaise, trip.currency)} settlement from ${fromName} to ${toName} was recorded on this device, but its cloud settlement record did not sync. Check your connection before relying on other devices.`
+          : `${formatCurrencyAmount(amountPaise, trip.currency)} settlement from ${fromName} to ${toName} has been recorded and deducted from balances!`
       );
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not record settlement.');

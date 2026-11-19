@@ -57,26 +57,31 @@ export function splitByShares(
   shareCounts: Array<{ memberId: string; shares: number }>,
   totalPaise: number
 ): MemberShare[] {
+  if (!Number.isSafeInteger(totalPaise) || totalPaise < 0) {
+    throw new RangeError('Total amount must be a non-negative integer number of paise.');
+  }
+  if (shareCounts.length === 0) {
+    if (totalPaise !== 0) throw new RangeError('A share split needs at least one participant.');
+    return [];
+  }
+  if (shareCounts.some(item => !Number.isFinite(item.shares) || item.shares <= 0)) {
+    throw new RangeError('Each participant must have a positive share count.');
+  }
   const totalShares = shareCounts.reduce((acc, s) => acc + s.shares, 0);
-  if (totalShares <= 0 || totalPaise <= 0) {
-    return shareCounts.map(s => ({ memberId: s.memberId, shareAmount: 0 }));
+  if (!Number.isFinite(totalShares) || totalShares <= 0) {
+    throw new RangeError('Total share count must be finite and positive.');
   }
 
-  let allocated = 0;
-  const results: MemberShare[] = shareCounts.map(s => {
-    const amount = Math.floor((totalPaise * s.shares) / totalShares);
-    allocated += amount;
-    return { memberId: s.memberId, shareAmount: amount };
+  const allocations = shareCounts.map((item, index) => {
+    const exactAmount = totalPaise * (item.shares / totalShares);
+    const shareAmount = Math.floor(exactAmount);
+    return { memberId: item.memberId, shareAmount, fraction: exactAmount - shareAmount, index };
   });
-
-  // Distribute remaining paise
-  let remainder = totalPaise - allocated;
-  for (let i = 0; i < results.length && remainder > 0; i++) {
-    results[i].shareAmount += 1;
-    remainder--;
-  }
-
-  return results;
+  const allocated = allocations.reduce((sum, item) => sum + item.shareAmount, 0);
+  const remainder = totalPaise - allocated;
+  const remainderOrder = [...allocations].sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (let i = 0; i < remainder; i++) remainderOrder[i].shareAmount += 1;
+  return allocations.map(({ memberId, shareAmount }) => ({ memberId, shareAmount }));
 }
 
 /**
@@ -86,18 +91,28 @@ export function splitByPercentage(
   percentages: Array<{ memberId: string; percentage: number }>,
   totalPaise: number
 ): MemberShare[] {
-  let allocated = 0;
-  const results: MemberShare[] = percentages.map(p => {
-    const amount = Math.floor((totalPaise * p.percentage) / 100);
-    allocated += amount;
-    return { memberId: p.memberId, shareAmount: amount };
-  });
-
-  let remainder = totalPaise - allocated;
-  for (let i = 0; i < results.length && remainder > 0; i++) {
-    results[i].shareAmount += 1;
-    remainder--;
+  if (!Number.isSafeInteger(totalPaise) || totalPaise < 0) {
+    throw new RangeError('Total amount must be a non-negative integer number of paise.');
+  }
+  if (percentages.length === 0) {
+    if (totalPaise !== 0) throw new RangeError('A percentage split needs at least one participant.');
+    return [];
+  }
+  if (percentages.some(p => !Number.isFinite(p.percentage) || p.percentage < 0 || p.percentage > 100)) {
+    throw new RangeError('Each percentage must be between 0 and 100.');
+  }
+  const percentageTotal = percentages.reduce((sum, item) => sum + item.percentage, 0);
+  if (Math.abs(percentageTotal - 100) > 1e-8) {
+    throw new RangeError('Percentages must total exactly 100.');
   }
 
-  return results;
+  const allocations = percentages.map((item, index) => {
+    const exactAmount = totalPaise * (item.percentage / percentageTotal);
+    const flooredAmount = Math.floor(exactAmount);
+    return { memberId: item.memberId, shareAmount: flooredAmount, fraction: exactAmount - flooredAmount, index };
+  });
+  let remainder = totalPaise - allocations.reduce((sum, item) => sum + item.shareAmount, 0);
+  const remainderOrder = [...allocations].sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (let i = 0; i < remainder; i++) remainderOrder[i].shareAmount += 1;
+  return allocations.map(({ memberId, shareAmount }) => ({ memberId, shareAmount }));
 }

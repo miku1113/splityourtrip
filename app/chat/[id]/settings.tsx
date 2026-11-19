@@ -18,12 +18,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTripStore } from '../../../src/features/trips/useTripStore';
+import { useAuthStore } from '../../../src/features/auth/useAuthStore';
+import { useContactsStore } from '../../../src/features/contacts/useContactsStore';
 import { useTheme } from '../../../src/theme/useThemeStore';
 import {
   getFriendSettings,
   saveFriendSettings,
   FriendSettingsData,
 } from '../../../src/services/friendSettings';
+import { blockUser, unblockUser, isTripBlockedBilateral } from '../../../src/services/blockService';
 
 export default function FriendSettingsScreen() {
   const { id, friendName, friendPhone, friendId } = useLocalSearchParams<{
@@ -35,7 +38,9 @@ export default function FriendSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { expenses, deleteTrip } = useTripStore();
+  const { expenses, deleteTrip, trips, fetchTrips } = useTripStore();
+  const { user, profile } = useAuthStore();
+  const { fetchFriendsSummary } = useContactsStore();
 
   const settingsKey = friendId || id || '';
   const displayName = friendName || 'Friend';
@@ -54,16 +59,27 @@ export default function FriendSettingsScreen() {
   const totalAmountPaise = friendExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   useEffect(() => {
+    // Check if the trip itself is blocked in remote/state
+    const currentTrip = trips.find(t => t.id === id);
+    const blockCheck = isTripBlockedBilateral(currentTrip, user?.id, profile?.phone_number);
+    if (blockCheck.isBlocked) {
+      setIsBlocked(true);
+    }
+
     if (settingsKey) {
       getFriendSettings(settingsKey).then(data => {
         if (data.nickname) setNickname(data.nickname);
         if (data.notes) setNotes(data.notes);
-        if (data.isBlocked !== undefined) setIsBlocked(data.isBlocked);
+        if (data.isBlocked !== undefined) {
+          setIsBlocked(data.isBlocked);
+        } else if (blockCheck.isBlocked) {
+          setIsBlocked(true);
+        }
         if (data.isMuted !== undefined) setIsMuted(data.isMuted);
         if (data.defaultSplit) setDefaultSplit(data.defaultSplit);
       });
     }
-  }, [settingsKey]);
+  }, [settingsKey, id, trips, user?.id, profile?.phone_number]);
 
   const handleToggleBlock = (val: boolean) => {
     if (val) {
@@ -75,16 +91,56 @@ export default function FriendSettingsScreen() {
           {
             text: 'Block Contact',
             style: 'destructive',
-            onPress: () => {
+            onPress: async () => {
               setIsBlocked(true);
-              saveFriendSettings(settingsKey, { isBlocked: true });
+              const blockerId = user?.id || profile?.id;
+              if (blockerId) {
+                await blockUser({
+                  blockerId,
+                  blockedId: friendId && friendId !== id ? friendId : undefined,
+                  blockedPhone: displayPhone || undefined,
+                  blockedName: displayName,
+                  tripId: id || undefined,
+                });
+              }
+              await saveFriendSettings(settingsKey, {
+                isBlocked: true,
+                friendId: friendId || undefined,
+                friendPhone: displayPhone || undefined,
+                friendName: displayName,
+                tripId: id || undefined,
+              });
+              if (blockerId) {
+                fetchFriendsSummary(blockerId);
+                fetchTrips(blockerId, true);
+              }
             },
           },
         ]
       );
     } else {
       setIsBlocked(false);
-      saveFriendSettings(settingsKey, { isBlocked: false });
+      (async () => {
+        const blockerId = user?.id || profile?.id;
+        if (blockerId) {
+          await unblockUser({
+            blockerId,
+            blockedId: friendId && friendId !== id ? friendId : undefined,
+            blockedPhone: displayPhone || undefined,
+            tripId: id || undefined,
+          });
+        }
+        await saveFriendSettings(settingsKey, {
+          isBlocked: false,
+          friendId: friendId || undefined,
+          friendPhone: displayPhone || undefined,
+          tripId: id || undefined,
+        });
+        if (blockerId) {
+          fetchFriendsSummary(blockerId);
+          fetchTrips(blockerId, true);
+        }
+      })();
     }
   };
 
@@ -92,13 +148,40 @@ export default function FriendSettingsScreen() {
     if (!settingsKey || isSaving) return;
     setIsSaving(true);
     try {
+      const blockerId = user?.id || profile?.id;
+      if (blockerId && isBlocked) {
+        await blockUser({
+          blockerId,
+          blockedId: friendId && friendId !== id ? friendId : undefined,
+          blockedPhone: displayPhone || undefined,
+          blockedName: displayName,
+          tripId: id || undefined,
+        });
+      } else if (blockerId && !isBlocked) {
+        await unblockUser({
+          blockerId,
+          blockedId: friendId && friendId !== id ? friendId : undefined,
+          blockedPhone: displayPhone || undefined,
+          tripId: id || undefined,
+        });
+      }
+
       await saveFriendSettings(settingsKey, {
         nickname: nickname.trim(),
         notes: notes.trim(),
         isBlocked,
         isMuted,
         defaultSplit,
+        friendId: friendId || undefined,
+        friendPhone: displayPhone || undefined,
+        friendName: displayName,
+        tripId: id || undefined,
       });
+
+      if (blockerId) {
+        fetchFriendsSummary(blockerId);
+        fetchTrips(blockerId, true);
+      }
       setSavedSuccess(true);
       Alert.alert('Saved', 'Friend preferences have been updated successfully.');
       setTimeout(() => setSavedSuccess(false), 2500);

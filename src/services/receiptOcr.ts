@@ -109,12 +109,19 @@ export async function recognizeTextFromImage(imageUri: string): Promise<string> 
     throw new Error('No image URI provided for OCR');
   }
 
-  // 1. Android Native Google ML Kit (Instant on-device when in standalone APK)
+  let bestText = '';
+  let bestAmountConfidence = -1;
+
+  // 1. Android Native Google ML Kit. Keep low-confidence text as a fallback,
+  // but let the cloud engine try when the recognized total is uncertain.
   if (Platform.OS === 'android' && SplitOcr?.recognizeText) {
     try {
       const text = await SplitOcr.recognizeText(imageUri);
       if (text && text.trim().length > 0) {
-        return text;
+        const trimmedText = text.trim();
+        bestText = trimmedText;
+        bestAmountConfidence = parseUpiReceipt(trimmedText).confidence.amount;
+        if (bestAmountConfidence >= 0.9) return trimmedText;
       }
     } catch (err) {
       console.warn('[receiptOcr] Native ML Kit OCR failed, trying cloud engine:', err);
@@ -197,7 +204,19 @@ export async function recognizeTextFromImage(imageUri: string): Promise<string> 
         const parsedText = json?.ParsedResults?.[0]?.ParsedText;
 
         if (parsedText && typeof parsedText === 'string' && parsedText.trim().length > 0) {
-          return parsedText.trim();
+          const cloudText = parsedText.trim();
+          const cloudAmountConfidence = parseUpiReceipt(cloudText).confidence.amount;
+          const cloudImprovesBest = !bestText || cloudAmountConfidence > bestAmountConfidence;
+          if (cloudImprovesBest) {
+            bestText = cloudText;
+            bestAmountConfidence = cloudAmountConfidence;
+          }
+
+          // On non-Android platforms the cloud engine is the primary OCR.
+          // On Android, prefer it when it reads the amount more confidently.
+          if (Platform.OS !== 'android' || cloudImprovesBest || cloudAmountConfidence >= 0.9) {
+            return bestText;
+          }
         }
       } catch (err) {
         console.log(`[receiptOcr] OCR key ${apiKey.slice(0, 4)}... engine ${engine} failed:`, err);
@@ -206,7 +225,7 @@ export async function recognizeTextFromImage(imageUri: string): Promise<string> 
   }
 
   // If OCR could not detect legible text, return empty string so caller can prompt user gracefully
-  return '';
+  return bestText;
 }
 
 /**

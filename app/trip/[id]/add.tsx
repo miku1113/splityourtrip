@@ -14,6 +14,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Linking,
+  BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -46,6 +47,7 @@ export default function AddExpenseScreen() {
     upiTxnId: paramUpiTxnId,
     paymentApp: paramPaymentApp,
     attachmentUri: paramAttachmentUri,
+    fromShare,
     prefillPaidBy,
     prefillParticipants,
     prefillPaymentMode,
@@ -228,6 +230,68 @@ export default function AddExpenseScreen() {
       );
     }
   }, [paramAttachmentUri, paramPaymentApp]);
+
+  const handleBackAction = React.useCallback(() => {
+    if (fromShare === 'true') {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace({
+          pathname: '/shared-payment',
+          params: {
+            imageUri: attachmentUri || paramAttachmentUri || '',
+            amount: amountRupees,
+            description: description,
+            category: category,
+            receiverName: prefillReceiver || '',
+            detectedApp: detectedApp || paramPaymentApp || '',
+            upiTxnId: upiTxnId || paramUpiTxnId || '',
+            alternativeAmount: alternativeAmount || '',
+            rupeeOcrMisread: rupeeOcrMisread ? 'true' : 'false',
+            rupeeOcrReason: rupeeOcrReason || '',
+          },
+        });
+      }
+      return true;
+    }
+
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace(id ? `/trip/${id}` : '/(tabs)');
+    }
+    return true;
+  }, [
+    fromShare,
+    router,
+    attachmentUri,
+    paramAttachmentUri,
+    amountRupees,
+    description,
+    category,
+    prefillReceiver,
+    detectedApp,
+    paramPaymentApp,
+    upiTxnId,
+    paramUpiTxnId,
+    alternativeAmount,
+    rupeeOcrMisread,
+    rupeeOcrReason,
+    id,
+  ]);
+
+  React.useEffect(() => {
+    const onBackPress = () => {
+      if (fromShare === 'true') {
+        handleBackAction();
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [fromShare, handleBackAction]);
 
   const handleScanComplete = (scanned: ScannedBillResult) => {
     if (scanned.amount) {
@@ -699,12 +763,65 @@ export default function AddExpenseScreen() {
           title: expenseId ? 'Edit Expense' : 'Add Expense',
           headerBackTitleVisible: false,
           headerBackTitle: 'Back',
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={handleBackAction}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={{ paddingRight: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center' }}
+            >
+              <Ionicons
+                name={Platform.OS === 'ios' ? 'chevron-back' : 'arrow-back'}
+                size={24}
+                color={colors.text}
+              />
+              <Text style={{ fontSize: 14, color: colors.primary, fontWeight: '600', marginLeft: 2 }}>
+                {fromShare === 'true' ? 'Select Entity' : 'Back'}
+              </Text>
+            </TouchableOpacity>
+          ),
         }}
       />
 
       {errorMsg && (
         <View style={[styles.errorBanner, { backgroundColor: colors.dangerBg }]}>
           <Text style={[styles.errorText, { color: colors.danger }]}>{errorMsg}</Text>
+        </View>
+      )}
+
+      {/* Option to change target entity when arriving from shared screenshot */}
+      {fromShare === 'true' && (
+        <View
+          style={[
+            styles.fromShareBannerCard,
+            {
+              backgroundColor: isDark ? 'rgba(99, 102, 241, 0.12)' : '#EEF2FF',
+              borderColor: isDark ? 'rgba(129, 140, 248, 0.35)' : '#C7D2FE',
+            },
+          ]}
+        >
+          <View style={{ flex: 1, marginRight: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+              <Ionicons name="people-outline" size={15} color={colors.primary} />
+              <Text style={[styles.fromShareBannerLabel, { color: colors.textSecondary }]}>
+                Splitting with
+              </Text>
+            </View>
+            <Text
+              style={[styles.fromShareBannerTarget, { color: colors.text }]}
+              numberOfLines={1}
+            >
+              {currentTrip?.name ? currentTrip.name.replace(/^split with\s+/i, '') : (prefillReceiver || 'Selected Entity')}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={handleBackAction}
+            style={[styles.fromShareChangeBtn, { backgroundColor: colors.primary }]}
+            activeOpacity={0.8}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="swap-horizontal" size={14} color="#FFF" style={{ marginRight: 4 }} />
+            <Text style={styles.fromShareChangeBtnText}>Change Entity</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -843,11 +960,13 @@ export default function AddExpenseScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.rupeeOcrChipTitle, { color: isDark ? '#FCD34D' : '#92400E' }]}>
               {rupeeOcrMisread
-                ? `Rupee (₹) symbol scanned as 7 ("7${amountRupees}" → ₹${amountRupees})`
+                ? `✨ AI Auto-corrected to ₹${amountRupees}`
                 : `Did ₹ symbol scan as 7?`}
             </Text>
             <Text style={[styles.rupeeOcrChipSubtitle, { color: isDark ? '#FDE68A' : '#B45309' }]}>
-              Tap to switch to ₹{effectiveAltAmount}
+              {rupeeOcrMisread
+                ? `Rupee symbol (₹) detected from "${effectiveAltAmount}" • Tap to revert to ₹${effectiveAltAmount}`
+                : `Tap to switch to ₹${effectiveAltAmount}`}
             </Text>
           </View>
           <Ionicons name="swap-horizontal" size={16} color="#D97706" />
@@ -1867,5 +1986,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#D97706',
+  },
+  fromShareBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 16,
+  },
+  fromShareBannerLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fromShareBannerTarget: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  fromShareChangeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  fromShareChangeBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

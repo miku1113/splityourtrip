@@ -61,21 +61,6 @@ export const supabase = createClient(
   }
 );
 
-export const SUPABASE_SERVICE_ROLE_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhwaml6dWpienZ3a3h2ZnNvcXFkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQyNzY3OSwiZXhwIjoyMDk0MDAzNjc5fQ.OqoYiFvaX9Y1QnO-im008_Qag3raaEWRvLEuidXaMUc';
-
-export const supabaseAdmin = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      storage: SafeStorage,
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  }
-);
-
 export const GOOGLE_WEB_CLIENT_ID =
   process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
   '597031180305-6ulmsoapmeneas46oam4ss593rfuep4l.apps.googleusercontent.com';

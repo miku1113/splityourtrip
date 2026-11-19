@@ -114,10 +114,18 @@ const NUMBER_WORDS: Record<string, number> = {
   chaubis: 24, pachis: 25, pacchis: 25, chhabis: 26, sattais: 27, atthais: 28, untees: 29, tees: 30,
   chaalis: 40, chalis: 40, pachaas: 50, pachas: 50, saath: 60, sath: 60, sattar: 70, assi: 80,
   nabbe: 90, sau: 100, so: 100, hazar: 1000, hazaar: 1000,
+  एक: 1, दो: 2, तीन: 3, चार: 4, पांच: 5, पाँच: 5, छह: 6, सात: 7, आठ: 8, नौ: 9, दस: 10,
+  ग्यारह: 11, बारह: 12, तेरह: 13, चौदह: 14, पंद्रह: 15, पन्द्रह: 15, सोलह: 16, सत्रह: 17,
+  अठारह: 18, उन्नीस: 19, बीस: 20, तीस: 30, चालीस: 40, पचास: 50, साठ: 60, सत्तर: 70,
+  अस्सी: 80, नब्बे: 90, सौ: 100, हजार: 1000, हज़ार: 1000, लाख: 100000, करोड़: 10000000,
 
   // Gujarati
   be: 2, tran: 3, chha: 6, sat: 7, agiyar: 11, bar: 12, ter: 13, chaud: 14, pandar: 15, sol: 16,
   vees: 20, vis: 20, trees: 30, tris: 30, hajar: 1000,
+  એક: 1, બે: 2, ત્રણ: 3, ચાર: 4, પાંચ: 5, છ: 6, સાત: 7, આઠ: 8, નવ: 9, દસ: 10,
+  અગિયાર: 11, બાર: 12, તેર: 13, ચૌદ: 14, પંદર: 15, સોળ: 16, સત્તર: 17, અઢાર: 18,
+  ઓગણીસ: 19, વીસ: 20, ત્રીસ: 30, ચાલીસ: 40, પચાસ: 50, સાઠ: 60, સિત્તેર: 70,
+  એંસી: 80, નેવું: 90, સો: 100, હજાર: 1000, લાખ: 100000, કરોડ: 10000000,
 };
 
 /**
@@ -130,6 +138,42 @@ export function cleanText(str: string): string {
     .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const GENERIC_TRIP_WORDS = new Set(['trip', 'travel', 'journey', 'holiday', 'vacation', 'tour']);
+
+/** Match a trip by its full name or distinctive name tokens, without selecting an unrelated first trip. */
+export function matchVoiceTrip<T extends { id: string; name: string }>(
+  text: string,
+  trips: T[]
+): { trip: T | null; ambiguous: boolean } {
+  const normalizedText = cleanText(text).toLowerCase();
+  const textTokens = new Set(normalizedText.split(/\s+/).filter(Boolean));
+  let bestScore = 0;
+  let bestTrips: T[] = [];
+
+  for (const trip of trips) {
+    if (!trip?.name) continue;
+    const normalizedName = cleanText(trip.name).toLowerCase();
+    const tokens = normalizedName.split(/\s+/).filter(token => token && !GENERIC_TRIP_WORDS.has(token));
+    if (tokens.length === 0) continue;
+
+    const phraseMatch = ` ${normalizedText} `.includes(` ${normalizedName} `);
+    const matchedTokens = tokens.filter(token => textTokens.has(token)).length;
+    const score = phraseMatch
+      ? 10000 + tokens.length + normalizedName.length / 1000
+      : matchedTokens > 0
+      ? matchedTokens * 100 + matchedTokens / tokens.length
+      : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestTrips = [trip];
+    } else if (score > 0 && score === bestScore && !bestTrips.some(candidate => candidate.id === trip.id)) {
+      bestTrips.push(trip);
+    }
+  }
+
+  return { trip: bestTrips.length === 1 ? bestTrips[0] : null, ambiguous: bestTrips.length > 1 };
 }
 
 /**
@@ -189,6 +233,9 @@ export function parseSpokenAmount(text: string): { amountRupees: string; amountP
   if (/\b(?:dhai|adi)\s+(?:hazar|hazaar|hajar|thousand)\b/.test(cleanLower)) {
     return { amountRupees: '2500', amountPaise: 250000 };
   }
+  if (/\bpaune\s+teen\s+(?:sau|so|hundred)\b/.test(cleanLower)) {
+    return { amountRupees: '275', amountPaise: 27500 };
+  }
 
   // 4. Standalone digits (e.g. "Dinner 500", "500 Petrol", "Cafe 250", "Chai 40")
   const allNumberMatches = Array.from(clean.matchAll(/\b(\d+(?:\.\d{1,2})?)\b/g));
@@ -211,37 +258,38 @@ export function parseSpokenAmount(text: string): { amountRupees: string; amountP
     }
   }
 
-  // 5. Spoken words from NUMBER_WORDS
+  // 5. Spoken cardinal numbers ("one hundred and fifty", "do hazaar paanch sau").
   const words = cleanLower.split(/\s+/);
   for (let i = 0; i < words.length; i++) {
-    const w = words[i];
-    if (NUMBER_WORDS[w] !== undefined) {
-      let val = NUMBER_WORDS[w];
-      const next = words[i + 1];
+    if (NUMBER_WORDS[words[i]] === undefined) continue;
 
-      if (next && (next === 'sau' || next === 'so' || next === 'hundred')) {
-        val = val * 100;
-        const nextNext = words[i + 2];
-        if (nextNext && NUMBER_WORDS[nextNext] !== undefined) {
-          val = val + NUMBER_WORDS[nextNext];
-        }
-      } else if (next && (next === 'hazar' || next === 'hazaar' || next === 'hajar' || next === 'thousand')) {
-        val = val * 1000;
-        const nextNext = words[i + 2];
-        if (nextNext && (nextNext === 'sau' || nextNext === 'so' || nextNext === 'hundred') && words[i + 3]) {
-          const numHundred = NUMBER_WORDS[words[i + 3]];
-          if (numHundred) val += numHundred * 100;
-        } else if (nextNext && NUMBER_WORDS[nextNext] !== undefined) {
-          val = val + NUMBER_WORDS[nextNext];
-        }
-      }
+    let total = 0;
+    let group = 0;
+    let consumed = false;
+    for (let j = i; j < words.length; j++) {
+      const token = words[j];
+      if (token === 'and' && consumed && NUMBER_WORDS[words[j + 1]] !== undefined) continue;
 
-      if (val > 0) {
-        return {
-          amountRupees: val.toString(),
-          amountPaise: Math.round(val * 100),
-        };
+      const value = NUMBER_WORDS[token];
+      if (value === undefined) break;
+      consumed = true;
+
+      if (value === 100) {
+        group = Math.max(1, group) * 100;
+      } else if (value >= 1000) {
+        total += Math.max(1, group) * value;
+        group = 0;
+      } else {
+        group += value;
       }
+    }
+
+    const amount = total + group;
+    if (consumed && amount > 0) {
+      return {
+        amountRupees: amount.toString(),
+        amountPaise: Math.round(amount * 100),
+      };
     }
   }
 
@@ -263,33 +311,8 @@ export function parseVoiceExpense(
   const cleanLower = clean.toLowerCase();
 
   // 1. MATCH TRIP
-  let matchedTrip: Trip | null = null;
-  let highestTripScore = 0;
-
-  for (const t of trips) {
-    if (!t || !t.name) continue;
-    const tClean = cleanText(t.name).toLowerCase();
-    const tWords = tClean.split(' ').filter(w => w.length >= 3);
-
-    // Direct match
-    if (cleanLower.includes(tClean)) {
-      matchedTrip = t;
-      highestTripScore = 100;
-      break;
-    }
-
-    // Word match
-    for (const w of tWords) {
-      if (cleanLower.includes(w) && w.length > highestTripScore) {
-        matchedTrip = t;
-        highestTripScore = w.length;
-      }
-    }
-  }
-
-  if (!matchedTrip && trips.length > 0) {
-    matchedTrip = trips[0];
-  }
+  const tripMatch = matchVoiceTrip(clean, trips);
+  const matchedTrip: Trip | null = tripMatch.trip;
 
   // Fetch members of the matched trip
   const tripMembers: TripMember[] =

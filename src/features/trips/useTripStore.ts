@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { AppStorage } from '../../lib/storage';
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useAuthStore } from '../auth/useAuthStore';
 import {
   Trip,
@@ -909,7 +909,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         // Execute created trips, member rows, and friend trips concurrently in parallel!
         const [createdRes, memberRes, friendRes] = await Promise.all([
           withTimeout(
-            supabaseAdmin
+            supabase
               .from('trips')
               .select('*')
               .eq('created_by', targetUserId)
@@ -917,14 +917,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             8000
           ).catch(() => ({ data: [] as any[], error: null })),
           withTimeout(
-            supabaseAdmin
+            supabase
               .from('trip_members')
               .select('trip_id')
               .or(memberQueryFilter),
             8000
           ).catch(() => ({ data: [] as any[], error: null })),
           withTimeout(
-            supabaseAdmin
+            supabase
               .from('trips')
               .select('*')
               .eq('friend_id', targetUserId)
@@ -944,7 +944,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         let memberTrips: Trip[] = [];
         if (memberTripIds.length > 0) {
           const { data: mtData } = await withTimeout(
-            supabaseAdmin
+            supabase
               .from('trips')
               .select('*')
               .in('id', memberTripIds)
@@ -1057,7 +1057,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 const authState = useAuthStore.getState();
                 const userName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.email?.split('@')[0] || 'You';
                 const userPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number || null;
-                await supabaseAdmin.from('trip_members').upsert({
+                await supabase.from('trip_members').upsert({
                   trip_id: tripToSync.id,
                   profile_id: targetUserId,
                   user_id: targetUserId,
@@ -1287,7 +1287,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       try {
         if (authenticatedUserId) {
           try {
-            await supabaseAdmin.from('profiles').upsert({
+            await supabase.from('profiles').upsert({
               id: authenticatedUserId,
               full_name: effectiveUserName,
               name: effectiveUserName,
@@ -1313,7 +1313,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         };
 
         let { error: tripError } = await withTimeout(
-          supabaseAdmin
+          supabase
             .from('trips')
             .upsert(tripPayload, { onConflict: 'id' }),
           5000
@@ -1350,7 +1350,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             status: 'accepted',
             is_guest: m.is_guest !== undefined ? m.is_guest : !m.profile_id,
           };
-          const { error: mErr } = await supabaseAdmin
+          const { error: mErr } = await supabase
             .from('trip_members')
             .upsert(memberPayload, { onConflict: 'id' });
           if (mErr) {
@@ -1438,7 +1438,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       console.warn('Failed to persist updated trip:', e);
     }
 
-    // 3. Supabase sync with supabaseAdmin and supabase fallback
+    // 3. Supabase sync with supabase and supabase fallback
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
         const updateData: any = {
@@ -1455,7 +1455,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         };
 
         const adminRes = await withTimeout(
-          supabaseAdmin.from('trips').update(updateData).eq('id', tripId),
+          supabase.from('trips').update(updateData).eq('id', tripId),
           3500
         ).catch(() => null);
 
@@ -1502,7 +1502,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 3. Cascade delete from Supabase
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
 
         // Broadcast delete event over realtime so other active devices remove it instantly
         try {
@@ -1651,7 +1651,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         // Wave 1: Fetch trip record, members, and expenses concurrently in parallel!
         const [tripRes, membersRes, expensesRes] = await Promise.all([
         withTimeout(
-          supabaseAdmin
+          supabase
             .from('trips')
             .select('*')
             .eq('id', tripId)
@@ -1659,14 +1659,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           5000
         ).catch((err) => ({ data: null, error: err || new Error('Timeout') })),
         withTimeout(
-          supabaseAdmin
+          supabase
             .from('trip_members')
             .select('*')
             .eq('trip_id', tripId),
           5000
         ).catch((err) => ({ data: [] as any[], error: err || new Error('Timeout') })),
         withTimeout(
-          supabaseAdmin
+          supabase
             .from('expenses')
             .select('*')
             .eq('trip_id', tripId)
@@ -1716,13 +1716,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       }
 
       // Wave 2: Fetch profiles for members and expense splits concurrently in parallel!
-      const profileIds = (membersRaw || []).map((m: any) => m.profile_id).filter(Boolean);
+      const profileIds = Array.from(new Set(
+        (membersRaw || [])
+          .map((m: any) => m.profile_id)
+          .filter((id: unknown): id is string => typeof id === 'string' && isValidUUID(id))
+      ));
       const expenseIds = (expensesRaw || []).map((e: any) => e.id);
 
       const [profilesRes, splitsRes] = await Promise.all([
         profileIds.length > 0
           ? withTimeout(
-              supabaseAdmin
+              supabase
                 .from('profiles')
                 .select('id, full_name, phone_number')
                 .in('id', profileIds),
@@ -1731,7 +1735,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           : Promise.resolve({ data: [] as any[] }),
         expenseIds.length > 0
           ? withTimeout(
-              supabaseAdmin
+              supabase
                 .from('expense_splits')
                 .select('*')
                 .in('expense_id', expenseIds),
@@ -1981,7 +1985,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       try {
         const [tmRes, mRes] = await Promise.all([
           withTimeout(
-            supabaseAdmin
+            supabase
               .from('trip_messages')
               .select('*')
               .eq('trip_id', tripId)
@@ -1989,7 +1993,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             3500
           ).catch(() => ({ data: [] as any[] })),
           withTimeout(
-            supabaseAdmin
+            supabase
               .from('messages')
               .select('*')
               .eq('trip_id', tripId)
@@ -2152,11 +2156,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     try {
       const [membersRes, expsRes] = await Promise.all([
         withTimeout(
-          supabaseAdmin.from('trip_members').select('*').in('trip_id', validIds),
+          supabase.from('trip_members').select('*').in('trip_id', validIds),
           8000
         ).catch(() => ({ data: [] as any[] })),
         withTimeout(
-          supabaseAdmin.from('expenses').select('*').in('trip_id', validIds).order('created_at', { ascending: false }),
+          supabase.from('expenses').select('*').in('trip_id', validIds).order('created_at', { ascending: false }),
           8000
         ).catch(() => ({ data: [] as any[] })),
       ]);
@@ -2168,7 +2172,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       let allSplits: any[] = [];
       if (expIds.length > 0) {
         const { data: spData } = await withTimeout(
-          supabaseAdmin.from('expense_splits').select('*').in('expense_id', expIds),
+          supabase.from('expense_splits').select('*').in('expense_id', expIds),
           8000
         ).catch(() => ({ data: [] }));
         allSplits = spData || [];
@@ -2449,7 +2453,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         };
 
         const adminRes = await withTimeout(
-          supabaseAdmin.from('trip_members').upsert(memberPayload, { onConflict: 'id' }),
+          supabase.from('trip_members').upsert(memberPayload, { onConflict: 'id' }),
           3500
         ).catch(() => null);
 
@@ -2514,7 +2518,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     if (isSupabaseConfigured) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         if (isValidUUID(memberId)) {
           await withTimeout(
             client.from('trip_members').delete().eq('id', memberId),
@@ -2551,7 +2555,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     if (isSupabaseConfigured) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         if (isValidUUID(memberId)) {
           await client.from('trip_members').update({ role }).eq('id', memberId);
         } else {
@@ -2610,7 +2614,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 1. Check Supabase profiles table (registered app users)
     if (isSupabaseConfigured) {
       try {
-        let profQuery = supabaseAdmin
+        let profQuery = supabase
           .from('profiles')
           .select('id, full_name, phone_number, avatar_url')
           .or(`phone_number.ilike.%${last10}%,phone_number.ilike.%${cleanDigits}%`);
@@ -2648,7 +2652,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
       // 2. Check Supabase trip_members table for previously linked members with this number
       try {
-        let memQuery = supabaseAdmin
+        let memQuery = supabase
           .from('trip_members')
           .select('id, display_name, phone_number, profile_id')
           .or(`phone_number.ilike.%${last10}%,phone_number.ilike.%${cleanDigits}%`)
@@ -2762,7 +2766,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     }
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         const { data } = await client.from('trips').select('invite_code').eq('id', tripId).maybeSingle();
         if (data?.invite_code) {
           return data.invite_code;
@@ -2818,7 +2822,23 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     }
 
     try {
-      const client = supabaseAdmin || supabase;
+      const client = supabase;
+      const { data: joinedRows, error: joinError } = await client.rpc('join_trip_by_code', {
+        p_code: clean,
+        p_display_name: resolvedName,
+        p_phone: userPhone,
+      });
+      if (joinError) throw joinError;
+      const joined = Array.isArray(joinedRows) ? joinedRows[0] : joinedRows;
+      if (joined?.trip_id) {
+        await get().fetchTrips(effectiveUserId, true);
+        return {
+          success: true,
+          alreadyMember: false,
+          tripId: joined.trip_id,
+          tripName: joined.trip_name,
+        };
+      }
       let targetTrip: { id: string; name: string; invite_code?: string } | null = null;
 
       // 1. Check by invite_code (case-insensitive)
@@ -3026,7 +3046,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
         if (activeUserId) {
           // 1. Verify trip exists in Supabase, auto-sync if missing
-          const { data: tripExists } = await supabaseAdmin
+          const { data: tripExists } = await supabase
             .from('trips')
             .select('id')
             .eq('id', tripId)
@@ -3036,7 +3056,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             const localTrip = get().trips.find(t => t.id === tripId) || get().activeTrip;
             if (localTrip) {
               const tripInvite = (localTrip as any).invite_code || Math.random().toString(36).substring(2, 8).toUpperCase();
-              await supabaseAdmin.from('trips').upsert({
+              await supabase.from('trips').upsert({
                 id: tripId,
                 name: localTrip.name,
                 description: localTrip.description || '',
@@ -3051,7 +3071,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
               const authState = useAuthStore.getState();
               const userName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.email?.split('@')[0] || 'Member';
-              await supabaseAdmin.from('trip_members').upsert({
+              await supabase.from('trip_members').upsert({
                 trip_id: tripId,
                 profile_id: activeUserId,
                 user_id: activeUserId,
@@ -3070,15 +3090,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             (tripObj?.created_by && isValidUUID(tripObj.created_by) ? tripObj.created_by : null) ||
             'c190b7ba-767d-4c0e-9ec5-53ecd91d06c5';
 
-          let validPaidBy = guaranteedAuthUserId;
-          if (payerProfileId && isValidUUID(payerProfileId)) {
-            try {
-              const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(payerProfileId);
-              if (userCheck?.user?.id) {
-                validPaidBy = userCheck.user.id;
-              }
-            } catch {}
-          }
+          // paid_by references auth.users; use the signed-in user. Member IDs
+          // may be guest/member-row UUIDs and are not auth user IDs.
+          const validPaidBy = guaranteedAuthUserId;
 
           const structuredMerchantJson = JSON.stringify({
             payer_name: payerName,
@@ -3120,7 +3134,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             created_by: guaranteedAuthUserId,
           };
 
-          let { data: expData, error: expError } = await supabaseAdmin
+          let { data: expData, error: expError } = await supabase
             .from('expenses')
             .upsert(expensePayload, { onConflict: 'id' })
             .select()
@@ -3128,7 +3142,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
           if (expError && guaranteedAuthUserId !== validPaidBy) {
             console.warn('Expense foreign key retry with guaranteed auth user:', expError.message);
-            const retryRes = await supabaseAdmin
+            const retryRes = await supabase
               .from('expenses')
               .upsert({ ...expensePayload, paid_by: guaranteedAuthUserId }, { onConflict: 'id' })
               .select()
@@ -3138,7 +3152,6 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           }
 
           if (!expError && expData) {
-            insertedInCloud = true;
             if (computedSplits.length > 0) {
               const splitInserts = computedSplits.map(s => {
                 const participant = (tripScopeMembers.length > 0 ? tripScopeMembers : get().members).find(m => m.id === s.memberId);
@@ -3159,8 +3172,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
               });
 
               if (splitInserts.length > 0) {
-                await supabaseAdmin.from('expense_splits').upsert(splitInserts, { onConflict: 'id' });
+                const { error: splitsError } = await supabase
+                  .from('expense_splits')
+                  .upsert(splitInserts, { onConflict: 'id' });
+                if (splitsError) {
+                  console.warn('Expense split cloud insert failed:', splitsError.message);
+                } else {
+                  insertedInCloud = true;
+                }
+              } else {
+                insertedInCloud = true;
               }
+            } else {
+              insertedInCloud = true;
             }
           } else if (expError) {
             console.warn('Expense Supabase insert notice:', expError.message);
@@ -3270,7 +3294,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         .then(async (remoteUrl) => {
           if (remoteUrl && remoteUrl.startsWith('http')) {
             if (isSupabaseConfigured && isValidUUID(tripId)) {
-              await supabaseAdmin.from('expenses').update({
+              await supabase.from('expenses').update({
                 attachment_url: remoteUrl,
                 screenshot_path: remoteUrl,
               }).eq('id', newExpenseId);
@@ -3404,7 +3428,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       set({ personalExpensesTotalPaise: newTotal, personalExpensesCount: newExpenses.length });
     }
 
-    // Cloud update if configured
+    // Cloud update if configured. Local data remains saved if this fails.
+    let cloudUpdateFailed = false;
     if (isSupabaseConfigured && isValidUUID(tripId) && isValidUUID(expenseId)) {
       try {
         const tripObj = get().trips.find(t => t.id === tripId) || get().activeTrip;
@@ -3415,17 +3440,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           (tripObj?.created_by && isValidUUID(tripObj.created_by) ? tripObj.created_by : null) ||
           'c190b7ba-767d-4c0e-9ec5-53ecd91d06c5';
 
-        let validPaidBy = guaranteedAuthUserId;
-        if (payerProfileId && isValidUUID(payerProfileId)) {
-          try {
-            const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(payerProfileId);
-            if (userCheck?.user?.id) {
-              validPaidBy = userCheck.user.id;
-            }
-          } catch {}
-        }
+        const validPaidBy = guaranteedAuthUserId;
 
-        await supabaseAdmin
+        const { error: expenseUpdateError } = await supabase
           .from('expenses')
           .update({
             amount: amountPaise,
@@ -3458,8 +3475,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             attachment_type: resolvedAttachmentType !== undefined ? resolvedAttachmentType : undefined,
           })
           .eq('id', expenseId);
+        if (expenseUpdateError) throw expenseUpdateError;
 
-        await supabaseAdmin.from('expense_splits').delete().eq('expense_id', expenseId);
+        const { error: deleteSplitsError } = await supabase
+          .from('expense_splits')
+          .delete()
+          .eq('expense_id', expenseId);
+        if (deleteSplitsError) throw deleteSplitsError;
         if (computedSplits.length > 0) {
           const splitInserts = computedSplits.map(s => {
             const participant = (tripScopeMembers.length > 0 ? tripScopeMembers : get().members).find(m => m.id === s.memberId);
@@ -3480,10 +3502,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           });
 
           if (splitInserts.length > 0) {
-            await supabaseAdmin.from('expense_splits').insert(splitInserts);
+            const { error: insertSplitsError } = await supabase
+              .from('expense_splits')
+              .insert(splitInserts);
+            if (insertSplitsError) throw insertSplitsError;
           }
         }
       } catch (err: any) {
+        cloudUpdateFailed = true;
         console.log('updateExpense cloud update notice:', err?.message);
       }
     }
@@ -3560,13 +3586,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         // Cloud update if configured
         if (isSupabaseConfigured && isValidUUID(existingMsg.id)) {
           try {
-            await supabaseAdmin
+            await supabase
               .from('trip_messages')
               .update({
                 message: updatedPayload,
               })
               .eq('id', existingMsg.id);
-            await supabaseAdmin
+            await supabase
               .from('messages')
               .update({
                 content: updatedPayload,
@@ -3595,7 +3621,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         .then(async (remoteUrl) => {
           if (remoteUrl && remoteUrl.startsWith('http')) {
             if (isSupabaseConfigured && isValidUUID(tripId) && isValidUUID(expenseId)) {
-              await supabaseAdmin.from('expenses').update({
+              await supabase.from('expenses').update({
                 attachment_url: remoteUrl,
                 screenshot_path: remoteUrl,
               }).eq('id', expenseId);
@@ -3609,7 +3635,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         .catch(() => {});
     }
 
-    return true;
+    return !cloudUpdateFailed;
   },
 
   deleteExpense: async (tripId: string, expenseId: string, deleterName?: string) => {
@@ -3719,44 +3745,49 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     } catch {}
 
     // Cloud delete if configured
+    let cloudDeleteFailed = false;
     if (isSupabaseConfigured && isValidUUID(expenseId)) {
       try {
-        await supabaseAdmin.from('expense_splits').delete().eq('expense_id', expenseId);
-        await supabaseAdmin.from('expenses').delete().eq('id', expenseId);
-        await supabaseAdmin.from('trip_messages').delete().eq('id', expenseId);
-        await supabaseAdmin.from('trip_messages').delete().eq('expense_id', expenseId);
-        await supabaseAdmin.from('trip_messages').delete().ilike('message', `%${expenseId}%`);
-        await supabaseAdmin.from('messages').delete().ilike('content', `%${expenseId}%`);
+        const { error: splitsError } = await supabase.from('expense_splits').delete().eq('expense_id', expenseId);
+        if (splitsError) cloudDeleteFailed = true;
+        const { error: expenseError } = await supabase.from('expenses').delete().eq('id', expenseId);
+        if (expenseError) cloudDeleteFailed = true;
+        const { error: tripMessageError } = await supabase.from('trip_messages').delete().eq('expense_id', expenseId);
+        if (tripMessageError) cloudDeleteFailed = true;
+        await supabase.from('trip_messages').delete().eq('id', expenseId);
+        await supabase.from('trip_messages').delete().ilike('message', `%${expenseId}%`);
+        await supabase.from('messages').delete().ilike('content', `%${expenseId}%`);
 
         if (isSettlement) {
           if (targetAmount) {
-            await supabaseAdmin
+            await supabase
               .from('settlement_payments')
               .delete()
               .eq('trip_id', tripId)
               .eq('amount', targetAmount);
 
             try {
-              const { data: settleMsgs } = await supabaseAdmin
+              const { data: settleMsgs } = await supabase
                 .from('trip_messages')
                 .select('id, message')
                 .eq('trip_id', tripId);
               if (settleMsgs) {
                 for (const sm of settleMsgs) {
                   if (sm.message && (sm.message.includes(expenseId) || (sm.message.includes('payment_settlement') && sm.message.includes(String(targetAmount))))) {
-                    await supabaseAdmin.from('trip_messages').delete().eq('id', sm.id);
-                    await supabaseAdmin.from('messages').delete().eq('id', sm.id);
+                    await supabase.from('trip_messages').delete().eq('id', sm.id);
+                    await supabase.from('messages').delete().eq('id', sm.id);
                   }
                 }
               }
             } catch {}
           }
           for (const msgId of Array.from(purgedMsgIds)) {
-            await supabaseAdmin.from('trip_messages').delete().eq('id', msgId);
-            await supabaseAdmin.from('messages').delete().eq('id', msgId);
+            await supabase.from('trip_messages').delete().eq('id', msgId);
+            await supabase.from('messages').delete().eq('id', msgId);
           }
         }
       } catch (err: any) {
+        cloudDeleteFailed = true;
         console.log('deleteExpense cloud notice:', err?.message);
       }
     }
@@ -3770,7 +3801,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       useContactsStore.getState().fetchFriendsSummary(activeId).catch(() => {});
     } catch {}
 
-    return true;
+    return !cloudDeleteFailed;
   },
 
   disputeExpense: async data => {
@@ -3846,7 +3877,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 3. Persist to Supabase
     if (isSupabaseConfigured && isValidUUID(expenseId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         let merchantObj: any = {};
         if (exp.merchant_name && typeof exp.merchant_name === 'string') {
           try {
@@ -4012,7 +4043,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 3. Persist to Supabase
     if (isSupabaseConfigured && isValidUUID(expenseId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         let merchantObj: any = {};
         if (exp.merchant_name && typeof exp.merchant_name === 'string') {
           try {
@@ -4393,7 +4424,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 4. Update on Supabase so seen status is persisted across fresh installs and devices
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         const { data: rows, error } = await client
           .from('trip_messages')
           .select('id, message, sender_id')
@@ -4526,7 +4557,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 3. Update on Supabase
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         await client
           .from('trip_messages')
           .update({ message: updatedPayload })
@@ -4585,7 +4616,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 2. Remove on Supabase
     if (isSupabaseConfigured && isValidUUID(tripId)) {
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         await client.from('trip_messages').delete().eq('id', messageId);
         await client.from('messages').delete().eq('id', messageId);
         if (claimId) {
@@ -4617,7 +4648,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       } else if (settlementAmount > 0) {
         if (isSupabaseConfigured && isValidUUID(tripId)) {
           try {
-            await (supabaseAdmin || supabase)
+            await (supabase)
               .from('settlement_payments')
               .delete()
               .eq('trip_id', tripId)
@@ -4767,7 +4798,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 memberPayload.user_id = newProfileId;
               }
 
-              const client = supabaseAdmin || supabase;
+              const client = supabase;
               if (guestMemberId && isValidUUID(guestMemberId)) {
                 await withTimeout(
                   client.from('trip_members').update(memberPayload).eq('id', guestMemberId),
@@ -4782,14 +4813,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
               if (newProfileId && guestMemberId && isValidUUID(guestMemberId)) {
                 await withTimeout(
-                  supabaseAdmin.from('expense_splits').update({ profile_id: newProfileId }).eq('member_id', guestMemberId),
+                  supabase.from('expense_splits').update({ profile_id: newProfileId }).eq('member_id', guestMemberId),
                   3500
                 ).catch(() => null);
               }
 
               if (isDirectFriendTrip) {
                 await withTimeout(
-                  supabaseAdmin.from('trips').update({
+                  supabase.from('trips').update({
                     name: `Split with ${newName}`,
                     friend_id: newProfileId || contact.id,
                   }).eq('id', t.id),
@@ -4855,7 +4886,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     // 2. Client-side fallback: direct queries to claim matching unlinked members
     try {
-      const client = supabaseAdmin || supabase;
+      const client = supabase;
       const { data: matchedMembers } = await withTimeout(
         client
           .from('trip_members')
@@ -5043,7 +5074,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       // 3. If defaultTripId exists but wasn't in memory, check Supabase directly (must be 1-on-1 and belong to current user!)
       if (!matchedTrip && friend.defaultTripId && isValidUUID(friend.defaultTripId) && isSupabaseConfigured && currentUserId) {
         try {
-          const client = supabaseAdmin || supabase;
+          const client = supabase;
           const { data: tripRow } = await withTimeout(
             client
               .from('trips')
@@ -5062,7 +5093,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       // 4. If still not found, search Supabase strictly for 1-on-1 friend split trips belonging to current user
       if (!matchedTrip && isSupabaseConfigured && currentUserId) {
         try {
-          const client = supabaseAdmin || supabase;
+          const client = supabase;
 
           // A. Parallel bi-directional query by profile ID for 1-on-1 split trips
           if (resolvedProfileId) {
@@ -5119,7 +5150,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         if (isSupabaseConfigured) {
           (async () => {
             try {
-              const client = supabaseAdmin || supabase;
+              const client = supabase;
               if (resolvedProfileId && matchedTrip!.created_by === currentUserId && matchedTrip!.friend_id !== resolvedProfileId) {
                 await client.from('trips').update({ friend_id: resolvedProfileId }).eq('id', matchedTrip!.id);
               }
@@ -5155,7 +5186,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         if (resolvedProfileId && isSupabaseConfigured) {
           (async () => {
             try {
-              const client = supabaseAdmin || supabase;
+              const client = supabase;
               await client.from('trips').update({ friend_id: resolvedProfileId }).eq('id', newTrip.id);
             } catch {}
           })();
@@ -5187,7 +5218,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const syncPromise = (async () => {
       syncTripMessagesTimestamps[tripId] = Date.now();
       try {
-        const client = supabaseAdmin || supabase;
+        const client = supabase;
         const { data, error } = await client
           .from('trip_messages')
           .select('*')
@@ -5504,7 +5535,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 3. Query Supabase for any existing personal trip before creating a duplicate
     if (effectiveUserId && isValidUUID(effectiveUserId)) {
       try {
-        const sb = supabaseAdmin || supabase;
+        const sb = supabase;
         const { data: dbTrips } = await withTimeout(
           sb
             .from('trips')
@@ -5625,7 +5656,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
     // 5. Query Supabase for latest up-to-date expenses
     try {
-      const sb = supabaseAdmin || supabase;
+      const sb = supabase;
       const { data } = await withTimeout(
         sb
           .from('expenses')

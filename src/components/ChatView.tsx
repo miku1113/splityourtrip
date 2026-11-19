@@ -53,7 +53,7 @@ import { uploadAudioToSupabase, uploadDocumentToSupabase, uploadVideoToSupabase 
 import { chatOutbox, OutboxMessageItem } from '../services/chatOutboxService';
 import { useTheme } from '../theme/useThemeStore';
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   useTripStore,
   computeBalances,
@@ -78,6 +78,7 @@ import TripCoverBadge from './TripCoverBadge';
 import ChatFeedSkeleton, { ChatPaginationSkeleton } from './ChatFeedSkeleton';
 import { StandardBottomSheet } from './StandardBottomSheet';
 import { getFriendSettings } from '../services/friendSettings';
+import { isTripBlockedBilateral } from '../services/blockService';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
@@ -207,6 +208,7 @@ export default function ChatView({
   };
 
   const [isBlocked, setIsBlocked] = useState(false);
+  const [isBlockedByMe, setIsBlockedByMe] = useState(false);
 
   useEffect(() => {
     if (isGroup) {
@@ -231,17 +233,31 @@ export default function ChatView({
 
   useFocusEffect(
     useCallback(() => {
-      if (!isGroup && (friendId || tripId)) {
-        getFriendSettings(friendId || tripId).then(data => {
-          if (data.isBlocked !== undefined) {
-            setIsBlocked(data.isBlocked);
-          }
-          if (data.nickname) {
-            setDisplayTitle(data.nickname);
-          }
-        });
+      if (!isGroup) {
+        const myId = user?.id || profile?.id;
+        const currentTrip = trips.find(t => t.id === tripId);
+        const blockCheck = isTripBlockedBilateral(currentTrip, myId, profile?.phone_number);
+        if (blockCheck.isBlocked) {
+          setIsBlocked(true);
+          setIsBlockedByMe(blockCheck.isBlockedByMe);
+        }
+
+        if (friendId || tripId) {
+          getFriendSettings(friendId || tripId).then(data => {
+            if (data.isBlocked !== undefined) {
+              setIsBlocked(data.isBlocked);
+              setIsBlockedByMe(data.isBlocked);
+            } else if (blockCheck.isBlocked) {
+              setIsBlocked(true);
+              setIsBlockedByMe(blockCheck.isBlockedByMe);
+            }
+            if (data.nickname) {
+              setDisplayTitle(data.nickname);
+            }
+          });
+        }
       }
-    }, [isGroup, friendId, tripId])
+    }, [isGroup, friendId, tripId, trips, user?.id, profile?.id, profile?.phone_number])
   );
 
   const [inputText, setInputText] = useState('');
@@ -1739,7 +1755,7 @@ export default function ChatView({
   };
 
   const handleSendText = async () => {
-    if (!inputText.trim()) return;
+    if (isBlocked || !inputText.trim()) return;
     const textToSend = inputText.trim();
 
     if (editingMessage) {
@@ -2279,7 +2295,7 @@ export default function ChatView({
       // Screenshot is NOT compulsory! Only upload if provided
       if (payScreenshotBase64 && payScreenshotUri) {
         try {
-          const client = supabaseAdmin || supabase;
+          const client = supabase;
           const storagePath = `settlements/${tripId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
           const arrayBuffer = decodeBase64ToArrayBuffer(payScreenshotBase64);
           const { data: uploadData } = await client.storage
@@ -2438,6 +2454,7 @@ export default function ChatView({
   };
 
   const handleAcceptPayment = async (item: TripMessage) => {
+    let settlementRowSyncFailed = false;
     let payload: any = item.payload;
     if (!payload && item.content && item.content.startsWith('{')) {
       try { payload = JSON.parse(item.content); } catch {}
@@ -2490,8 +2507,8 @@ export default function ChatView({
       // 2. Also insert into public.settlement_payments table in Supabase
       if (isSupabaseConfigured && isValidUUID(targetTripId)) {
         try {
-          const client = supabaseAdmin || supabase;
-          await client.from('settlement_payments').insert({
+          const client = supabase;
+          const { error: settlementError } = await client.from('settlement_payments').insert({
             trip_id: targetTripId,
             from_member: payerMember.id,
             to_member: receiverMember.id,
@@ -2500,7 +2517,12 @@ export default function ChatView({
             note: payload.note || (mode === 'cash' ? 'Settled in cash' : 'Paid via UPI'),
             paid_at: new Date().toISOString(),
           });
+          if (settlementError) {
+            settlementRowSyncFailed = true;
+            console.warn('settlement_payments insert failed:', settlementError.message);
+          }
         } catch (spErr) {
+          settlementRowSyncFailed = true;
           console.log('settlement_payments insert notice:', spErr);
         }
       }
@@ -2530,7 +2552,9 @@ export default function ChatView({
         tripId,
         currentUserId,
         resolvedSenderName,
-        `✅ Payment of ${amtStr} accepted and deducted from balance!`,
+        settlementRowSyncFailed
+          ? `✅ Payment of ${amtStr} accepted locally. Its cloud settlement record did not sync; check your connection before relying on other devices.`
+          : `✅ Payment of ${amtStr} accepted and deducted from balance!`,
         undefined,
         isGroup ? 'group' : 'individual'
       );
@@ -4599,7 +4623,9 @@ export default function ChatView({
         >
           <Ionicons name="ban-outline" size={20} color={colors.danger} />
           <Text style={[styles.blockedText, { color: colors.danger }]}>
-            This friend is blocked. Unblock in Friend Settings to chat.
+            {isBlockedByMe
+              ? 'This friend is blocked. Unblock in Friend Settings to chat.'
+              : 'You cannot message this user.'}
           </Text>
         </View>
       ) : (

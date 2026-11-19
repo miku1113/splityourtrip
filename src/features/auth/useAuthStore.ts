@@ -3,7 +3,7 @@ import { Platform, NativeModules } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { AppStorage } from '../../lib/storage';
-import { supabase, supabaseAdmin, isSupabaseConfigured, GOOGLE_WEB_CLIENT_ID } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured, GOOGLE_WEB_CLIENT_ID } from '../../lib/supabase';
 import { Profile } from '../../types/database';
 import { getUserCurrencyPreference, setUserCurrencyPreference } from '../../services/currency';
 // Dynamically resolve GoogleSignin only when the native module is present in the binary (e.g. custom development build)
@@ -225,7 +225,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         if (!profileRow) {
           try {
-            const { data } = await supabaseAdmin
+            const { data } = await supabase
               .from('profiles')
               .select('*')
               .eq('id', targetUserId)
@@ -298,7 +298,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         if (!dbProfile) {
           try {
-            const { data } = await supabaseAdmin
+            const { data } = await supabase
               .from('profiles')
               .select('*')
               .eq('id', userId)
@@ -636,26 +636,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     const cleanEmail = email.trim().toLowerCase();
     try {
-      // 1. Verify user exists first to prevent waiting on typos (read-only query)
-      if (supabaseAdmin) {
-        try {
-          const { data: userData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-          if (userData?.users && userData.users.length > 0) {
-            const userExists = userData.users.some(
-              (u) => u.email?.trim().toLowerCase() === cleanEmail
-            );
-            if (!userExists) {
-              return {
-                error: new Error(
-                  `No account found with "${cleanEmail}". Please check your email for typos or create an account.`
-                ),
-              };
-            }
-          }
-        } catch {}
-      }
-
-      // 2. Dispatch recovery email via Supabase Auth
+      // Dispatch recovery email without enumerating registered accounts.
       const { error } = await withTimeout(
         supabase.auth.resetPasswordForEmail(cleanEmail),
         10000
@@ -706,17 +687,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         10000
       );
 
-      if (updateError) {
-        if (data?.user?.id && supabaseAdmin) {
-          try {
-            await supabaseAdmin.auth.admin.updateUserById(data.user.id, { password: newPassword });
-          } catch {
-            return { error: new Error(updateError.message) };
-          }
-        } else {
-          return { error: new Error(updateError.message) };
-        }
-      }
+      if (updateError) return { error: new Error(updateError.message) };
 
       if (data?.user) {
         const fallbackName =
@@ -1241,6 +1212,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await AppStorage.removeItem('@splityourtrip_local_trips');
       await AppStorage.removeItem('@splityourtrip_cached_contacts');
       await AppStorage.removeItem('@splityourtrip_last_login_at');
+      await AppStorage.removeItemsByPrefix([
+        '@splityourtrip_local_details_',
+        '@splityourtrip_analyser_cached_',
+      ]);
     } catch {}
     if (isSupabaseConfigured) {
       try {
@@ -1322,7 +1297,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           updated_at: new Date().toISOString(),
         };
 
-        const { error: dbErr } = await supabaseAdmin
+        const { error: dbErr } = await supabase
           .from('profiles')
           .upsert(payload, { onConflict: 'id' });
 

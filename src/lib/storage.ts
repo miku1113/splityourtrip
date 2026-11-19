@@ -33,4 +33,16 @@ export const AppStorage = {
       // Memory fallback remains active
     }
   },
+
+  removeItemsByPrefix: async (prefixes: string[]): Promise<void> => {
+    const matches = (key: string) => prefixes.some(prefix => key.startsWith(prefix));
+    Object.keys(memoryStore).filter(matches).forEach(key => delete memoryStore[key]);
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const matchingKeys = keys.filter(matches);
+      if (matchingKeys.length > 0) await AsyncStorage.multiRemove(matchingKeys);
+    } catch {
+      // Memory cache is still cleared when persistent storage is unavailable.
+    }
+  },
 };

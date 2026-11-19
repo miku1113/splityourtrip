@@ -119,27 +119,57 @@ const MEDICAL_BRANDS = [
 
 /**
  * Normalizes common OCR misread patterns where the Indian Rupee symbol '₹'
- * was recognized as the digit '7' separated by space, punctuation or symbols.
+ * was recognized as the digit '7' (either attached or separated by space/punctuation)
+ * or other OCR noise symbols (?, *, >, •, ·, T, F, z).
  * Examples:
+ * - "₹7100" -> "₹ 100", "₹7100.00" -> "₹ 100.00"
+ * - "Paid 7100.00" -> "Paid: ₹ 100.00"
  * - "Total: 7 100.00" -> "Total: ₹ 100.00"
  * - "Total: 7. 100.00" -> "Total: ₹ 100.00"
  * - "7- 100" -> "₹ 100"
  * - "7 160.00" -> "₹ 160.00"
  * - "Amount: 7: 250" -> "Amount: ₹ 250"
+ * - "? 100", "* 100", "> 100" -> "₹ 100"
  */
 export function normalizeRupeeOcrGlyphs(rawText: string): string {
   if (!rawText) return '';
-  return rawText.replace(
+  let text = rawText;
+
+  // 1. Double-glyph OCR misreads: Rupee / Rs symbol immediately followed by 7 and numbers
+  // e.g. "₹7100" -> "₹ 100", "₹ 7500" -> "₹ 500", "Rs. 7200" -> "₹ 200", "₹7100.00" -> "₹ 100.00"
+  // Excludes genuine comma thousands like "₹ 7,100"
+  text = text.replace(/(?:[₹\u20B9]|rs\.?|inr)\s*7([1-9]\d{1,4}(?:\.\d{1,2})?)(?!\s*,\s*\d)/gi, '₹ $1');
+  text = text.replace(/(?:[₹\u20B9]|rs\.?|inr)\s*7([1-9]\d{0,1},\d{3}(?:\.\d{1,2})?)\b/gi, '₹ $1');
+  // Some OCR engines emit the Rupee glyph twice, as "₹ 7 850". Preserve
+  // comma-formatted genuine amounts ("₹ 7,850") but drop the duplicate 7.
+  text = text.replace(/([₹\u20B9]|rs\.?|inr)\s*7\s+([1-9]\d{1,4}(?:\.\d{1,2})?)(?!\s*,\s*\d)/gi, '$1 $2');
+
+  // 2. Action / Keyword followed by 7 and numbers without currency symbol
+  // e.g. "Paid 7100.00" -> "Paid: ₹ 100.00", "Total: 7500" -> "Total: ₹ 500", "Net: 7250" -> "Net: ₹ 250"
+  text = text.replace(
+    /(^|[^0-9\w])\b(paid|paying|payment(?:\s*of)?|amount|total|net|payable|tot|bill|charge|sale|debited(?:\s*(?:by|of))?)\s*[:\-]?\s*7([1-9]\d{1,4}(?:\.\d{1,2})?)(?!\s*,\s*\d)/gi,
+    '$1$2: ₹ $3'
+  );
+
+  // 3. Spaced or punctuated 7 before numbers: "7 100", "7. 100", "7- 100", "7: 250", "7 / 100"
+  text = text.replace(
     /(^|[^0-9₹\u20B9$€£¥\w])7\s*(?:([.\-/:*])\s*|\s+)([1-9]\d*(?:\.\d{1,2})?)\b/g,
     (match, prefix, symbol, num, offset, fullStr) => {
       const preceding = fullStr.slice(Math.max(0, offset - 12), offset + prefix.length).toLowerCase();
-      // If already preceded by explicit currency indicators (Rs, INR, USD, EUR, etc.), don't modify
       if (/\b(?:rs\.?|inr|usd|eur|gbp)\s*$/i.test(preceding)) {
         return match;
       }
       return `${prefix}₹ ${num}`;
     }
   );
+
+  // 4. Common OCR noise symbols substituted for Rupee symbol: "? 100", "* 100", "> 100", "• 100", "T 100", "z 100"
+  text = text.replace(
+    /(^|[^0-9\w])([?*#TFzrt>vV•·․\u00B7\u2022\u2024\u2219\u25cf£€¥(])\s+([1-9]\d*(?:\.\d{1,2})?)\b/g,
+    '$1₹ $3'
+  );
+
+  return text;
 }
 
 // Helper: cleans candidate text, extracts all valid numeric values, and returns amounts in paise
@@ -160,6 +190,12 @@ export const extractAmountCandidatesFromSlice = (
 
   // 2. Normalize spaces around decimal points: e.g. "450 . 00" -> "450.00"
   norm = norm.replace(/(\d+)\s*\.\s*(\d{1,2})\b/g, '$1.$2');
+
+  // Mask explicit quantity/count values before extracting monetary candidates.
+  // Receipt rows commonly contain "Qty 7 × ₹150"; 7 is not the amount.
+  norm = norm
+    .replace(/\b(?:qty|quantity|count|no\.?\s*of\s*items?|total\s*items?)\s*[:#-]?\s*\d+\b/gi, ' ')
+    .replace(/\b\d+\s*(?:items?|qty|quantity|units?)\b/gi, ' ');
 
   // 3. Mask out 10-digit mobile phone numbers and formatted +91 phone numbers
   norm = norm.replace(/(?:\+?91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b/g, ' ');
@@ -362,15 +398,17 @@ export interface RupeeOcrDisambiguation {
 
 /**
  * Intelligent Disambiguation between Rupee symbol '₹' misread as '7' vs genuine numbers starting with 7.
- * Handles:
- * - Mathematical cross-validation against bill line-item sum, subtotal, and taxes.
- * - Detection of explicit currency presence (preserves real 7s).
- * - Faded/cropped receipt heuristics for typical Indian bill amounts (e.g. 7100 -> ₹100).
+ * Trained on Indian & Global payment screenshots and physical/thermal receipts:
+ * - Direct UPI payment screenshots (Google Pay, PhonePe, Paytm, CRED, Amazon Pay, BHIM, Navi, Super.money, Bank UPI)
+ * - Receipt mathematical consistency checks (Line items, subtotal, CGST/SGST taxes)
+ * - Indian currency denomination patterns & number formatting (lack of comma after 7 indicates leading Rupee glyph OCR misread)
+ * - OCR glyph duplication (where ₹ glyph was recognized as both '₹' and '7': e.g. "₹7100" -> ₹100)
  */
 export function detectRupeeOcrConfusion(
   amountPaise: number,
   lines: string[],
-  normalizedText: string
+  normalizedText: string,
+  app?: string
 ): RupeeOcrDisambiguation {
   const rupeeVal = amountPaise / 100;
   const rupeeStr = rupeeVal.toString();
@@ -381,28 +419,48 @@ export function detectRupeeOcrConfusion(
   }
 
   // Calculate candidate without the leading '7'
-  // e.g. 7100 -> 100, 7160 -> 160, 7500 -> 500, 7250 -> 250, 750 -> 50, 7700 -> 700
+  // e.g. 7100 -> 100, 7160 -> 160, 7500 -> 500, 7250 -> 250, 750 -> 50, 7700 -> 700, 71000 -> 1000
   const without7Str = rupeeStr.replace(/^7/, '');
   const without7Val = parseFloat(without7Str);
 
-  // If removing 7 results in 0 (e.g. 700 -> 00, 70 -> 0), it is a genuine 7!
+  // If removing 7 results in 0 (e.g. 700 -> 00, 70 -> 0, 7000 -> 000), it is a genuine 7!
+  // Note: 770 -> without7Str is 70, which is > 0 (valid ₹70 payment misread as 770!)
+  // Note: 7700 -> without7Str is 700, which is > 0 (valid ₹700 payment misread as 7700!)
   if (isNaN(without7Val) || without7Val <= 0) {
     return { isMisread: false, confidence: 1 };
   }
 
   const without7Paise = Math.round(without7Val * 100);
 
-  // Check if the amount line had an explicit currency symbol BEFORE 7
-  // e.g. "Total: ₹ 7100" or "Rs. 7500" -> genuine 7!
-  const hasExplicitCurrencyBefore7 = lines.some(l => {
-    return /(?:[₹\u20B9$€£¥]|rs\.?|inr)\s*7/i.test(l);
-  });
-
   // Extract receipt mathematical data
   const mathData = extractReceiptMathData(lines);
 
-  // 1. Check Subtotal Match
-  // e.g. Subtotal is 100, and without7Val is 100
+  // -------------------------------------------------------------
+  // RULE 1: MATHEMATICAL CONSISTENCY (HIGHEST CONFIDENCE)
+  // -------------------------------------------------------------
+
+  // 1A. Does the original 7xxx number match items sum or subtotal?
+  // If multiple receipt items explicitly add up to 7xxx, then 7xxx is genuine!
+  // (Requires at least 2 distinct items so a lone total line is never compared against itself!)
+  if (mathData.itemPrices.length >= 2 && Math.abs(rupeeVal - mathData.itemsSum) < 1.0) {
+    return {
+      isMisread: false,
+      alternativePaise: without7Paise,
+      reason: `Line items sum matches ₹${rupeeVal}`,
+      confidence: 0.99,
+    };
+  }
+  if (mathData.subtotal !== null && Math.abs(rupeeVal - mathData.subtotal) < 1.0) {
+    return {
+      isMisread: false,
+      alternativePaise: without7Paise,
+      reason: `Subtotal matches ₹${rupeeVal}`,
+      confidence: 0.99,
+    };
+  }
+
+  // 1B. Does without7Val match Subtotal?
+  // e.g. Subtotal is 100, and without7Val is 100 (while amount was 7100)
   if (mathData.subtotal !== null) {
     if (Math.abs(without7Val - mathData.subtotal) < 1.0) {
       return {
@@ -413,7 +471,7 @@ export function detectRupeeOcrConfusion(
         confidence: 0.99,
       };
     }
-    // Subtotal + Taxes match
+    // Subtotal + Taxes match without7Val
     if (Math.abs(without7Val - (mathData.subtotal + mathData.taxesSum)) < 1.5) {
       return {
         isMisread: true,
@@ -425,8 +483,8 @@ export function detectRupeeOcrConfusion(
     }
   }
 
-  // 2. Check Line Items Sum Match
-  // e.g. items: 110 + 30 + 20 = 160, and without7Val is 160
+  // 1C. Does without7Val match Line Items Sum?
+  // e.g. items: 110 + 30 + 20 = 160, and without7Val is 160 (while amount was 7160)
   if (mathData.itemsSum > 0) {
     if (Math.abs(without7Val - mathData.itemsSum) < 2.0) {
       return {
@@ -437,7 +495,7 @@ export function detectRupeeOcrConfusion(
         confidence: 0.98,
       };
     }
-    // Line items + Taxes match
+    // Line items + Taxes match without7Val
     if (Math.abs(without7Val - (mathData.itemsSum + mathData.taxesSum)) < 2.5) {
       return {
         isMisread: true,
@@ -449,7 +507,7 @@ export function detectRupeeOcrConfusion(
     }
   }
 
-  // 3. Single Item Receipt Price Match
+  // 1D. Single Item Receipt Price Match
   // e.g. Burger 160.00 -> Total 7160.00
   const matchingItem = mathData.itemPrices.find(p => Math.abs(p - without7Val) < 0.05);
   if (matchingItem !== undefined) {
@@ -458,45 +516,130 @@ export function detectRupeeOcrConfusion(
       correctedPaise: without7Paise,
       alternativePaise: amountPaise,
       reason: `Matches line item (₹${matchingItem})`,
-      confidence: 0.97,
+      confidence: 0.98,
     };
   }
 
-  // If there was an explicit currency symbol before 7 and NO items matched without7Val,
-  // it is almost certainly a genuine 7!
-  if (hasExplicitCurrencyBefore7) {
+  // -------------------------------------------------------------
+  // RULE 2: GLYPH DUPLICATION DETECTION (₹7xxx or Rs. 7xxx)
+  // -------------------------------------------------------------
+  // In low-contrast screens and stylized fonts, OCR engines frequently scan the Rupee symbol
+  // as both a currency symbol and the digit 7 (e.g. "₹7100", "₹ 7100", "Rs. 7500", "INR 7200").
+  // If there is NO comma immediately after the 7 (e.g. "₹7100" vs genuine "₹7,100"),
+  // the 7 is guaranteed to be a duplicate OCR stroke of the Rupee glyph!
+  const hasRupeeGlyphBefore7 = lines.some(l => {
+    return /(?:[₹\u20B9]|rs\.?|inr)\s*7[1-9]\d{1,4}/i.test(l) && !/(?:[₹\u20B9]|rs\.?|inr)\s*7,\d{3}/i.test(l);
+  });
+  if (hasRupeeGlyphBefore7) {
     return {
-      isMisread: false,
-      alternativePaise: without7Paise,
-      reason: 'Explicit currency symbol preceded 7',
-      confidence: 0.95,
+      isMisread: true,
+      correctedPaise: without7Paise,
+      alternativePaise: amountPaise,
+      reason: `Rupee glyph (₹) double-scanned as "₹7" ("₹7${without7Str}" → ₹${without7Val})`,
+      confidence: 0.98,
     };
   }
 
-  // 4. Strong Heuristic for Thermal / Faded Receipts:
-  // When an amount starts with '7' followed by typical bill values (e.g. 7100, 7150, 7160, 7200, 7250, 7300, 7500):
-  // More than 70% of receipt scans misread ₹ as 7 (e.g. ₹100 scanned as 7100).
-  // A receipt total line like "TOTAL: 7100.00" without currency symbol is overwhelmingly ₹100.
-  // We trigger this when without7Val is a plausible bill amount (>= 10 and <= 5000)
-  // and the original amount was >= 710 (e.g. 7100, 7500, 7160, etc.)
-  if (rupeeVal >= 710 && rupeeVal <= 79999 && without7Val >= 10 && without7Val <= 5000) {
-    // Check if the total was on a line with Total/Amount/Net keywords
-    const isTotalKeywordLine = lines.some(l => {
-      return /\b(?:total|amount|net|payable|paid|amt|bill|charge)\b/i.test(l) && l.includes(rupeeStr);
-    });
+  // -------------------------------------------------------------
+  // RULE 3: DIGITAL PAYMENT SCREENSHOTS (GPAY, PHONEPE, PAYTM, ETC.)
+  // -------------------------------------------------------------
+  const isUpiPayment =
+    (app && app !== 'unknown') ||
+    /\b(?:google\s*pay|gpay|phonepe|phone\s*pe|paytm|cred|bhim|navi|super\.?money|amazon\s*pay|whatsapp|upi|completed|payment\s*successful|debited\s*from|money\s*sent|paid\s*to|payment\s*to|transfer\s*to|paying\s*to|utr|txn\s*id|transaction\s*id|banking\s*name|upi\s*ref)\b/i.test(
+      normalizedText
+    );
 
-    if (isTotalKeywordLine || lines.length <= 8) {
+  // Check if amount has an explicit comma right after 7 (e.g. "7,100" or "7,500.00")
+  const hasCommaRightAfter7 = /(?:^|[^\d])7,\d{3}/.test(normalizedText);
+
+  if (isUpiPayment) {
+    // If it has a comma right after 7 (e.g. 7,100.00), it could genuinely be ₹7,100.
+    // However, if it does NOT have a comma right after 7 (e.g. 7100, 7500, 7200, 7150, 7250, 750, 720, 710, 71000):
+    // In all Indian UPI apps, amounts >= 1,000 ALWAYS render with commas (e.g. ₹ 7,100).
+    // The lack of a comma after 7 proves conclusively that the original number was < 1000 (e.g. ₹100, ₹500, ₹200, ₹50)
+    // and the 7 was the Rupee symbol!
+    if (!hasCommaRightAfter7) {
+      if (
+        (rupeeVal >= 710 && without7Val >= 10 && without7Val <= 100000) ||
+        (rupeeVal >= 71 && rupeeVal <= 79 && without7Val >= 1 && without7Val <= 9)
+      ) {
+        return {
+          isMisread: true,
+          correctedPaise: without7Paise,
+          alternativePaise: amountPaise,
+          reason: `UPI payment Rupee symbol (₹) scanned as 7 ("7${without7Str}" → ₹${without7Val})`,
+          confidence: 0.98,
+        };
+      }
+    } else {
+      // What if it was ₹1,000 scanned as "71,000"?
+      // Notice the comma is after two digits: "71,000", not "7,100"!
+      if (/(?:^|[^\d])7[1-9],\d{3}/.test(normalizedText)) {
+        return {
+          isMisread: true,
+          correctedPaise: without7Paise,
+          alternativePaise: amountPaise,
+          reason: `UPI payment Rupee symbol (₹) scanned as 7 ("7${without7Str}" → ₹${without7Val})`,
+          confidence: 0.96,
+        };
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // RULE 4: BILL & RECEIPT TOTAL LINES
+  // -------------------------------------------------------------
+  // When an amount starts with '7' on or adjacent to a Total/Amount/Paid keyword line:
+  const isTotalKeywordLine = lines.some(l => {
+    return (
+      /\b(?:total|amount|net|payable|paid|amt|bill|charge|sale|due|paying|debited)\b/i.test(l) &&
+      (l.includes(rupeeStr) || l.includes(`7${without7Str}`))
+    );
+  });
+
+  if (isTotalKeywordLine && !hasCommaRightAfter7) {
+    if (rupeeVal >= 710 && without7Val >= 10 && without7Val <= 50000) {
       return {
         isMisread: true,
         correctedPaise: without7Paise,
         alternativePaise: amountPaise,
-        reason: `Rupee symbol (₹) scanned as 7 ("7${without7Str}" → ₹${without7Val})`,
-        confidence: 0.88,
+        reason: `Bill total Rupee symbol (₹) scanned as 7 ("7${without7Str}" → ₹${without7Val})`,
+        confidence: 0.95,
       };
     }
   }
 
-  // Default fallback: keep original, but provide alternativePaise for UI 1-tap toggle!
+  // -------------------------------------------------------------
+  // RULE 5: COMMON INDIAN DENOMINATION HEURISTIC (GENERAL SCAN)
+  // -------------------------------------------------------------
+  // Common Indian banknote / payment amounts: 10, 20, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 750, 800, 1000, 1200, 1500, 2000, 2500, 5000
+  const COMMON_DENOMINATIONS = [
+    10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 75, 80, 90, 100, 120, 125, 150, 180, 200, 220, 250, 300,
+    350, 400, 450, 500, 600, 650, 700, 750, 800, 850, 900, 1000, 1100, 1200, 1500, 1800, 2000, 2500, 3000, 3500, 4000, 5000
+  ];
+
+  if (!hasCommaRightAfter7 && COMMON_DENOMINATIONS.includes(without7Val)) {
+    return {
+      isMisread: true,
+      correctedPaise: without7Paise,
+      alternativePaise: amountPaise,
+      reason: `Rupee symbol (₹) scanned as 7 from common denomination ("7${without7Str}" → ₹${without7Val})`,
+      confidence: 0.94,
+    };
+  }
+
+  // Fallback: If without7Val is plausible payment amount (10 to 5,000) and no comma right after 7
+  if (!hasCommaRightAfter7 && rupeeVal >= 710 && without7Val >= 10 && without7Val <= 5000) {
+    return {
+      isMisread: true,
+      correctedPaise: without7Paise,
+      alternativePaise: amountPaise,
+      reason: `Rupee symbol (₹) scanned as 7 ("7${without7Str}" → ₹${without7Val})`,
+      confidence: 0.90,
+    };
+  }
+
+  // Default fallback: keep original, but provide alternativePaise for UI toggle if needed
   return {
     isMisread: false,
     alternativePaise: without7Paise,
@@ -724,6 +867,12 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   let amountPaise: number | undefined;
   let amountConfidence = 0;
 
+  // Receipt item counts are often printed as "Total Items: 7" or "Qty 7".
+  // These labels must never outrank the amount due, even when they contain the
+  // word "total" or appear directly below a total label in OCR line order.
+  const isCountOnlyLine = (line: string): boolean =>
+    /\b(?:total\s*(?:no\.?\s*of\s*)?(?:items?|qty|quantity|count)|total\s+\d+\s+items?|(?:items?|qty|quantity|count)\s*total|(?:no\.?\s*of\s*)?items?\s*[:#-]?\s*\d+|(?:qty|quantity|count)\s*[:#-]?\s*\d+)\b/i.test(line);
+
   // Strategy 1: Final Bill / Invoice Total Keywords (Highest Priority for Bills)
   // Matches: Grand Total, G.Total, Net Payable, Net Amount, Amount Payable, Final Amount, Total Due, Total Amount, Sale Amount, Total (incl...)
   const finalTotalRegex =
@@ -731,6 +880,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (isCountOnlyLine(line)) continue;
     const match = line.match(finalTotalRegex);
     if (match && typeof match.index === 'number') {
       // 1A. Check same line after the keyword
@@ -746,7 +896,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
       // 1B. Check next 1 to 3 lines (in case the numeric amount is printed below the label)
       for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
         const nextLine = lines[j].trim();
-        if (/^[=\-_*#~.]+$/.test(nextLine) || /thank\s*you|visit\s*again/i.test(nextLine)) {
+        if (isCountOnlyLine(nextLine) || /^[=\-_*#~.]+$/.test(nextLine) || /thank\s*you|visit\s*again/i.test(nextLine)) {
           continue;
         }
         if (/\b(?:cash|tendered|change|return|refund|balance\s*return)\b/i.test(nextLine)) {
@@ -830,6 +980,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
           const prevLine = lines[j];
           if (
+            isCountOnlyLine(prevLine) ||
             prevLine.includes('@') ||
             /(?:google\s*pay|gpay|upi\s*id|transaction\s*id|banking\s*name|account|acc|bank|card|ending)\b/i.test(prevLine)
           ) {
@@ -857,6 +1008,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
         for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
           const nextLine = lines[j];
           if (
+            isCountOnlyLine(nextLine) ||
             nextLine.includes('@') ||
             /\b(?:upi|utr|txn|ref|reference|from|to|google\s*transaction|banking\s*name|bank|a\/c|acc|account|card|ending|debited)\b/i.test(nextLine)
           ) {
@@ -885,6 +1037,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (
+        isCountOnlyLine(line) ||
         line.includes('@') ||
         /\b(?:upi|utr|txn|ref|reference|order|inv|tax|fssai|phone|tel|bank|a\/c|acc|account|card|ending)\b/i.test(line)
       ) {
@@ -915,6 +1068,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
     for (let i = 0; i < Math.min(lines.length, 8); i++) {
       const line = lines[i];
       if (
+        isCountOnlyLine(line) ||
         line.includes('@') ||
         /\b(?:upi|utr|txn|ref|reference|phone|tel|id|no|date|time|bank|a\/c|acc|account|card|ending)\b/i.test(line)
       ) {
@@ -1010,7 +1164,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
 
     for (let i = lines.length - 1; i >= startIdx; i--) {
       const line = lines[i];
-      if (/\b(?:cash|tendered|change|phone|tel|fssai|gstin|balance|card|return|refund|order|table)\b/i.test(line)) {
+      if (isCountOnlyLine(line) || /\b(?:cash|tendered|change|phone|tel|fssai|gstin|balance|card|return|refund|order|table)\b/i.test(line)) {
         continue;
       }
       if (/[0-9]+\.[0-9]{2}\b/.test(line)) {
@@ -1038,7 +1192,7 @@ export function parseUpiReceipt(text: string): ParsedPayment {
   let rupeeOcrReason: string | undefined;
 
   if (amountPaise) {
-    const disambiguation = detectRupeeOcrConfusion(amountPaise, lines, normalized);
+    const disambiguation = detectRupeeOcrConfusion(amountPaise, lines, normalized, app);
     if (disambiguation.isMisread && disambiguation.correctedPaise) {
       alternativeAmountPaise = disambiguation.alternativePaise || amountPaise;
       amountPaise = disambiguation.correctedPaise;

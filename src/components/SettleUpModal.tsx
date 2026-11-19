@@ -24,7 +24,7 @@ import { useContactsStore, FriendContact, normalizePhone } from '../features/con
 import { useAuthStore, decodeBase64ToArrayBuffer } from '../features/auth/useAuthStore';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
 import { formatCurrencyAmount } from '../services/currency';
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { scaleFont, moderateScale } from '../theme/responsive';
 import TripCoverBadge from './TripCoverBadge';
 import { DraggableBottomSheet } from './DraggableBottomSheet';
@@ -232,7 +232,7 @@ export default function SettleUpModal({
           });
           const arrayBuffer = decodeBase64ToArrayBuffer(base64Data);
 
-          const client = supabaseAdmin || supabase;
+          const client = supabase;
           const { data: upData, error: upErr } = await client.storage
             .from('attachments')
             .upload(storagePath, arrayBuffer, {

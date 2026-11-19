@@ -473,6 +473,22 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         return (a.name || '').localeCompare(b.name || '');
       });
 
+      // Filter out any contacts who are blocked bilaterally
+      let finalMerged = merged;
+      try {
+        const { getBilateralBlockedSet } = require('../../services/blockService');
+        const { blockedUserIds, blockedPhones } = await getBilateralBlockedSet(targetId, myUserPhone);
+        if (blockedUserIds.size > 0 || blockedPhones.size > 0) {
+          finalMerged = merged.filter(c => {
+            const normP = c.cleanPhone || normalizePhone(c.phoneNumber);
+            if (c.profileId && blockedUserIds.has(c.profileId)) return false;
+            if (c.id && blockedUserIds.has(c.id)) return false;
+            if (normP && (blockedPhones.has(normP) || (normP.length >= 6 && blockedPhones.has(normP.slice(-10))))) return false;
+            return true;
+          });
+        }
+      } catch {}
+
       const newTotals = {
         totalOwedToYouPaise: summaryRes.totalOwedToYouPaise,
         totalYouOwePaise: summaryRes.totalYouOwePaise,
@@ -487,11 +503,11 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
         currentTotals.netOverallPaise !== newTotals.netOverallPaise;
 
       const currentContacts = get().contacts;
-      let contactsChanged = currentContacts.length !== merged.length;
+      let contactsChanged = currentContacts.length !== finalMerged.length;
       if (!contactsChanged) {
-        for (let i = 0; i < merged.length; i++) {
+        for (let i = 0; i < finalMerged.length; i++) {
           const a = currentContacts[i];
-          const b = merged[i];
+          const b = finalMerged[i];
           if (
             a.id !== b.id ||
             a.owedToYouPaise !== b.owedToYouPaise ||
@@ -510,7 +526,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       if (totalsChanged || contactsChanged || get().isLoading) {
         set({
           friendsSummary: newTotals,
-          contacts: merged,
+          contacts: finalMerged,
           isLoading: false,
         });
       }

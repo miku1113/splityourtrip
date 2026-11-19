@@ -1,9 +1,10 @@
-import { supabase, supabaseAdmin, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from './settle';
 import { FriendContact, normalizePhone, normalizeNameForMatch, getContactNameByPhone, getEffectiveContactName, isGenericPlaceholder, isSelfContact } from '../features/contacts/useContactsStore';
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
 import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload, deletedTripIdsSet } from '../features/trips/useTripStore';
+import { getBilateralBlockedSet, parseTripBlockMeta } from './blockService';
 
 export interface FriendsApiResult {
   totalOwedToYouPaise: number;
@@ -88,7 +89,7 @@ export async function fetchFriendsSummaryApi(
   } catch {}
 
   try {
-    const sb = supabaseAdmin || supabase;
+    const sb = supabase;
 
     // Ensure we have current user's own profile data for strict self-filtering
     if ((!myUserPhone || !myUserName) && userId) {
@@ -148,12 +149,13 @@ export async function fetchFriendsSummaryApi(
       return emptyResult;
     }
 
-    // Concurrently fetch trips metadata, members, expenses, and recent messages
-    const [allTripsRes, allMembersRes, allExpensesRes, allMessagesRes] = await Promise.all([
-      sb.from('trips').select('id, name, trip_type, friend_id, created_by').in('id', tripIds),
+    // Concurrently fetch trips metadata, members, expenses, recent messages, and bilateral blocks
+    const [allTripsRes, allMembersRes, allExpensesRes, allMessagesRes, bilateralBlocks] = await Promise.all([
+      sb.from('trips').select('id, name, trip_type, friend_id, created_by, description').in('id', tripIds),
       sb.from('trip_members').select('*').in('trip_id', tripIds),
       sb.from('expenses').select('*').in('trip_id', tripIds),
       sb.from('trip_messages').select('id, trip_id, sender_id, message, created_at').in('trip_id', tripIds).order('created_at', { ascending: false }).limit(400),
+      getBilateralBlockedSet(userId, myUserPhone),
     ]);
 
     const remoteTrips = allTripsRes.data || [];
@@ -161,6 +163,31 @@ export async function fetchFriendsSummaryApi(
     const remoteExpenses = allExpensesRes.data || [];
     const remoteMessages = allMessagesRes.data || [];
     const expIds = remoteExpenses.map((e: any) => e.id);
+
+    const { blockedUserIds, blockedPhones, blockedTripIds } = bilateralBlocks;
+
+    // Scan trips for blocked descriptions and register them
+    remoteTrips.forEach((t: any) => {
+      const meta = parseTripBlockMeta(t.description);
+      if (meta && meta.is_blocked) {
+        blockedTripIds.add(t.id);
+        if (meta.blocked_id) blockedUserIds.add(meta.blocked_id);
+        if (meta.blocked_by) blockedUserIds.add(meta.blocked_by);
+        if (meta.blocked_phone) {
+          const norm = normalizePhone(meta.blocked_phone);
+          if (norm) {
+            blockedPhones.add(norm);
+            if (norm.length >= 6) blockedPhones.add(norm.slice(-10));
+          }
+        }
+      }
+    });
+    localTrips.forEach(t => {
+      const meta = parseTripBlockMeta(t.description);
+      if (meta && meta.is_blocked) {
+        blockedTripIds.add(t.id);
+      }
+    });
 
     const splitsRes = expIds.length > 0
       ? await sb.from('expense_splits').select('*').in('expense_id', expIds)
@@ -263,6 +290,10 @@ interface FriendMapEntry {
       ];
 
       const tripMeta = allTripsMap.get(tId);
+      const isOneOnOneTrip = tripMeta && (tripMeta.trip_type === 'friend_split' || tripMeta.name?.toLowerCase().startsWith('split with '));
+      if (isOneOnOneTrip && (blockedTripIds.has(tId) || parseTripBlockMeta(tripMeta?.description)?.is_blocked)) {
+        continue;
+      }
       const lastReadMs = lastReadMap.get(tId) || 0;
       const tMessages = remoteMessages.filter((m: any) => m.trip_id === tId);
 
@@ -489,6 +520,17 @@ interface FriendMapEntry {
 
     for (const [, f] of friendMap.entries()) {
       if (isSelfContact(f, { id: userId, name: myUserName, phone: myUserPhone })) continue;
+
+      const normP = f.cleanPhone || normalizePhone(f.phoneNumber);
+      const isBlocked =
+        (f.profileId && blockedUserIds.has(f.profileId)) ||
+        (f.id && blockedUserIds.has(f.id)) ||
+        (normP && (blockedPhones.has(normP) || (normP.length >= 6 && blockedPhones.has(normP.slice(-10))))) ||
+        (f.trips.size > 0 && Array.from(f.trips).every(tId => blockedTripIds.has(tId)));
+
+      if (isBlocked) {
+        continue;
+      }
 
       const prof = f.profileId ? profilesMap.get(f.profileId) : null;
       // If f.name was accidentally set to the current user's name, strip it so profileName wins!

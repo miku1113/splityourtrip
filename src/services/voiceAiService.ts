@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { AppStorage } from '../lib/storage';
 import { TripMember, TripBalanceRow } from '../types/database';
-import { parseVoiceExpense } from './voiceExpenseParser';
+import { matchVoiceTrip, parseSpokenAmount, parseVoiceExpense } from './voiceExpenseParser';
 
 // Supported language codes for speech recognition
 export type VoiceLanguage = 'auto' | 'en' | 'hi' | 'gu';
@@ -685,6 +685,81 @@ export async function runVoiceCopilot(params: {
     }
   }
 
+  // Deterministic path for explicit expense additions. This keeps common add
+  // commands consistent when Groq is unavailable or gives device-dependent output.
+  const startsExpenseAdd = /^(?:please\s+)?(?:add|record|log|track|save|enter)\b/i.test(cleanPrompt) ||
+    /\b(?:add|record|log|track|save|enter)\s+(?:kar\s+do|karo|do)\b/i.test(cleanPrompt) ||
+    /(?:जोड़\s*दो|दर्ज\s*करो|लिख\s*दो|ઉમેરો|નોંધો)\s*$/u.test(cleanPrompt);
+  const reportsPaidExpense = /^(?:(?:i|we)\s+)?(?:have\s+)?(?:spent|paid|bought|used)\b/i.test(cleanPrompt) ||
+    /^(?:maine|mene|humne|मैंने|हमने|મેં)\b/i.test(cleanPrompt);
+  const hasExpenseLanguage = /\b(expense|bill|spend|spent|purchase|paid)\b/i.test(cleanPrompt);
+  const hasAmount = parseSpokenAmount(cleanPrompt).amountPaise > 0;
+  const isContactSplitRequest = /\b(split\s*with|contact\s*split|friend\s*split|sathe|ke\s*saath|ke\s*sath)\b/i.test(cleanPrompt);
+  if ((startsExpenseAdd || reportsPaidExpense) && !isContactSplitRequest && (hasExpenseLanguage || hasAmount)) {
+    if (trips.length === 0) {
+      return { reply: "You don't have a trip to add this expense to yet. Create or join a trip first.", action: null };
+    }
+
+    const explicitTripMatch = matchVoiceTrip(cleanPrompt, trips);
+    if (explicitTripMatch.ambiguous) {
+      return {
+        reply: `I found more than one matching trip. Which one should I use: ${trips
+          .slice(0, 5)
+          .map(t => t.name)
+          .join(', ')}?`,
+        action: null,
+      };
+    }
+
+    const mentionsTrip = /\btrip\b/i.test(cleanPrompt);
+    const targetTrip = explicitTripMatch.trip || (
+      mentionsTrip
+        ? null
+        : trips.find(t => t.id === activeTripId) || (trips.length === 1 ? trips[0] : null)
+    );
+    if (!targetTrip) {
+      const tripNames = trips.slice(0, 5).map(t => t.name).join(', ');
+      return {
+        reply: mentionsTrip
+          ? `I couldn't match that trip to one of your trips. Your trips are ${tripNames}. Which one did you mean?`
+          : `Which trip should I add this to? Your trips are ${tripNames}.`,
+        action: null,
+      };
+    }
+
+    const parsedAmount = parseSpokenAmount(cleanPrompt);
+    if (parsedAmount.amountPaise <= 0) {
+      return { reply: `How much was the expense for ${targetTrip.name}?`, action: null };
+    }
+
+    const parserInput = explicitTripMatch.trip ? cleanPrompt : `${cleanPrompt} ${targetTrip.name}`;
+    const parsed = parseVoiceExpense(
+      parserInput,
+      [targetTrip as any],
+      currentUserId,
+      currentUserPhone,
+      tripMembersMap as any
+    );
+    const expense: CopilotExpensePayload = {
+      amountPaise: parsedAmount.amountPaise,
+      amountRupees: parsedAmount.amountRupees,
+      description: parsed.description || 'Expense',
+      category: parsed.category,
+      tripId: targetTrip.id,
+      tripName: targetTrip.name,
+      paidByMemberId: parsed.paidByMemberId || '',
+      paidByMemberName: parsed.paidByMemberName || 'You',
+      participantMemberIds: parsed.selectedParticipantIds,
+      splitAll: parsed.splitAll,
+      paymentMode: parsed.paymentMode,
+    };
+
+    return {
+      reply: `I have added ₹${expense.amountRupees} for ${expense.description} to ${targetTrip.name}.`,
+      action: { type: 'ADD_EXPENSE', status: 'confirmed', expense },
+    };
+  }
+
   const groqApiKey = (await getSavedGroqApiKey()) || process.env.EXPO_PUBLIC_GROQ_API_KEY;
   if (!groqApiKey) {
     console.log('[voiceAiService] No Groq API key configured; running intelligent local fallback engine.');
@@ -804,7 +879,9 @@ Rules:
     Include ALL member IDs of the trip in participantMemberIds. Set splitAll = true.
 
 - ADD EXPENSE RULES:
-  - When user gives a direct imperative command to record an expense (e.g. "Add 500 for dinner in Goa", "Coffee 150 split 50-50 with Khushi", "Dinner 800", "Petrol 500 maine diya", "100 each for 4 in Goa"):
+  - Recognize the same expense request across word orders and natural phrasing (e.g. "Add 500 for dinner in Goa", "I spent ₹500 on dinner in Goa", "Please record lunch, rupees one hundred and fifty, in Goa", "Goa trip mein lunch ke liye 150 kharch hue", "Dinner 800", "Petrol 500 maine diya", "100 each for 4 in Goa").
+  - Parse complete spoken number phrases, including connectors and scales (e.g. "one hundred and fifty" = 150, "two thousand five hundred" = 2500, "do hazaar paanch sau" = 2500, "rupees hundred" = 100). Do not mistake trip years or member counts for the expense amount when a separate amount is given.
+  - When user gives a direct command or clearly reports a newly paid expense:
     SET status = "confirmed"! Do NOT ask for confirmation!
     Formulate reply: "I have added ₹{amountRupees} for {description} to {tripName}."
   - If trip is ambiguous (e.g. 2 trips named Goa), ASK for clarification politely: "Which Goa trip do you mean: Goa Friends or Goa Family?". Set status="needs_clarification".

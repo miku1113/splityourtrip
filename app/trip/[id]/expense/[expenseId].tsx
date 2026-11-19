@@ -465,9 +465,14 @@ export default function BillDetailScreen() {
             setDeleting(true);
             try {
               const currentUserName = profile?.full_name || profile?.name || 'Member';
-              await deleteExpense(tripId, expense.id, currentUserName);
-              Alert.alert('Bill Deleted', 'The bill has been deleted.');
-              router.back();
+              const synced = await deleteExpense(tripId, expense.id, currentUserName);
+              if (synced) {
+                Alert.alert('Bill Deleted', 'The bill has been deleted.');
+                router.back();
+              } else {
+                Alert.alert('Deleted on this device', 'The bill was removed locally, but the cloud deletion did not sync. Check your connection and refresh before using another device.');
+                setDeleting(false);
+              }
             } catch (e: any) {
               Alert.alert('Error', e?.message || 'Could not delete bill.');
               setDeleting(false);

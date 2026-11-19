@@ -11,6 +11,7 @@ import {
   Platform,
   Image,
   Alert,
+  BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
@@ -89,6 +90,21 @@ export default function SharedPaymentScreen() {
       useContactsStore.getState().fetchFriendsSummary(currentId);
     }
   }, [user?.id, profile?.id]);
+
+  // Handle hardware back press gracefully
+  useEffect(() => {
+    const handleBackPress = () => {
+      if (router.canGoBack()) {
+        router.back();
+        return true;
+      }
+      router.replace('/(tabs)');
+      return true;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+    return () => sub.remove();
+  }, [router]);
 
   // Check for shared image or text from Android SEND Intent or route params
   useEffect(() => {
@@ -248,7 +264,7 @@ export default function SharedPaymentScreen() {
 
       if (targetTrip) {
         const paymentDesc = description || (receiverName ? `Payment to ${receiverName}` : `Payment with ${friend.name}`);
-        router.replace({
+        router.push({
           pathname: '/trip/[id]/add',
           params: {
             id: targetTrip.id,
@@ -278,7 +294,7 @@ export default function SharedPaymentScreen() {
     setIsNavigating(true);
     setSelectedDestinationId(tripId);
 
-    router.replace({
+    router.push({
       pathname: '/trip/[id]/add',
       params: {
         id: tripId,
@@ -353,6 +369,25 @@ export default function SharedPaymentScreen() {
           headerStyle: { backgroundColor: colors.card },
           headerTintColor: colors.text,
           headerShadowVisible: false,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => {
+                if (router.canGoBack()) {
+                  router.back();
+                } else {
+                  router.replace('/(tabs)');
+                }
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={{ paddingRight: 10, paddingVertical: 4 }}
+            >
+              <Ionicons
+                name={router.canGoBack() ? (Platform.OS === 'ios' ? 'chevron-back' : 'arrow-back') : 'close'}
+                size={24}
+                color={colors.text}
+              />
+            </TouchableOpacity>
+          ),
         }}
       />
 
@@ -439,11 +474,13 @@ export default function SharedPaymentScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.rupeeOcrChipTitle, { color: isDark ? '#FCD34D' : '#92400E' }]}>
                           {rupeeOcrMisread
-                            ? `Rupee (₹) symbol scanned as 7 from "7${amountRupees}"`
+                            ? `✨ AI Auto-corrected to ₹${amountRupees}`
                             : `Did the ₹ symbol scan as 7?`}
                         </Text>
                         <Text style={[styles.rupeeOcrChipSubtitle, { color: isDark ? '#FDE68A' : '#B45309' }]}>
-                          Tap to switch to ₹{effectiveAltAmount}
+                          {rupeeOcrMisread
+                            ? `Rupee symbol (₹) detected from "${effectiveAltAmount}" • Tap to revert to ₹${effectiveAltAmount}`
+                            : `Tap to switch to ₹${effectiveAltAmount}`}
                         </Text>
                       </View>
                       <Ionicons name="swap-horizontal" size={16} color="#D97706" />
@@ -547,11 +584,13 @@ export default function SharedPaymentScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.rupeeOcrChipTitle, { color: isDark ? '#FCD34D' : '#92400E' }]}>
                           {rupeeOcrMisread
-                            ? `Rupee (₹) symbol scanned as 7 from "7${amountRupees}"`
+                            ? `✨ AI Auto-corrected to ₹${amountRupees}`
                             : `Did the ₹ symbol scan as 7?`}
                         </Text>
                         <Text style={[styles.rupeeOcrChipSubtitle, { color: isDark ? '#FDE68A' : '#B45309' }]}>
-                          Tap to switch to ₹{effectiveAltAmount}
+                          {rupeeOcrMisread
+                            ? `Rupee symbol (₹) detected from "${effectiveAltAmount}" • Tap to revert to ₹${effectiveAltAmount}`
+                            : `Tap to switch to ₹${effectiveAltAmount}`}
                         </Text>
                       </View>
                       <Ionicons name="swap-horizontal" size={16} color="#D97706" />

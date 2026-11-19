@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { supabase, supabaseAdmin } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 // Safely check whether the ExpoPushTokenManager native module is compiled into this binary
 function isNotificationsNativeAvailable(): boolean {
@@ -87,7 +87,7 @@ export async function registerForPushNotificationsAsync(userId?: string): Promis
     }
 
     if (token && userId) {
-      const sb = supabaseAdmin || supabase;
+      const sb = supabase;
       await sb.from('profiles').update({ push_token: token }).eq('id', userId);
     }
 
@@ -134,7 +134,7 @@ export async function sendPushNotificationToMembers(
 ): Promise<void> {
   try {
     if (!tripId) return;
-    const sb = supabaseAdmin || supabase;
+    const sb = supabase;
 
     // 1. Fetch only members belonging to this specific trip
     const { data: members } = await sb
@@ -147,8 +147,12 @@ export async function sendPushNotificationToMembers(
     const recipientIds: string[] = Array.from(
       new Set(
         members
-          .map((m: any) => m.profile_id || m.user_id)
-          .filter((id: string) => id && id !== senderId)
+          .flatMap((m: any) => [m.profile_id, m.user_id])
+          .filter((id: unknown): id is string =>
+            typeof id === 'string' &&
+            id !== senderId &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+          )
       )
     );
 

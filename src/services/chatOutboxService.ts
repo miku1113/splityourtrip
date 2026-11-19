@@ -1,6 +1,6 @@
 import { AppState, Platform } from 'react-native';
 import { AppStorage } from '../lib/storage';
-import { supabase, supabaseAdmin, isSupabaseConfigured, supabaseAnonKey } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
 import {
   uploadImageToSupabase,
   uploadAudioToSupabase,
@@ -47,8 +47,6 @@ export interface OutboxMessageItem {
 }
 
 const OUTBOX_STORAGE_KEY = '@splityourtrip_chat_outbox_queue_v1';
-const SUPABASE_BASE_URL = 'https://hpjizujbzvwkxvfsoqqd.supabase.co';
-
 type OutboxChangeListener = (queue: OutboxMessageItem[]) => void;
 type MessageSentCallback = (
   messageId: string,
@@ -97,6 +95,7 @@ class ChatOutboxManager {
   }
 
   private lastOnlineResult = { status: true, checkedAt: 0 };
+  private connectivityCheck: Promise<boolean> | null = null;
 
   /**
    * Fast, reliable connectivity check against Supabase with in-memory caching to prevent server flooding
@@ -107,29 +106,41 @@ class ChatOutboxManager {
       return false;
     }
     const now = Date.now();
-    // Cache connectivity result for 20 seconds to prevent hammering Supabase with repeated HEAD requests
-    if (!forceCheck && now - this.lastOnlineResult.checkedAt < 20000) {
+    // Deduplicate simultaneous callers, including app-foreground events.
+    if (this.connectivityCheck) return this.connectivityCheck;
+
+    // A forced refresh may bypass the normal cache, but never issue a burst of
+    // probes when the OS emits repeated foreground/network events.
+    const cacheWindowMs = forceCheck ? 5000 : 20000;
+    if (now - this.lastOnlineResult.checkedAt < cacheWindowMs) {
       return this.lastOnlineResult.status;
     }
 
-    try {
+    const check = (async () => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(`${SUPABASE_BASE_URL}/rest/v1/`, {
-        method: 'HEAD',
-        headers: {
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      const online = res.status >= 200 && res.status < 500;
-      this.lastOnlineResult = { status: online, checkedAt: now };
+      let online = false;
+      try {
+        const res = await fetch(`${supabaseUrl}/auth/v1/health`, {
+          method: 'GET',
+          headers: { apikey: supabaseAnonKey },
+          signal: controller.signal,
+        });
+        online = res.status >= 200 && res.status < 500;
+      } catch {
+        online = false;
+      } finally {
+        clearTimeout(timeout);
+      }
+      this.lastOnlineResult = { status: online, checkedAt: Date.now() };
       return online;
-    } catch {
-      this.lastOnlineResult = { status: false, checkedAt: now };
-      return false;
+    })();
+
+    this.connectivityCheck = check;
+    try {
+      return await check;
+    } finally {
+      if (this.connectivityCheck === check) this.connectivityCheck = null;
     }
   }
 
@@ -315,7 +326,7 @@ class ChatOutboxManager {
         }
 
         try {
-          const client = supabaseAdmin || supabase;
+          const client = supabase;
           const remoteMediaUrl = currentItem.mediaData?.remoteUrl;
 
           // Build database payload string

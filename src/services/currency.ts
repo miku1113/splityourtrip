@@ -37,9 +37,17 @@ export function getCurrencyInfo(currencyCode?: string | null): CurrencyItem {
 
 export function formatCurrencyAmount(amountPaise: number, currencyCode?: string | null): string {
   const info = getCurrencyInfo(currencyCode);
-  const units = (amountPaise / 100).toLocaleString(undefined, {
+  const unitsValue = amountPaise / 100;
+  let fractionDigits = 2;
+  try {
+    fractionDigits = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: info.code,
+    }).resolvedOptions().maximumFractionDigits;
+  } catch {}
+  const units = unitsValue.toLocaleString(undefined, {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: fractionDigits,
   });
   return `${info.symbol} ${units}`;
 }

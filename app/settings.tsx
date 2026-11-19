@@ -29,18 +29,70 @@ import {
 } from '../src/services/currency';
 import { AppStorage } from '../src/lib/storage';
 import { DraggableBottomSheet } from '../src/components/DraggableBottomSheet';
+import {
+  getBlockedUsersList,
+  unblockUser,
+  BlockedUserRecord,
+} from '../src/services/blockService';
+import { useContactsStore } from '../src/features/contacts/useContactsStore';
+import { useResponsive } from '../src/theme/responsive';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
   const { user, profile, updateProfile, signOut } = useAuthStore();
   const { trips, fetchTrips } = useTripStore();
+  const { fetchFriendsSummary } = useContactsStore();
+  const { isSmall } = useResponsive();
 
   const [preferredCurrency, setPreferredCurrency] = useState('INR');
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
   const [currencySearch, setCurrencySearch] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedText, setLastSyncedText] = useState('Live & Synchronized');
+
+  const [blockedModalVisible, setBlockedModalVisible] = useState(false);
+  const [blockedList, setBlockedList] = useState<BlockedUserRecord[]>([]);
+  const [loadingBlocked, setLoadingBlocked] = useState(false);
+
+  const handleOpenBlockedUsers = async () => {
+    const currentId = user?.id || profile?.id;
+    if (!currentId) return;
+    setBlockedModalVisible(true);
+    setLoadingBlocked(true);
+    try {
+      const list = await getBlockedUsersList(currentId);
+      setBlockedList(list);
+    } catch {}
+    setLoadingBlocked(false);
+  };
+
+  const handleUnblock = (item: BlockedUserRecord) => {
+    const currentId = user?.id || profile?.id;
+    if (!currentId) return;
+
+    Alert.alert(
+      'Unblock Contact',
+      `Unblock ${item.blockedName || item.blockedPhone || 'this user'}? You will be able to split bills and chat again.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: async () => {
+            await unblockUser({
+              blockerId: currentId,
+              blockedId: item.blockedId,
+              blockedPhone: item.blockedPhone,
+              tripId: item.tripId,
+            });
+            setBlockedList(prev => prev.filter(r => r.id !== item.id));
+            fetchFriendsSummary(currentId);
+            fetchTrips(currentId, true);
+          },
+        },
+      ]
+    );
+  };
 
   const handleManualSync = async () => {
     if (isSyncing) return;
@@ -441,6 +493,30 @@ export default function SettingsScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
+          onPress={handleOpenBlockedUsers}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingLabelRow}>
+            <View
+              style={[
+                styles.iconBox,
+                { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEE2E2' },
+              ]}
+            >
+              <Ionicons name="ban-outline" size={18} color={colors.danger} />
+            </View>
+            <View>
+              <Text style={[styles.settingTitle, { color: colors.text }]}>Blocked Contacts</Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+                Manage contacts you've restricted from messaging & splits
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         <View style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}>
           <View style={styles.settingLabelRow}>
             <View
@@ -519,7 +595,7 @@ export default function SettingsScreen() {
           setCurrencySearch('');
         }}
         maxHeight="80%"
-        sheetStyle={{ padding: 20 }}
+        sheetStyle={{ maxWidth: 640, alignSelf: 'center', width: '100%', padding: 20 }}
       >
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
@@ -588,6 +664,88 @@ export default function SettingsScreen() {
                 );
               }}
             />
+      </DraggableBottomSheet>
+
+      {/* Blocked Contacts Modal */}
+      <DraggableBottomSheet
+        visible={blockedModalVisible}
+        onClose={() => setBlockedModalVisible(false)}
+        maxHeight="80%"
+        sheetStyle={{ maxWidth: 640, alignSelf: 'center', width: '100%', padding: 20 }}
+      >
+        <View style={styles.modalHeaderRow}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="ban-outline" size={22} color={colors.danger} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Blocked Contacts ({blockedList.length})
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setBlockedModalVisible(false)}>
+            <Ionicons name="close-circle" size={24} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {loadingBlocked ? (
+          <View style={{ padding: 32, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : blockedList.length === 0 ? (
+          <View style={{ padding: 32, alignItems: 'center' }}>
+            <Ionicons name="shield-checkmark-outline" size={44} color={colors.textMuted} />
+            <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '600', color: colors.text }}>
+              No Blocked Contacts
+            </Text>
+            <Text style={{ marginTop: 6, fontSize: 13, color: colors.textSecondary, textAlign: 'center' }}>
+              Contacts you block in chat settings will appear here.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={blockedList}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingVertical: 14,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.borderLight,
+                }}
+              >
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text
+                    style={{ fontSize: 15, fontWeight: '600', color: colors.text }}
+                    numberOfLines={1}
+                  >
+                    {item.blockedName || item.blockedPhone || 'Blocked User'}
+                  </Text>
+                  {item.blockedPhone && (
+                    <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
+                      {item.blockedPhone}
+                    </Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  onPress={() => handleUnblock(item)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 7,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F3F4F6',
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary }}>
+                    Unblock
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        )}
       </DraggableBottomSheet>
     </ScrollView>
   );
