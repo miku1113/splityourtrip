@@ -39,3 +39,10 @@
 ## 7. Stop Confirmation Rule
 - **Mandatory Confirmation on Stop**: Whenever the user asks to stop a conversation, task, or process, always ask for confirmation first: *"Are you sure?"* before stopping or terminating.
 
+## 8. APK & Build Artifact Storage Rule
+- **Mandatory Storage Destination**: All generated APKs MUST always be saved in `~/Desktop/apks/<project_name>/` (i.e. `/Users/mihir/Desktop/apks/splitYourTrip/`).
+- Ensure the destination directory exists (`mkdir -p ~/Desktop/apks/splitYourTrip`).
+- Always copy both versioned and standard release APKs:
+  - `~/Desktop/apks/splitYourTrip/SplitYourTrip-v<version>.apk`
+  - `~/Desktop/apks/splitYourTrip/app-release.apk`
+
