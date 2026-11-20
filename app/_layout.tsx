@@ -11,6 +11,8 @@ import { useContactsStore } from '../src/features/contacts/useContactsStore';
 import { subscribeToSharedData } from '../src/services/receiptOcr';
 import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native';
 import * as Linking from 'expo-linking';
+import UpiConfirmModal from '../src/components/UpiConfirmModal';
+import { useUpiPaymentStore } from '../src/features/settlements/useUpiPaymentStore';
 
 // Suppress known development network and crypto notices
 LogBox.ignoreLogs([
@@ -64,6 +66,7 @@ export default function RootLayout() {
     });
     initTrips().catch(() => {});
     initContacts(false).catch(() => {});
+    useUpiPaymentStore.getState().initUpiListener();
 
     // Global listener for deep links (e.g. splityourtrip://join/CODE, splityourtrip://trip/ID, OAuth)
     const handleDeepLink = async (event: { url: string }) => {
@@ -250,6 +253,7 @@ export default function RootLayout() {
           <Stack.Screen name="all-expenses" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
         </Stack>
+        <UpiConfirmModal />
       </ThemeProvider>
     </View>
   );

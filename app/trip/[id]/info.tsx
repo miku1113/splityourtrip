@@ -43,6 +43,7 @@ import { theme } from '../../../src/theme/colors';
 import { useTheme } from '../../../src/theme/useThemeStore';
 import TripCoverBadge from '../../../src/components/TripCoverBadge';
 import { DraggableBottomSheet } from '../../../src/components/DraggableBottomSheet';
+import { useUpiPaymentStore } from '../../../src/features/settlements/useUpiPaymentStore';
 
 type InfoTabKey = 'expenses' | 'members' | 'balances' | 'settle';
 
@@ -752,24 +753,22 @@ export default function TripInfoScreen() {
     fromMemberId?: string,
     toMemberId?: string
   ) => {
-    const rupees = (amountPaise / 100).toFixed(2);
-    const upiUrl = `upi://pay?pn=${encodeURIComponent(receiverName)}&am=${rupees}&cu=INR`;
-    Linking.openURL(upiUrl).catch(() => {});
-
     if (fromMemberId && toMemberId) {
-      setTimeout(() => {
-        Alert.alert(
-          'Record UPI Settlement',
-          `Did you complete the payment of ${formatCurrencyAmount(amountPaise, trip.currency)} to ${receiverName}? Tap 'Confirm & Deduct' to deduct it from balances immediately.`,
-          [
-            { text: 'Not Yet', style: 'cancel' },
-            {
-              text: 'Confirm & Deduct',
-              onPress: () => handleRecordDirectSettlement(fromMemberId, toMemberId, amountPaise, 'upi'),
-            },
-          ]
-        );
-      }, 600);
+      const targetMember = members.find(m => m.id === toMemberId);
+      useUpiPaymentStore.getState().startUpiPayment({
+        amountPaise,
+        receiverName,
+        receiverPhone: targetMember?.phone_number,
+        fromMemberId,
+        toMemberId,
+        tripId: id,
+        tripName: trip.name,
+        currency: trip.currency,
+      });
+    } else {
+      const rupees = (amountPaise / 100).toFixed(2);
+      const upiUrl = `upi://pay?pn=${encodeURIComponent(receiverName)}&am=${rupees}&cu=INR`;
+      Linking.openURL(upiUrl).catch(() => {});
     }
   };
 

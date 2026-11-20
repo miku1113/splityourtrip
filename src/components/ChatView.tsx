@@ -78,6 +78,7 @@ import TripCoverBadge from './TripCoverBadge';
 import ChatFeedSkeleton, { ChatPaginationSkeleton } from './ChatFeedSkeleton';
 import { StandardBottomSheet } from './StandardBottomSheet';
 import { getFriendSettings } from '../services/friendSettings';
+import { useUpiPaymentStore } from '../features/settlements/useUpiPaymentStore';
 import { isTripBlockedBilateral } from '../services/blockService';
 import { TripMessage, TripMember, PaymentMode } from '../types/database';
 import { scaleFont, moderateScale, isSmallDevice } from '../theme/responsive';
@@ -2274,6 +2275,41 @@ export default function ChatView({
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not capture photo');
     }
+  };
+
+  const handleLaunchUpiAndSettleChat = async () => {
+    const numAmt = parseFloat(payAmountText);
+    if (!numAmt || numAmt <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
+      return;
+    }
+    const amountPaise = Math.round(numAmt * 100);
+    const curUserId = user?.id || 'local_user';
+    const payerMem =
+      myMember ||
+      findMyMember(tripMembers, curUserId, currentUserPhone) ||
+      tripMembers.find(m => m.profile_id === curUserId || (m as any).user_id === curUserId) ||
+      tripMembers[0];
+    const targetMem =
+      tripMembers.find(m => m.id === payTargetMemberId) ||
+      otherMember ||
+      selectableMembers[0] ||
+      tripMembers.find(m => m.id !== payerMem?.id) ||
+      tripMembers[0];
+    const targetName = targetMem?.display_name || activeReceiverName || 'Member';
+
+    setPayModalVisible(false);
+
+    useUpiPaymentStore.getState().startUpiPayment({
+      amountPaise,
+      receiverName: targetName,
+      receiverPhone: targetMem?.phone_number,
+      fromMemberId: payerMem?.id || curUserId,
+      toMemberId: targetMem?.id,
+      tripId,
+      tripName: currentTrip?.name,
+      currency: userCurrency,
+    });
   };
 
   const handleSubmitPayment = async () => {
@@ -5399,6 +5435,25 @@ export default function ChatView({
             {activeReceiverName} will receive a notification to verify and accept this payment. The amount will be deducted from balances once accepted.
           </Text>
         </View>
+
+        {/* Launch UPI App Directly & Auto-Settle on Return */}
+        {payPaymentMode === 'upi' ? (
+          <TouchableOpacity
+            style={[
+              styles.submitPayBtn,
+              {
+                backgroundColor: '#10B981',
+                marginBottom: 10,
+              },
+            ]}
+            onPress={handleLaunchUpiAndSettleChat}
+            disabled={isSubmittingPayment}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="card" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+            <Text style={[styles.submitPayBtnText, { color: '#FFFFFF' }]}>Pay with UPI (GPay / PhonePe)</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Submit Button */}
         <TouchableOpacity

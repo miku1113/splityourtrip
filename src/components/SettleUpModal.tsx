@@ -28,6 +28,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { scaleFont, moderateScale } from '../theme/responsive';
 import TripCoverBadge from './TripCoverBadge';
 import { DraggableBottomSheet } from './DraggableBottomSheet';
+import { useUpiPaymentStore } from '../features/settlements/useUpiPaymentStore';
 
 interface SettleUpModalProps {
   visible: boolean;
@@ -198,6 +199,67 @@ export default function SettleUpModal({
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not pick image');
     }
+  };
+
+  const handleLaunchUpiAndSettle = async () => {
+    const numAmt = parseFloat(amountText);
+    if (!numAmt || numAmt <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
+      return;
+    }
+    if (!selectedReceiver) {
+      Alert.alert('Missing Receiver', 'Please select who you are paying.');
+      return;
+    }
+
+    const amountPaise = Math.round(numAmt * 100);
+    const currentUserId = user?.id || 'local_user';
+
+    let targetTripId: string | null = null;
+    let payerMemberId: string = currentUserId;
+    let receiverMemberId: string = selectedReceiver.memberId || selectedReceiver.id;
+
+    if (selectedTrip) {
+      targetTripId = selectedTrip.id;
+      const mems = tripMembersList.length > 0 ? tripMembersList : useTripStore.getState().members.filter(m => m.trip_id === selectedTrip.id);
+      const myMem = findMyMember(mems, currentUserId, (user as any)?.phone || (profile as any)?.phone_number);
+      if (myMem) payerMemberId = myMem.id;
+      const recMem = mems.find(m => m.id === selectedReceiver.memberId || m.id === selectedReceiver.id || m.profile_id === selectedReceiver.profileId);
+      if (recMem) receiverMemberId = recMem.id;
+    } else {
+      const friendObj: any = {
+        id: selectedReceiver.profileId || selectedReceiver.id,
+        name: selectedReceiver.name,
+        phoneNumber: selectedReceiver.phone || undefined,
+      };
+      const personalTrip = await findOrCreateFriendSplitTrip(friendObj);
+      if (personalTrip) {
+        targetTripId = personalTrip.id;
+        const pMembers = useTripStore.getState().members.filter(m => m.trip_id === personalTrip.id);
+        const myMem = findMyMember(pMembers, currentUserId, (user as any)?.phone || (profile as any)?.phone_number);
+        if (myMem) payerMemberId = myMem.id;
+        const recMem = pMembers.find(m => m.id !== payerMemberId) || pMembers[1] || pMembers[0];
+        if (recMem) receiverMemberId = recMem.id;
+      }
+    }
+
+    if (!targetTripId) {
+      Alert.alert('Error', 'Could not identify trip or friend split for settlement.');
+      return;
+    }
+
+    onClose();
+
+    useUpiPaymentStore.getState().startUpiPayment({
+      amountPaise,
+      receiverName: selectedReceiver.name,
+      receiverPhone: selectedReceiver.phone,
+      fromMemberId: payerMemberId,
+      toMemberId: receiverMemberId,
+      tripId: targetTripId,
+      tripName: selectedTrip?.name || 'Friend Split',
+      currency: 'INR',
+    });
   };
 
   const handleSubmit = async () => {
@@ -833,6 +895,29 @@ export default function SettleUpModal({
                     </Text>
                   </TouchableOpacity>
                 )}
+
+                {/* When UPI is selected: Direct launch GPay / PhonePe */}
+                {paymentMethod === 'upi' ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.submitBtn,
+                      {
+                        backgroundColor: '#10B981',
+                        marginBottom: 10,
+                      },
+                    ]}
+                    onPress={handleLaunchUpiAndSettle}
+                    disabled={isSubmitting}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.submitBtnRow}>
+                      <Ionicons name="card" size={18} color="#FFFFFF" />
+                      <Text style={[styles.submitBtnText, { color: '#FFFFFF' }]}>
+                        Pay with UPI (GPay / PhonePe)
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
 
                 {/* Submit Action */}
                 <TouchableOpacity
