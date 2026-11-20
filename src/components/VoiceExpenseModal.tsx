@@ -38,6 +38,7 @@ import {
   CopilotMoveExpensePayload,
   SMART_VOICE_SUGGESTIONS,
 } from '../services/voiceAiService';
+import { matchesContactName } from '../services/voiceExpenseParser';
 import { ChangeEntityModal, SelectedEntity } from './ChangeEntityModal';
 import {
   speakAssistantReply,
@@ -848,12 +849,12 @@ export default function VoiceExpenseModal({
     }): Promise<{ trip: any; expenseAdded: boolean } | null> => {
       setIsExecutingAction(true);
       try {
-        // Locate contact in contacts summary
+        // Locate contact in contacts summary (with phonetic matching, e.g. Kushi -> Khushi)
         const matched = contactsSummary.find(
           c =>
             (targetData.contactId && c.id === targetData.contactId) ||
             (c.phoneNumber && targetData.phoneNumber && c.phoneNumber.includes(targetData.phoneNumber.slice(-8))) ||
-            (c.name && targetData.contactName && c.name.toLowerCase().includes(targetData.contactName.toLowerCase()))
+            (c.name && targetData.contactName && matchesContactName(targetData.contactName, c.name))
         );
 
         const friendObj = {
@@ -947,10 +948,16 @@ export default function VoiceExpenseModal({
         let destTripName = movePayload.targetTripName;
 
         if (!destTripId && movePayload.targetContactName) {
+          const matched = contactsSummary.find(
+            c =>
+              (movePayload.targetContactId && c.id === movePayload.targetContactId) ||
+              (c.phoneNumber && movePayload.targetPhoneNumber && c.phoneNumber.includes(movePayload.targetPhoneNumber.slice(-8))) ||
+              (c.name && matchesContactName(movePayload.targetContactName, c.name))
+          );
           const friendTrip = await findOrCreateFriendSplitTrip({
-            id: movePayload.targetContactId || generateUUID(),
-            name: movePayload.targetContactName,
-            phoneNumber: movePayload.targetPhoneNumber || null,
+            id: matched?.id || movePayload.targetContactId || generateUUID(),
+            name: matched?.name || movePayload.targetContactName,
+            phoneNumber: matched?.phoneNumber || movePayload.targetPhoneNumber || null,
           });
           if (friendTrip) {
             destTripId = friendTrip.id;

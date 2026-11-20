@@ -794,6 +794,68 @@ export async function runVoiceCopilot(params: {
   }
 
   if (matchedPersonContact) {
+    // If user specified or is currently inside a group trip where candidateName is an existing member,
+    // add it directly to that group trip splitting 50-50 between Speaker(You) and that member!
+    const explicitTripMatch = matchVoiceTrip(cleanPrompt, trips);
+    const activeTrip = trips.find(t => t.id === activeTripId);
+    const candidateTrip = explicitTripMatch.trip || (
+      activeTrip &&
+      activeTrip.trip_type !== 'friend_split' &&
+      !activeTrip.name.toLowerCase().startsWith('split with ')
+        ? activeTrip
+        : null
+    );
+
+    const tripMembers = candidateTrip && tripMembersMap ? tripMembersMap[candidateTrip.id] || [] : [];
+    const matchedMember = tripMembers.find(m => matchesContactName(matchedPersonContact!.name, m.display_name));
+
+    if (candidateTrip && matchedMember) {
+      const myMember = tripMembers.find(
+        m =>
+          (currentUserId && (m.user_id === currentUserId || m.profile_id === currentUserId)) ||
+          (currentUserPhone && m.phone_number && m.phone_number.includes(currentUserPhone.slice(-8))) ||
+          (m.display_name && m.display_name.toLowerCase().includes('you'))
+      ) || tripMembers[0];
+
+      const parsedAmount = parseSpokenAmount(cleanPrompt);
+      const parsed = parseVoiceExpense(
+        cleanPrompt,
+        [candidateTrip as any],
+        currentUserId,
+        currentUserPhone,
+        tripMembersMap as any
+      );
+      const amtRupees = parsedAmount.amountRupees || parsed.amountRupees || '0';
+      const amtPaise = parsedAmount.amountPaise || parsed.amountPaise || 0;
+      const desc = parsed.description && parsed.description !== 'Voice Expense' ? parsed.description : 'Expense';
+
+      const participants = [myMember.id];
+      if (!participants.includes(matchedMember.id)) {
+        participants.push(matchedMember.id);
+      }
+
+      return {
+        reply: `I have added ₹${amtRupees} for ${desc} to ${candidateTrip.name} split with ${matchedMember.display_name}.`,
+        action: {
+          type: 'ADD_EXPENSE',
+          status: 'confirmed',
+          expense: {
+            amountPaise: amtPaise,
+            amountRupees: amtRupees,
+            description: desc,
+            category: parsed.category || 'General',
+            tripId: candidateTrip.id,
+            tripName: candidateTrip.name,
+            paidByMemberId: myMember.id,
+            paidByMemberName: 'You',
+            participantMemberIds: participants,
+            splitAll: false,
+            paymentMode: parsed.paymentMode || 'upi',
+          },
+        },
+      };
+    }
+
     const parsedAmount = parseSpokenAmount(cleanPrompt);
     const parsed = parseVoiceExpense(
       cleanPrompt,
@@ -837,7 +899,7 @@ export async function runVoiceCopilot(params: {
     /^(?:maine|mene|humne|मैंने|हमने|મેં)\b/i.test(cleanPrompt);
   const hasExpenseLanguage = /\b(expense|bill|spend|spent|purchase|paid)\b/i.test(cleanPrompt);
   const hasAmount = parseSpokenAmount(cleanPrompt).amountPaise > 0;
-  const isContactSplitRequest = /\b(split\s*with|contact\s*split|friend\s*split|sathe|ke\s*saath|ke\s*sath)\b/i.test(cleanPrompt);
+  const isContactSplitRequest = /\b(split\s*with|contact\s*split|friend\s*split|with\s+[A-Za-z]+|sathe|ke\s*saath|ke\s*sath)\b/i.test(cleanPrompt);
   if ((startsExpenseAdd || reportsPaidExpense) && !isContactSplitRequest && (hasExpenseLanguage || hasAmount)) {
     if (trips.length === 0) {
       return { reply: "You don't have a trip to add this expense to yet. Create or join a trip first.", action: null };

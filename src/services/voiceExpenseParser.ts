@@ -214,7 +214,10 @@ export function cleanText(str: string): string {
     .trim();
 }
 
-const GENERIC_TRIP_WORDS = new Set(['trip', 'travel', 'journey', 'holiday', 'vacation', 'tour']);
+const GENERIC_TRIP_WORDS = new Set([
+  'trip', 'travel', 'journey', 'holiday', 'vacation', 'tour', 'group',
+  'split', 'with', 'for', 'in', 'at', 'to', 'a', 'an', 'the', 'of', 'and', 'or', 'by', 'on', 'my', 'our'
+]);
 
 /** Match a trip by its full name or distinctive name tokens, without selecting an unrelated first trip. */
 export function matchVoiceTrip<T extends { id: string; name: string }>(
@@ -233,7 +236,13 @@ export function matchVoiceTrip<T extends { id: string; name: string }>(
     if (tokens.length === 0) continue;
 
     const phraseMatch = ` ${normalizedText} `.includes(` ${normalizedName} `);
-    const matchedTokens = tokens.filter(token => textTokens.has(token)).length;
+    const matchedTokens = tokens.filter(token => {
+      if (textTokens.has(token)) return true;
+      for (const tToken of textTokens) {
+        if (matchesContactName(tToken, token)) return true;
+      }
+      return false;
+    }).length;
     const score = phraseMatch
       ? 10000 + tokens.length + normalizedName.length / 1000
       : matchedTokens > 0
@@ -507,11 +516,14 @@ export function parseVoiceExpense(
       matchedParticipantNames.push(m.display_name);
     });
   } else {
-    // Check specific member names
+    // Check specific member names (with phonetic tolerance, e.g. Kushi -> Khushi)
     for (const m of tripMembers) {
       const mNormalized = cleanText(m.display_name).toLowerCase().replace(/\s*\(you\)\s*/, '');
       const firstName = mNormalized.split(' ')[0];
-      if (firstName.length >= 3 && cleanLower.includes(firstName)) {
+      const matchesMember =
+        (firstName.length >= 2 && cleanLower.includes(firstName)) ||
+        cleanLower.split(/\s+/).some(word => word.length >= 2 && matchesContactName(word, mNormalized));
+      if (matchesMember) {
         if (!selectedParticipantIds.includes(m.id)) {
           selectedParticipantIds.push(m.id);
           matchedParticipantNames.push(m.display_name);
