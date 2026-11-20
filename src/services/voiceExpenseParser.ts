@@ -81,27 +81,54 @@ export function levenshteinDistance(a: string, b: string): number {
   return matrix[b.length][a.length];
 }
 
+export function cleanContactName(name: string): string {
+  if (!name) return '';
+  return name
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji}]/gu, '')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 export function matchesContactName(spokenName: string, contactName: string): boolean {
   if (!spokenName || !contactName) return false;
-  const sClean = spokenName.toLowerCase().trim();
-  const cClean = contactName.toLowerCase().trim();
-  const cFirst = cClean.split(/\s+/)[0];
+  const sClean = cleanContactName(spokenName);
+  const cClean = cleanContactName(contactName);
+  if (!sClean || !cClean) return false;
 
-  if (sClean === cClean || sClean === cFirst) return true;
-  if (sClean.includes(cClean) || cClean.includes(sClean)) return true;
-  if (cFirst.length >= 2 && (sClean.includes(cFirst) || cFirst.includes(sClean))) return true;
+  // 1. Exact clean match (e.g. "khushi" === "khushi" from "Khushi ❤️")
+  if (sClean === cClean) return true;
 
+  // 2. Full-word token match across multi-word names (e.g. "Khushi" in "Khushi Patel")
+  const sWords = sClean.split(/\s+/).filter(Boolean);
+  const cWords = cClean.split(/\s+/).filter(Boolean);
+
+  if (cWords.includes(sClean) || sWords.includes(cClean)) return true;
+  if (cWords.some(cw => cw === sClean) || sWords.some(sw => sw === cClean)) return true;
+
+  // 3. Phonetic matching on normalized strings
   const sNorm = normalizePhonetic(spokenName);
   const cNorm = normalizePhonetic(contactName);
-  const cFirstNorm = normalizePhonetic(cFirst);
+  if (!sNorm || !cNorm) return false;
 
-  if (sNorm === cNorm || sNorm === cFirstNorm) return true;
-  if (sNorm.includes(cNorm) || cNorm.includes(sNorm)) return true;
-  if (cFirstNorm.length >= 2 && (sNorm.includes(cFirstNorm) || cFirstNorm.includes(sNorm))) return true;
+  if (sNorm === cNorm) return true;
 
-  if (cFirstNorm.length >= 3 && sNorm.length >= 3) {
-    const dist = levenshteinDistance(sNorm, cFirstNorm);
-    if (dist <= 1) return true;
+  // Check phonetic word-level matches (e.g. "kusi" in "kusi patel")
+  const cNormWords = cWords.map(w => normalizePhonetic(w)).filter(Boolean);
+  const sNormWords = sWords.map(w => normalizePhonetic(w)).filter(Boolean);
+
+  if (cNormWords.includes(sNorm) || sNormWords.includes(cNorm)) return true;
+
+  // Levenshtein distance check ONLY for words of similar length (difference at most 1 in length)
+  // and having the same ending vowel structure, NOT for root truncations (like "khush" vs "khushi")!
+  if (sNorm.length >= 4 && cNorm.length >= 4 && Math.abs(sNorm.length - cNorm.length) <= 1) {
+    const sEndsWithVowel = /[aeiou]$/.test(sNorm);
+    const cEndsWithVowel = /[aeiou]$/.test(cNorm);
+    if (sEndsWithVowel === cEndsWithVowel) {
+      const dist = levenshteinDistance(sNorm, cNorm);
+      if (dist <= 1) return true;
+    }
   }
 
   return false;

@@ -16,7 +16,7 @@ export type { Trip, TripMember, Expense, ExpenseSplit } from '../../types/databa
 import { splitEqual } from '../../services/split';
 import { formatCurrencyAmount } from '../../services/currency';
 import { getContactNameByPhone, getEffectiveContactName, normalizeNameForMatch } from '../contacts/useContactsStore';
-import { matchesContactName } from '../../services/voiceExpenseParser';
+import { matchesContactName, cleanContactName } from '../../services/voiceExpenseParser';
 import { uploadTripCoverImage, persistLocalAttachment, uploadExpenseAttachment } from '../../services/imageUpload';
 import { chatOutbox } from '../../services/chatOutboxService';
 import { sendPushNotificationToMembers } from '../../services/pushNotificationService';
@@ -5199,12 +5199,16 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             }
           }
 
-          // C. Match by exact title or phonetic match
+          // C. Match by exact title or phonetic match (exact clean title prioritized)
           const tNameLower = t.name.toLowerCase().trim();
+          const tCleanTitle = cleanContactName(t.name.replace(/^split with\s+/i, ''));
+          const friendCleanTitle = cleanContactName(cleanFriendName);
+
           if (
             tNameLower === 'split with ' + cleanFriendName ||
             tNameLower === cleanFriendName ||
-            (cleanFriendName.length >= 2 && matchesContactName(cleanFriendName, tNameLower.replace(/^split with\s+/i, '')))
+            (tCleanTitle && friendCleanTitle && tCleanTitle === friendCleanTitle) ||
+            (cleanFriendName.length >= 2 && matchesContactName(cleanFriendName, t.name.replace(/^split with\s+/i, '')))
           ) {
             matchedTrip = t;
             break;
@@ -5226,6 +5230,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             const hasFriend = tMembers.some(m => {
               if (resolvedProfileId && (m.profile_id === resolvedProfileId || m.user_id === resolvedProfileId)) return true;
               if (cleanFriendPhone && m.phone_number && normalizePhone(m.phone_number) === cleanFriendPhone) return true;
+              const mClean = cleanContactName(m.display_name);
+              if (friendCleanTitle && mClean === friendCleanTitle) return true;
               if (cleanFriendName && (normalizeNameForMatch(m.display_name) === normalizeNameForMatch(friend.name) || matchesContactName(cleanFriendName, m.display_name))) return true;
               return false;
             });
