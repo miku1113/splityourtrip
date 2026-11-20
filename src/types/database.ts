@@ -32,6 +32,8 @@ export interface Trip {
   created_by: string;
   created_at: string;
   updated_at?: string;
+  /** Budget per person in Paise (integer). 0 or undefined = no budget set. */
+  budget_per_person_paise?: number | null;
 }
 
 export interface TripMember {

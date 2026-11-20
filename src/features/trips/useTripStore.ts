@@ -18,6 +18,7 @@ import { formatCurrencyAmount } from '../../services/currency';
 import { getContactNameByPhone, getEffectiveContactName, normalizeNameForMatch } from '../contacts/useContactsStore';
 import { uploadTripCoverImage, persistLocalAttachment, uploadExpenseAttachment } from '../../services/imageUpload';
 import { chatOutbox } from '../../services/chatOutboxService';
+import { sendPushNotificationToMembers } from '../../services/pushNotificationService';
 
 // Universal helper to reliably find the active user's TripMember row without assuming admin
 export function findMyMember(
@@ -259,8 +260,22 @@ interface TripStoreState {
     friendId?: string,
     imageUrl?: string | null,
     description?: string | null,
-    initialMembers?: { name: string; phoneNumber?: string }[]
+    initialMembers?: { name: string; phoneNumber?: string }[],
+    budgetPerPersonPaise?: number | null
   ) => Promise<Trip | null>;
+  checkBudgetExceeded: (
+    tripId: string,
+    memberCount?: number
+  ) => {
+    exceeded: boolean;
+    budgetPaise: number;
+    budgetPerPersonPaise: number;
+    totalBudgetPaise: number;
+    spentPaise: number;
+    perPersonSpentPaise: number;
+    remainingPaise: number;
+    percentage: number;
+  } | null;
   updateTrip: (tripId: string, updates: Partial<Trip>) => Promise<Trip | null>;
   deleteTrip: (tripId: string) => Promise<boolean>;
   loadTripDetails: (tripId: string, forceRefresh?: boolean) => Promise<void>;
@@ -1153,7 +1168,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     friendId?: string,
     imageUrl?: string | null,
     description?: string | null,
-    initialMembers?: { name: string; phoneNumber?: string }[]
+    initialMembers?: { name: string; phoneNumber?: string }[],
+    budgetPerPersonPaise?: number | null
   ) => {
     let authUser = useAuthStore.getState().user;
     if (!authUser?.id) {
@@ -1202,6 +1218,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       invite_code: inviteCode,
       created_by: effectiveUserId,
       created_at: new Date().toISOString(),
+      budget_per_person_paise: budgetPerPersonPaise ?? null,
       _pendingSync: true,
     } as any;
 
@@ -1316,6 +1333,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           status: 'active',
           invite_code: inviteCode,
           created_by: authenticatedUserId || null,
+          budget_per_person_paise: budgetPerPersonPaise ?? null,
         };
 
         let { error: tripError } = await withTimeout(
@@ -3289,6 +3307,44 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         const authState = useAuthStore.getState();
         const creatorName = authState.profile?.full_name || authState.profile?.name || payerName;
         await get().sendMessage(tripId, creatorId, creatorName, expensePayload);
+
+        // --- Push Notification to all other trip members ---
+        const senderUserId = authState.user?.id || userId || payerProfileId || '';
+        const perPersonPaise = participantMemberIds.length > 0
+          ? Math.round(amountPaise / participantMemberIds.length)
+          : amountPaise;
+        const perPersonFormatted = formatCurrencyAmount(perPersonPaise, trip?.currency || 'INR');
+        const pushTitle = `${payerName} added ${formattedAmount}`;
+        const pushBody = `"${description.trim()}" · Your share: ${perPersonFormatted}`;
+        sendPushNotificationToMembers(tripId, senderUserId, pushTitle, pushBody, {
+          type: 'expense_added',
+          expenseId: newExpenseId,
+        }).catch(() => {});
+
+        // --- Budget Exceeded Check & Alert ---
+        if (trip && trip.budget_per_person_paise && trip.budget_per_person_paise > 0) {
+          const budgetResult = get().checkBudgetExceeded(tripId, participantMemberIds.length || 1);
+          if (budgetResult?.exceeded) {
+            const budgetFormatted = formatCurrencyAmount(trip.budget_per_person_paise, trip.currency || 'INR');
+            const spentFormatted = formatCurrencyAmount(budgetResult.perPersonSpentPaise, trip.currency || 'INR');
+            const alertText = `⚠️ Budget Alert: Per-person spending is ${spentFormatted}, exceeding the set budget of ${budgetFormatted} per person!`;
+
+            const alertPayload = JSON.stringify({
+              type: 'system',
+              text: alertText,
+              chat_type: isFriend ? 'user' : 'trip',
+            });
+            get().sendMessage(tripId, 'system', 'Budget Alert', alertPayload).catch(() => {});
+
+            sendPushNotificationToMembers(
+              tripId,
+              '',
+              '⚠️ Budget Exceeded!',
+              `Trip "${trip.name}" exceeded budget! Spent: ${spentFormatted}/person (Budget: ${budgetFormatted})`,
+              { type: 'budget_exceeded', tripId }
+            ).catch(() => {});
+          }
+        }
       } catch (e: any) {
         console.log('Auto-chat notification error handled:', e?.message);
       }
@@ -5810,6 +5866,33 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const finalCount = expensesList.length;
     set({ personalExpensesTotalPaise: finalTotal, personalExpensesCount: finalCount });
     return { totalPaise: finalTotal, count: finalCount };
+  },
+
+  checkBudgetExceeded: (tripId: string, memberCount?: number) => {
+    const trip = get().trips.find(t => t.id === tripId) || (get().activeTrip?.id === tripId ? get().activeTrip : null);
+    if (!trip || !trip.budget_per_person_paise || trip.budget_per_person_paise <= 0) {
+      return null;
+    }
+    const tripMembers = get().members.filter(m => !m.trip_id || m.trip_id === tripId);
+    const count = Math.max(1, memberCount || tripMembers.length);
+    const tripExpenses = get().expenses.filter(e => (!e.trip_id || e.trip_id === tripId) && e.category !== 'settlement');
+    const spentPaise = tripExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const totalBudgetPaise = trip.budget_per_person_paise * count;
+    const perPersonSpentPaise = Math.round(spentPaise / count);
+    const exceeded = spentPaise > totalBudgetPaise;
+    const remainingPaise = totalBudgetPaise - spentPaise;
+    const percentage = totalBudgetPaise > 0 ? Math.round((spentPaise / totalBudgetPaise) * 100) : 0;
+
+    return {
+      exceeded,
+      budgetPaise: trip.budget_per_person_paise,
+      budgetPerPersonPaise: trip.budget_per_person_paise,
+      totalBudgetPaise,
+      spentPaise,
+      perPersonSpentPaise,
+      remainingPaise,
+      percentage,
+    };
   },
 
   getPersonalExpensesTotalPaise: (): number => {

@@ -77,6 +77,7 @@ export default function MyTripsScreen() {
   const [newTripName, setNewTripName] = useState('');
   const [newTripImage, setNewTripImage] = useState<string | null>(null);
   const [newTripDescription, setNewTripDescription] = useState('');
+  const [newTripBudget, setNewTripBudget] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [joinErrorMsg, setJoinErrorMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -192,6 +193,10 @@ export default function MyTripsScreen() {
         activeUser?.email?.split('@')[0] ||
         'Traveler';
 
+      const budgetPaise = newTripBudget.trim()
+        ? Math.round(parseFloat(newTripBudget.trim()) * 100)
+        : null;
+
       const trip = await createTrip(
         newTripName.trim(),
         userId,
@@ -200,7 +205,8 @@ export default function MyTripsScreen() {
         undefined,
         newTripImage,
         newTripDescription,
-        []
+        [],
+        budgetPaise
       );
 
       if (trip) {
@@ -298,6 +304,7 @@ export default function MyTripsScreen() {
     setNewTripName('');
     setNewTripImage(null);
     setNewTripDescription('');
+    setNewTripBudget('');
     setContactSearch('');
     setGuestNameInput('');
     setGuestPhoneInput('');
@@ -925,6 +932,25 @@ export default function MyTripsScreen() {
                     placeholderTextColor={colors.textMuted}
                     value={newTripDescription}
                     onChangeText={setNewTripDescription}
+                  />
+
+                  <Text style={[styles.modalLabel, { color: colors.textSecondary, marginTop: 8 }]}>
+                    Budget Per Person (₹) (Optional)
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.modalInput,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.border,
+                        color: colors.text,
+                      },
+                    ]}
+                    placeholder="e.g. 5000 (We'll alert when exceeded)"
+                    placeholderTextColor={colors.textMuted}
+                    value={newTripBudget}
+                    onChangeText={setNewTripBudget}
+                    keyboardType="numeric"
                   />
 
                   <View style={styles.modalActions}>

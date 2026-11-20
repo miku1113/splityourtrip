@@ -911,7 +911,8 @@ export default function TripInfoScreen() {
               style={styles.headerCodeBadge}
               onPress={() => {
                 Share.share({
-                  message: `Join my trip "${trip.name}" on Split Your Trip! Use invite code: ${inviteCode}`,
+                  title: `Join "${trip.name}" on SplitYourTrip`,
+                  message: `✈️ You're invited to join my trip "${trip.name}" on SplitYourTrip!\n\n🔑 Invite Code: ${inviteCode}\n\n📲 Tap here to join or download the app:\nhttps://splityourtrip.app/join?code=${inviteCode}`,
                 });
               }}
             >
@@ -928,6 +929,43 @@ export default function TripInfoScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Budget Banner (if budget_per_person_paise is configured) */}
+      {trip.budget_per_person_paise && trip.budget_per_person_paise > 0 ? (() => {
+        const memberCount = Math.max(1, members.length);
+        const totalBudgetPaise = trip.budget_per_person_paise * memberCount;
+        const perPersonSpent = Math.round(totalSpentPaise / memberCount);
+        const percent = Math.min(200, Math.round((totalSpentPaise / totalBudgetPaise) * 100));
+        const isExceeded = totalSpentPaise > totalBudgetPaise;
+        const remainingPaise = totalBudgetPaise - totalSpentPaise;
+
+        return (
+          <View style={[styles.budgetBanner, { backgroundColor: isExceeded ? 'rgba(239, 68, 68, 0.1)' : isDark ? '#1F2937' : '#F0FDF4', borderColor: isExceeded ? '#EF4444' : '#10B981' }]}>
+            <View style={styles.budgetRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name={isExceeded ? 'warning' : 'wallet-outline'} size={16} color={isExceeded ? '#EF4444' : '#10B981'} />
+                <Text style={[styles.budgetTitle, { color: isExceeded ? '#EF4444' : colors.text }]}>
+                  {isExceeded ? 'Budget Exceeded!' : 'Trip Budget'}
+                </Text>
+              </View>
+              <Text style={[styles.budgetAmount, { color: isExceeded ? '#EF4444' : colors.textSecondary }]}>
+                {formatCurrencyAmount(perPersonSpent, trip.currency)} / {formatCurrencyAmount(trip.budget_per_person_paise, trip.currency)} per person
+              </Text>
+            </View>
+            <View style={[styles.budgetProgressBarBg, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
+              <View style={[styles.budgetProgressBarFill, { width: `${Math.min(100, percent)}%`, backgroundColor: isExceeded ? '#EF4444' : percent > 80 ? '#F59E0B' : '#10B981' }]} />
+            </View>
+            <View style={styles.budgetFooterRow}>
+              <Text style={[styles.budgetFooterText, { color: colors.textSecondary }]}>
+                {percent}% used ({formatCurrencyAmount(totalSpentPaise, trip.currency)} of {formatCurrencyAmount(totalBudgetPaise, trip.currency)} total)
+              </Text>
+              <Text style={[styles.budgetRemainingText, { color: isExceeded ? '#EF4444' : '#10B981' }]}>
+                {isExceeded ? `Over by ${formatCurrencyAmount(Math.abs(remainingPaise), trip.currency)}` : `${formatCurrencyAmount(remainingPaise, trip.currency)} left`}
+              </Text>
+            </View>
+          </View>
+        );
+      })() : null}
 
       {/* Segmented Tab Bar: Expenses | Members | Balances | Settle Up */}
       <View
@@ -3200,6 +3238,52 @@ const styles = StyleSheet.create({
   },
   expenseSubFilterText: {
     fontSize: 12,
+    fontWeight: '700',
+  },
+  budgetBanner: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  budgetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  budgetTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  budgetAmount: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  budgetProgressBarBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    width: '100%',
+    marginBottom: 6,
+  },
+  budgetProgressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  budgetFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  budgetFooterText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  budgetRemainingText: {
+    fontSize: 11,
     fontWeight: '700',
   },
 });

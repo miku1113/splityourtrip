@@ -27,7 +27,7 @@ import { useAuthStore } from '../../../src/features/auth/useAuthStore';
 import { PaymentMode, SplitType, TripMember } from '../../../src/types/database';
 import { theme } from '../../../src/theme/colors';
 import { useTheme } from '../../../src/theme/useThemeStore';
-import { getCurrencyInfo } from '../../../src/services/currency';
+import { getCurrencyInfo, formatCurrencyAmount } from '../../../src/services/currency';
 import { extractPaymentFromScreenshot } from '../../../src/services/receiptOcr';
 import { AppStorage } from '../../../src/lib/storage';
 import { sendAutomatedWhatsAppExpenseAlert } from '../../../src/services/whatsappService';
@@ -159,6 +159,28 @@ export default function AddExpenseScreen() {
       ? (existingExpense.amount / 100).toString()
       : prefillAmount || ''
   );
+
+  const budgetWarning = React.useMemo(() => {
+    if (!currentTrip?.budget_per_person_paise || currentTrip.budget_per_person_paise <= 0) return null;
+    const memberCount = Math.max(1, members.filter(m => !m.trip_id || m.trip_id === currentTrip.id).length);
+    const existingSpent = expenses
+      .filter(e => (!e.trip_id || e.trip_id === currentTrip.id) && e.id !== expenseId && e.category !== 'settlement')
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+    const newAmountPaise = Math.round((parseFloat(amountRupees) || 0) * 100);
+    if (newAmountPaise <= 0) return null;
+    const projectedTotal = existingSpent + newAmountPaise;
+    const totalBudget = currentTrip.budget_per_person_paise * memberCount;
+    if (projectedTotal > totalBudget) {
+      const perPersonSpent = Math.round(projectedTotal / memberCount);
+      return {
+        exceeded: true,
+        perPersonSpent,
+        budgetPerPerson: currentTrip.budget_per_person_paise,
+        currency: currentTrip.currency || 'INR',
+      };
+    }
+    return null;
+  }, [currentTrip, members, expenses, amountRupees, expenseId]);
   const [alternativeAmount, setAlternativeAmount] = useState<string | null>(null);
   const [rupeeOcrMisread, setRupeeOcrMisread] = useState<boolean>(false);
   const [rupeeOcrReason, setRupeeOcrReason] = useState<string>('');
@@ -1552,6 +1574,16 @@ export default function AddExpenseScreen() {
         </View>
       </View>
 
+      {/* Budget Warning Banner */}
+      {budgetWarning && (
+        <View style={[styles.budgetWarningBox, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEF2F2', borderColor: '#EF4444' }]}>
+          <Ionicons name="warning" size={18} color="#EF4444" />
+          <Text style={[styles.budgetWarningText, { color: isDark ? '#FCA5A5' : '#DC2626' }]}>
+            This expense will push per-person spending to {formatCurrencyAmount(budgetWarning.perPersonSpent, budgetWarning.currency)}, exceeding the budget of {formatCurrencyAmount(budgetWarning.budgetPerPerson, budgetWarning.currency)}/person.
+          </Text>
+        </View>
+      )}
+
       {/* Save Button */}
       <TouchableOpacity
         style={[
@@ -2063,5 +2095,21 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 12,
     fontWeight: '700',
+  },
+  budgetWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  budgetWarningText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
   },
 });

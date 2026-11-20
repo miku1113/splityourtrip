@@ -54,6 +54,7 @@ export default function AddExpenseScreen() {
   // Inline "Create New Trip" Modal
   const [showCreateTripModal, setShowCreateTripModal] = useState(false);
   const [newTripName, setNewTripName] = useState('');
+  const [newTripBudget, setNewTripBudget] = useState('');
   const [creatingTrip, setCreatingTrip] = useState(false);
 
   // Inline "Add Contact" Modal
@@ -203,15 +204,24 @@ export default function AddExpenseScreen() {
     setCreatingTrip(true);
     try {
       const activeUser = user || useAuthStore.getState().user;
+      const budgetPaise = newTripBudget.trim()
+        ? Math.round(parseFloat(newTripBudget.trim()) * 100)
+        : null;
       const created = await createTrip(
         newTripName.trim(),
         activeUser?.id,
         profile?.full_name || 'Me',
-        'group'
+        'group',
+        undefined,
+        null,
+        null,
+        [],
+        budgetPaise
       );
       if (created) {
         setShowCreateTripModal(false);
         setNewTripName('');
+        setNewTripBudget('');
         router.replace({
           pathname: '/trip/[id]/add',
           params: { id: created.id },
@@ -667,6 +677,25 @@ export default function AddExpenseScreen() {
                 value={newTripName}
                 onChangeText={setNewTripName}
                 autoFocus
+              />
+
+              <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                Budget Per Person (₹) (Optional)
+              </Text>
+              <TextInput
+                style={[
+                  styles.dialogInput,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
+                ]}
+                placeholder="e.g. 5000 (We'll alert when exceeded)"
+                placeholderTextColor={colors.textMuted}
+                value={newTripBudget}
+                onChangeText={setNewTripBudget}
+                keyboardType="numeric"
               />
 
               <TouchableOpacity

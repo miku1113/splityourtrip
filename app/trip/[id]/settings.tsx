@@ -85,6 +85,9 @@ export default function TripSettingsScreen() {
   const [status, setStatus] = useState<'active' | 'settled' | 'archived'>(trip?.status || 'active');
   const [startDate, setStartDate] = useState(trip?.start_date || '');
   const [endDate, setEndDate] = useState(trip?.end_date || '');
+  const [budgetPerPerson, setBudgetPerPerson] = useState(
+    trip?.budget_per_person_paise ? String(Math.round(trip.budget_per_person_paise / 100)) : ''
+  );
   const [inviteCode, setInviteCode] = useState<string | null>(trip?.invite_code || null);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -130,6 +133,9 @@ export default function TripSettingsScreen() {
       setStatus(trip.status || 'active');
       if (trip.start_date !== undefined) setStartDate(trip.start_date || '');
       if (trip.end_date !== undefined) setEndDate(trip.end_date || '');
+      if (trip.budget_per_person_paise !== undefined) {
+        setBudgetPerPerson(trip.budget_per_person_paise ? String(Math.round(trip.budget_per_person_paise / 100)) : '');
+      }
       if (trip.invite_code) setInviteCode(trip.invite_code);
     }
   }, [trip]);
@@ -303,9 +309,11 @@ export default function TripSettingsScreen() {
 
   const handleShareInvite = async () => {
     const code = inviteCode || (id ? id.substring(0, 6).toUpperCase() : '');
+    const joinUrl = `https://splityourtrip.app/join?code=${code}`;
     try {
       await Share.share({
-        message: `Join my trip "${tripName}" on Split Your Trip! Use invite code: ${code}\nOr open the app to join now.`,
+        title: `Join "${tripName}" on SplitYourTrip`,
+        message: `✈️ You're invited to join my trip "${tripName}" on SplitYourTrip!\n\n🔑 Invite Code: ${code}\n\n📲 Tap here to join or download the app:\n${joinUrl}`,
       });
     } catch {}
   };
@@ -411,6 +419,10 @@ export default function TripSettingsScreen() {
         }
       }
 
+      const parsedBudgetPaise = budgetPerPerson.trim()
+        ? Math.round(parseFloat(budgetPerPerson.trim()) * 100)
+        : null;
+
       const updated = await updateTrip(id, {
         name: tripName.trim(),
         description: description.trim(),
@@ -419,6 +431,7 @@ export default function TripSettingsScreen() {
         status,
         start_date: startDate.trim() || null,
         end_date: endDate.trim() || null,
+        budget_per_person_paise: parsedBudgetPaise,
       });
 
       setIsSaving(false);
@@ -868,6 +881,27 @@ export default function TripSettingsScreen() {
               placeholderTextColor={colors.textMuted}
               multiline
               numberOfLines={3}
+              allowFontScaling={false}
+            />
+
+            {/* Budget Per Person Setting */}
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]} allowFontScaling={false}>
+              Budget Per Person (₹)
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              value={budgetPerPerson}
+              onChangeText={setBudgetPerPerson}
+              placeholder="e.g. 5000 (We'll alert when exceeded)"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
               allowFontScaling={false}
             />
 
