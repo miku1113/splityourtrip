@@ -11,6 +11,8 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Linking,
+  Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +23,7 @@ import { useTripStore, findMyMember, generateUUID } from '../features/trips/useT
 import { useAuthStore } from '../features/auth/useAuthStore';
 import { useContactsStore, normalizePhone } from '../features/contacts/useContactsStore';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
+import { useUpiPaymentStore } from '../features/settlements/useUpiPaymentStore';
 import { TripMember, PaymentMode } from '../types/database';
 import { AppStorage } from '../lib/storage';
 import * as FileSystem from 'expo-file-system';
@@ -36,6 +39,8 @@ import {
   CopilotRecentExpense,
   CopilotContactSummary,
   CopilotMoveExpensePayload,
+  CopilotBalanceItem,
+  buildStructuredBalanceItems,
   SMART_VOICE_SUGGESTIONS,
 } from '../services/voiceAiService';
 import { matchesContactName } from '../services/voiceExpenseParser';
@@ -152,6 +157,7 @@ export default function VoiceExpenseModal({
   const hasSpokenRef = useRef(false);
   const speechFrameCountRef = useRef(0);
   const lastSpokenTimestampRef = useRef<number>(0);
+  const ambientNoiseFloorRef = useRef<number>(-60);
   const lastTtsEndTimeRef = useRef<number>(0);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const webRecognitionRef = useRef<any>(null);
@@ -1056,6 +1062,378 @@ export default function VoiceExpenseModal({
     setShowChangeEntityModal(false);
   };
 
+  // Card Mutators: Allow users to tap options directly on action cards
+  const handleCardPayerChange = async (msgId: string, memberId: string) => {
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg || !msg.action) return;
+
+    const targetTripId = msg.action.expense?.tripId || msg.action.updateExpense?.tripId;
+    const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+    const targetMember = tripMembers.find(m => m.id === memberId);
+    const memberName = targetMember?.display_name || 'Member';
+
+    // If already confirmed/saved, update in store & Supabase immediately
+    if (msg.action.status === 'confirmed' && msg.action.expense) {
+      const expId = (msg.action.expense as any).expenseId || recentExpenses.find(e => e.tripId === targetTripId)?.id;
+      if (expId && targetTripId) {
+        await executeUpdateExpense({
+          expenseId: expId,
+          tripId: targetTripId,
+          paidByMemberId: memberId,
+          amountPaise: msg.action.expense.amountPaise,
+          amountRupees: msg.action.expense.amountRupees,
+          description: msg.action.expense.description,
+          category: msg.action.expense.category,
+          participantMemberIds: msg.action.expense.participantMemberIds,
+          splitAll: msg.action.expense.splitAll,
+        });
+      }
+    }
+
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        if (updatedAction.expense) {
+          updatedAction.expense = {
+            ...updatedAction.expense,
+            paidByMemberId: memberId,
+            paidByMemberName: memberName,
+          };
+        }
+        if (updatedAction.updateExpense) {
+          updatedAction.updateExpense = {
+            ...updatedAction.updateExpense,
+            paidByMemberId: memberId,
+            paidByMemberName: memberName,
+          };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+
+    if (pendingAction) {
+      setPendingAction(prev => {
+        if (!prev) return prev;
+        const copy = { ...prev };
+        if (copy.expense) {
+          copy.expense = {
+            ...copy.expense,
+            paidByMemberId: memberId,
+            paidByMemberName: memberName,
+          };
+        }
+        if (copy.updateExpense) {
+          copy.updateExpense = {
+            ...copy.updateExpense,
+            paidByMemberId: memberId,
+            paidByMemberName: memberName,
+          };
+        }
+        return copy;
+      });
+    }
+  };
+
+  const handleCardParticipantToggle = (msgId: string, memberId: string) => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        if (updatedAction.expense) {
+          const currentIds = [...(updatedAction.expense.participantMemberIds || [])];
+          const targetTripId = updatedAction.expense.tripId;
+          const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+          let newIds: string[];
+          if (currentIds.includes(memberId)) {
+            if (currentIds.length <= 1) return m;
+            newIds = currentIds.filter(id => id !== memberId);
+          } else {
+            newIds = [...currentIds, memberId];
+          }
+          const splitAll = newIds.length === tripMembers.length;
+          updatedAction.expense = {
+            ...updatedAction.expense,
+            participantMemberIds: newIds,
+            splitAll,
+          };
+        }
+        if (updatedAction.updateExpense) {
+          const currentIds = [...(updatedAction.updateExpense.participantMemberIds || [])];
+          const targetTripId = updatedAction.updateExpense.tripId;
+          const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+          let newIds: string[];
+          if (currentIds.includes(memberId)) {
+            if (currentIds.length <= 1) return m;
+            newIds = currentIds.filter(id => id !== memberId);
+          } else {
+            newIds = [...currentIds, memberId];
+          }
+          const splitAll = newIds.length === tripMembers.length;
+          updatedAction.updateExpense = {
+            ...updatedAction.updateExpense,
+            participantMemberIds: newIds,
+            splitAll,
+          };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+
+    if (pendingAction) {
+      setPendingAction(prev => {
+        if (!prev) return prev;
+        const copy = { ...prev };
+        if (copy.expense) {
+          const currentIds = [...(copy.expense.participantMemberIds || [])];
+          const newIds = currentIds.includes(memberId)
+            ? currentIds.length > 1
+              ? currentIds.filter(id => id !== memberId)
+              : currentIds
+            : [...currentIds, memberId];
+          copy.expense = { ...copy.expense, participantMemberIds: newIds };
+        }
+        return copy;
+      });
+    }
+  };
+
+  const handleCardSplitAllToggle = (msgId: string) => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        const targetTripId = updatedAction.expense?.tripId || updatedAction.updateExpense?.tripId;
+        const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+        const allIds = tripMembers.map(tm => tm.id);
+        if (updatedAction.expense) {
+          updatedAction.expense = {
+            ...updatedAction.expense,
+            participantMemberIds: allIds,
+            splitAll: true,
+          };
+        }
+        if (updatedAction.updateExpense) {
+          updatedAction.updateExpense = {
+            ...updatedAction.updateExpense,
+            participantMemberIds: allIds,
+            splitAll: true,
+          };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+  };
+
+  const handleCard5050Toggle = (msgId: string, otherMemberId?: string) => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        const targetTripId = updatedAction.expense?.tripId || updatedAction.updateExpense?.tripId;
+        const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+        const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
+        const secondMem = otherMemberId
+          ? tripMembers.find(tm => tm.id === otherMemberId)
+          : tripMembers.find(tm => tm.id !== myMember?.id) || tripMembers[1] || myMember;
+
+        const participants = [myMember.id];
+        if (secondMem && secondMem.id !== myMember.id) {
+          participants.push(secondMem.id);
+        }
+
+        if (updatedAction.expense) {
+          updatedAction.expense = {
+            ...updatedAction.expense,
+            participantMemberIds: participants,
+            splitAll: false,
+          };
+        }
+        if (updatedAction.updateExpense) {
+          updatedAction.updateExpense = {
+            ...updatedAction.updateExpense,
+            participantMemberIds: participants,
+            splitAll: false,
+          };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+  };
+
+  const handleCardCategoryChange = (msgId: string, newCategory: string) => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        if (updatedAction.expense) {
+          updatedAction.expense = { ...updatedAction.expense, category: newCategory };
+        }
+        if (updatedAction.updateExpense) {
+          updatedAction.updateExpense = { ...updatedAction.updateExpense, category: newCategory };
+        }
+        if (updatedAction.contactSplit) {
+          updatedAction.contactSplit = { ...updatedAction.contactSplit, category: newCategory };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+  };
+
+  const handleCardPaymentModeChange = (msgId: string, mode: 'upi' | 'cash' | 'other') => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        if (updatedAction.expense) {
+          updatedAction.expense = { ...updatedAction.expense, paymentMode: mode };
+        }
+        if (updatedAction.updateExpense) {
+          updatedAction.updateExpense = { ...updatedAction.updateExpense, paymentMode: mode };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+  };
+
+  const handleCardTripChange = (msgId: string, newTripId: string) => {
+    const newTrip = trips.find(t => t.id === newTripId);
+    if (!newTrip) return;
+    const newTripMembers = tripMembersMap[newTripId] || rawMembers || [];
+    const myMember = findMyMember(newTripMembers, user?.id, currentUserPhone) || newTripMembers[0];
+    setSelectedTripId(newTripId);
+
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action) return m;
+        const updatedAction = { ...m.action };
+        if (updatedAction.expense) {
+          updatedAction.expense = {
+            ...updatedAction.expense,
+            tripId: newTripId,
+            tripName: newTrip.name,
+            paidByMemberId: myMember?.id || newTripMembers[0]?.id || '',
+            paidByMemberName: myMember?.display_name || 'You',
+            participantMemberIds: newTripMembers.map(tm => tm.id),
+            splitAll: true,
+          };
+        }
+        return { ...m, action: updatedAction };
+      })
+    );
+  };
+
+  const handleCardSettleFromChange = (msgId: string, memberId: string) => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action || !m.action.settle) return m;
+        return {
+          ...m,
+          action: {
+            ...m.action,
+            settle: {
+              ...m.action.settle,
+              fromMemberId: memberId,
+            },
+          },
+        };
+      })
+    );
+  };
+
+  const handleCardSettleToChange = (msgId: string, memberId: string) => {
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.id !== msgId || !m.action || !m.action.settle) return m;
+        const tripMembers = tripMembersMap[m.action.settle.tripId] || rawMembers || [];
+        const toMem = tripMembers.find(tm => tm.id === memberId);
+        return {
+          ...m,
+          action: {
+            ...m.action,
+            settle: {
+              ...m.action.settle,
+              toMemberId: memberId,
+              toMemberName: toMem?.display_name || m.action.settle.toMemberName,
+            },
+          },
+        };
+      })
+    );
+  };
+
+  const handleStartSettleFromBalance = (balanceItem: CopilotBalanceItem) => {
+    const targetTrip = trips.find(t => t.id === balanceItem.tripId) || trips[0];
+    const tripMembers = (targetTrip && tripMembersMap[targetTrip.id]) || rawMembers || [];
+    const myMember = findMyMember(tripMembers, user?.id, currentUserPhone) || tripMembers[0];
+
+    const fromId = balanceItem.type === 'you_owe' ? myMember?.id || '' : balanceItem.memberId;
+    const toId = balanceItem.type === 'you_owe' ? balanceItem.memberId : myMember?.id || '';
+    const toName = balanceItem.type === 'you_owe' ? balanceItem.memberName : 'You';
+
+    const settleAction: CopilotAction = {
+      type: 'SETTLE_UP',
+      status: 'pending_confirmation',
+      settle: {
+        tripId: targetTrip?.id || '',
+        fromMemberId: fromId,
+        toMemberId: toId,
+        amountPaise: balanceItem.amountPaise,
+        amountRupees: balanceItem.amountRupees,
+        toMemberName: toName,
+      },
+    };
+
+    setPendingAction(settleAction);
+    const settleMsg: CopilotMessage = {
+      id: generateUUID(),
+      role: 'assistant',
+      content: `Settle ₹${balanceItem.amountRupees} with ${balanceItem.memberName}. Choose your payment method below:`,
+      action: settleAction,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, settleMsg]);
+    speakAssistantReply(`Settle ₹${balanceItem.amountRupees} with ${balanceItem.memberName}.`);
+  };
+
+  const handleCardUpiPay = async (settlePayload: NonNullable<CopilotAction['settle']>) => {
+    try {
+      const toMember = contactsSummary.find(
+        c => c.id === settlePayload.toMemberId || c.name.toLowerCase() === (settlePayload.toMemberName || '').toLowerCase()
+      );
+      const ok = await useUpiPaymentStore.getState().startUpiPayment({
+        amountPaise: settlePayload.amountPaise,
+        receiverName: settlePayload.toMemberName || 'Member',
+        receiverPhone: toMember?.phoneNumber || null,
+        fromMemberId: settlePayload.fromMemberId,
+        toMemberId: settlePayload.toMemberId,
+        tripId: settlePayload.tripId,
+      });
+      if (!ok) {
+        Alert.alert('UPI Payment', 'Could not open UPI app on this device. You can record a cash settlement instead.');
+      }
+    } catch (e) {
+      console.warn('Card UPI Pay error:', e);
+    }
+  };
+
+  const handleCardWhatsAppReminder = (balanceItem: CopilotBalanceItem) => {
+    const phone = balanceItem.phoneNumber ? normalizePhone(balanceItem.phoneNumber) : '';
+    const text = encodeURIComponent(
+      `Hey ${balanceItem.memberName}! 👋 Just checking our SplitYourTrip hisaab for ${balanceItem.tripName}. Your balance is ₹${balanceItem.amountRupees}. You can settle it anytime!`
+    );
+    const url = phone ? `whatsapp://send?phone=${phone}&text=${text}` : `whatsapp://send?text=${text}`;
+    Linking.canOpenURL(url).then(supported => {
+      if (supported) {
+        Linking.openURL(url);
+      } else {
+        Share.share({
+          message: `Hey ${balanceItem.memberName}! Your SplitYourTrip balance for ${balanceItem.tripName} is ₹${balanceItem.amountRupees}.`,
+        });
+      }
+    });
+  };
+
   // Process a user message turn through the conversational Copilot
   const handleProcessUserTurn = useCallback(
     async (inputText: string) => {
@@ -1112,6 +1490,13 @@ export default function VoiceExpenseModal({
           recentExpenses,
           contacts: contactsSummary,
           pendingAction,
+          friendContacts: contacts.map(c => ({
+            id: c.id,
+            name: c.name,
+            phoneNumber: c.phoneNumber,
+            netBalancePaise: c.netBalancePaise,
+            defaultTripId: c.defaultTripId,
+          })),
         });
 
         setIsAnalyzing(false);
@@ -1268,6 +1653,7 @@ export default function VoiceExpenseModal({
       hasSpokenRef.current = false;
       speechFrameCountRef.current = 0;
       lastSpokenTimestampRef.current = 0;
+      ambientNoiseFloorRef.current = -55;
       setIsSpeaking(false);
       setIsAnalyzing(false);
 
@@ -1334,7 +1720,7 @@ export default function VoiceExpenseModal({
         playThroughEarpieceAndroid: false,
       });
 
-      // Dedicated mono recording with calibrated sensitivity
+      // Dedicated mono recording with Phase 2 calibrated VAD & adaptive noise rejection
       const { recording } = await Audio.Recording.createAsync(
         SPEECH_RECORDING_OPTIONS,
         (status: any) => {
@@ -1344,28 +1730,47 @@ export default function VoiceExpenseModal({
           const duration = status.durationMillis || 0;
           setRecordingSeconds(Math.round(duration / 100) / 10);
 
-          // Calibrated voice detection threshold:
-          // Background room noise is -65 to -52 dB.
-          // Real human voice at normal phone distance: -50 dB to -15 dB.
-          if (currentMetering > -50) {
+          // Phase 2 VAD: Calibrate dynamic ambient baseline during the first 400ms
+          if (duration < 400 && currentMetering > -100) {
+            ambientNoiseFloorRef.current = Math.max(-65, Math.min(-45, (ambientNoiseFloorRef.current + currentMetering) / 2));
+          }
+
+          // Dynamic speech threshold based on room ambient noise floor
+          const voiceThreshold = Math.max(-50, Math.min(-34, ambientNoiseFloorRef.current + 8));
+
+          if (currentMetering > voiceThreshold) {
             speechFrameCountRef.current += 1;
-            // Require at least 2 frames (200ms) of sustained audio to confirm user speech
+            // Require 2 frames (200ms) of sustained vocal energy to confirm real speech
             if (speechFrameCountRef.current >= 2) {
               hasSpokenRef.current = true;
               lastSpokenTimestampRef.current = Date.now();
               setIsSpeaking(true);
+
+              // Live vocal pulse: scale ring dynamically with voice power (-50dB to -10dB)
+              const normalizedVol = Math.max(0, Math.min(1, (currentMetering + 50) / 38));
+              Animated.spring(pulseRing1, {
+                toValue: 1 + normalizedVol * 0.45,
+                friction: 6,
+                tension: 80,
+                useNativeDriver: true,
+              }).start();
             }
-          } else if (Date.now() - lastSpokenTimestampRef.current > 900) {
+          } else if (Date.now() - lastSpokenTimestampRef.current > 700) {
             setIsSpeaking(false);
+            Animated.spring(pulseRing1, {
+              toValue: 1,
+              friction: 8,
+              useNativeDriver: true,
+            }).start();
           }
 
-          // Auto silence timeout: only if user has actually spoken, recording is at least 1.8s long,
-          // and user has been silent for 4.2 seconds (prevents cutting off normal conversational pauses)
+          // Phase 2 VAD: Snappy & natural silence auto-stop (1.9s of silence after speech)
+          // Eliminates the previous awkward 4.2-second freeze and cuts response latency by > 2s
           if (
             hasSpokenRef.current &&
-            duration > 1800 &&
+            duration > 1200 &&
             lastSpokenTimestampRef.current > 0 &&
-            Date.now() - lastSpokenTimestampRef.current > 4200
+            Date.now() - lastSpokenTimestampRef.current > 1900
           ) {
             if (!isStoppingListeningRef.current) {
               isStoppingListeningRef.current = true;
@@ -1373,7 +1778,15 @@ export default function VoiceExpenseModal({
             }
           }
 
-          // Maximum recording duration: 30 seconds
+          // Pure silence guard: if user tapped mic but didn't speak for 7 seconds, auto-cancel cleanly
+          if (!hasSpokenRef.current && duration > 7000) {
+            if (!isStoppingListeningRef.current) {
+              isStoppingListeningRef.current = true;
+              stopAutomaticListening();
+            }
+          }
+
+          // Hard safety limit: 30 seconds
           if (duration > 30000) {
             if (!isStoppingListeningRef.current) {
               isStoppingListeningRef.current = true;
@@ -1458,6 +1871,15 @@ export default function VoiceExpenseModal({
         setIsAnalyzing(false);
         setSpeechStatusType('info');
         setSpeechStatusMessage('Tap mic to speak at your own pace');
+        return;
+      }
+
+      // Phase 2 VAD: If no speech was detected by audio metering, bypass Whisper API call
+      // to eliminate false silence hallucinations and save API latency
+      if (!hasSpokenRef.current) {
+        setIsAnalyzing(false);
+        setSpeechStatusType('info');
+        setSpeechStatusMessage('No speech detected. Tap mic to speak.');
         return;
       }
 
@@ -1646,382 +2068,760 @@ export default function VoiceExpenseModal({
                     </Text>
 
                     {/* Action Card inside Assistant Bubble */}
-                    {isAssistant && (item.action?.type === 'ADD_EXPENSE' || item.action?.type === 'CONFIRM_ADD_EXPENSE') && item.action?.expense && (item.action.status === 'pending_confirmation' || item.action.status === 'confirmed') && (
-                      <View style={[styles.actionCard, { borderColor: item.action.status === 'confirmed' ? '#10B981' : colors.primary, backgroundColor: isDark ? colors.background : '#FFFFFF' }]}>
-                        <View style={styles.actionCardHeader}>
-                          <Text style={[styles.actionCardTitle, { color: colors.textSecondary }]}>
-                            {item.action.status === 'confirmed' ? 'Added Expense' : 'Proposed Expense'}
-                          </Text>
-                          <Text
-                            style={[styles.actionCardAmount, { color: item.action.status === 'confirmed' ? '#10B981' : colors.primary }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit={true}
-                            minimumFontScale={0.72}
+                    {/* 1. ADD_EXPENSE & CONFIRM_ADD_EXPENSE Action Card */}
+                    {isAssistant && (item.action?.type === 'ADD_EXPENSE' || item.action?.type === 'CONFIRM_ADD_EXPENSE') && item.action?.expense && (
+                      (() => {
+                        const exp = item.action.expense;
+                        const targetTripId = exp.tripId;
+                        const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+                        const activePayerId = exp.paidByMemberId;
+                        const participantIds = exp.participantMemberIds || [];
+                        const splitCount = participantIds.length;
+                        const perPersonPaise = splitCount > 0 ? Math.round(exp.amountPaise / splitCount) : exp.amountPaise;
+                        const perPersonRupees = Math.round(perPersonPaise / 100).toString();
+                        const isPending = item.action.status === 'pending_confirmation';
+                        const isConfirmed = item.action.status === 'confirmed';
+                        const availableCategories = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
+
+                        return (
+                          <View
+                            style={[
+                              styles.actionCard,
+                              {
+                                borderColor: isConfirmed ? '#10B981' : colors.primary,
+                                backgroundColor: isDark ? colors.background : '#FFFFFF',
+                              },
+                            ]}
                           >
-                            ₹{item.action.expense.amountRupees}
-                          </Text>
-                        </View>
-
-                        <Text style={[styles.actionCardDesc, { color: colors.text }]}>
-                          {item.action.expense.description}
-                        </Text>
-
-                        {/* Detail tags */}
-                        <View style={styles.actionTagsRow}>
-                          <View style={[styles.actionTagPill, { backgroundColor: isDark ? colors.card : '#F1F5F9' }]}>
-                            <Ionicons name="location-outline" size={11} color={colors.primary} />
-                            <Text style={[styles.actionTagText, { color: colors.text }]} numberOfLines={1}>
-                              {item.action.expense.tripName || 'Trip'}
-                            </Text>
-                          </View>
-                          <View style={[styles.actionTagPill, { backgroundColor: isDark ? colors.card : '#F1F5F9' }]}>
-                            <Ionicons name="pricetag-outline" size={11} color={colors.textSecondary} />
-                            <Text style={[styles.actionTagText, { color: colors.text }]} numberOfLines={1}>
-                              {item.action.expense.category}
-                            </Text>
-                          </View>
-                          {item.action.expense.participantMemberIds && item.action.expense.participantMemberIds.length > 0 && (
-                            <View style={[styles.actionTagPill, { backgroundColor: isDark ? colors.card : '#F1F5F9' }]}>
-                              <Ionicons name="people-outline" size={11} color={colors.primary} />
-                              <Text style={[styles.actionTagText, { color: colors.text }]} numberOfLines={1}>
-                                {item.action.expense.splitAll
-                                  ? 'All members'
-                                  : `${item.action.expense.participantMemberIds.length} members`}
+                            {/* Card Header */}
+                            <View style={styles.actionCardHeader}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <View style={[styles.titleIconBadge, { backgroundColor: isConfirmed ? 'rgba(16, 185, 129, 0.15)' : colors.primaryLight }]}>
+                                  <Ionicons name={isConfirmed ? 'checkmark-circle' : 'receipt-outline'} size={14} color={isConfirmed ? '#10B981' : colors.primary} />
+                                </View>
+                                <Text style={[styles.actionCardTitle, { color: isConfirmed ? '#10B981' : colors.primary }]}>
+                                  {isConfirmed ? 'Added Expense' : 'Confirm Expense'}
+                                </Text>
+                              </View>
+                              <Text
+                                style={[styles.actionCardAmount, { color: isConfirmed ? '#10B981' : colors.primary }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit={true}
+                                minimumFontScale={0.72}
+                              >
+                                ₹{exp.amountRupees}
                               </Text>
                             </View>
-                          )}
-                        </View>
 
-                        {/* Interactive Confirm / Review / Cancel Buttons or Confirmed Badge */}
-                        {item.action.status === 'pending_confirmation' ? (
-                          <View style={styles.actionCardButtonsRow}>
-                            <TouchableOpacity
-                              style={[styles.confirmBtn, { backgroundColor: '#10B981' }]}
-                              onPress={async () => {
-                                const proposedExp = item.action?.expense;
-                                if (proposedExp && !isExecutingAction) {
-                                  if (item.action) item.action.status = 'confirmed';
-                                  setPendingAction(null);
-                                  const ok = await executeSubmitExpense(proposedExp);
-                                  if (ok) {
+                            <Text style={[styles.actionCardDesc, { color: colors.text }]}>
+                              {exp.description}
+                            </Text>
+
+                            {/* Section 1: Who Paid? (Interactive Payer Selection) */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="wallet-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  WHO PAID?
+                                </Text>
+                                <Text style={[styles.cardSectionSubtitle, { color: colors.textMuted }]}>
+                                  (tap to change payer)
+                                </Text>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {tripMembers.map(m => {
+                                  const isSelected = m.id === activePayerId || (m.display_name === exp.paidByMemberName);
+                                  return (
+                                    <TouchableOpacity
+                                      key={m.id}
+                                      style={[
+                                        styles.memberChip,
+                                        isSelected
+                                          ? [styles.memberChipActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                          : [styles.memberChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardPayerChange(item.id, m.id)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <View
+                                        style={[
+                                          styles.chipAvatarCircle,
+                                          { backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : colors.primaryLight },
+                                        ]}
+                                      >
+                                        <Text style={[styles.chipAvatarText, { color: isSelected ? '#FFFFFF' : colors.primary }]}>
+                                          {(m.display_name || 'U').charAt(0).toUpperCase()}
+                                        </Text>
+                                      </View>
+                                      <Text
+                                        style={[
+                                          styles.memberChipText,
+                                          { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.text },
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {m.display_name}
+                                      </Text>
+                                      {isSelected && (
+                                        <Ionicons name="checkmark-circle" size={13} color={colors.textOnSilver || '#B5504F'} />
+                                      )}
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Section 2: Split With (Interactive Participant Selection) */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="people-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  SPLIT WITH
+                                </Text>
+                                <View style={[styles.perPersonPill, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.16)' : '#ECFDF5' }]}>
+                                  <Text style={styles.perPersonPillText} numberOfLines={1}>
+                                    ₹{perPersonRupees}/person ({splitCount})
+                                  </Text>
+                                </View>
+                              </View>
+
+                              {/* Quick Presets (All / 50-50) */}
+                              <View style={styles.quickPresetsRow}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.presetPill,
+                                    exp.splitAll
+                                      ? [styles.presetPillActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                      : [styles.presetPillInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCardSplitAllToggle(item.id)}
+                                  activeOpacity={0.7}
+                                >
+                                  <Ionicons
+                                    name="people"
+                                    size={12}
+                                    color={exp.splitAll ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.presetPillText,
+                                      { color: exp.splitAll ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
+                                    ]}
+                                  >
+                                    All ({tripMembers.length})
+                                  </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.presetPill,
+                                    !exp.splitAll && splitCount === 2
+                                      ? [styles.presetPillActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                      : [styles.presetPillInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCard5050Toggle(item.id)}
+                                  activeOpacity={0.7}
+                                >
+                                  <Ionicons
+                                    name="git-compare-outline"
+                                    size={12}
+                                    color={!exp.splitAll && splitCount === 2 ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.presetPillText,
+                                      { color: !exp.splitAll && splitCount === 2 ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
+                                    ]}
+                                  >
+                                    50-50
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+
+                              {/* Participant Chips */}
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {tripMembers.map(m => {
+                                  const isIncluded = participantIds.includes(m.id);
+                                  return (
+                                    <TouchableOpacity
+                                      key={m.id}
+                                      style={[
+                                        styles.participantChip,
+                                        isIncluded
+                                          ? [styles.participantChipActive, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.16)' : '#ECFDF5', borderColor: '#10B981' }]
+                                          : [styles.participantChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardParticipantToggle(item.id, m.id)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Ionicons
+                                        name={isIncluded ? 'checkbox' : 'square-outline'}
+                                        size={14}
+                                        color={isIncluded ? '#10B981' : colors.textSecondary}
+                                      />
+                                      <Text
+                                        style={[
+                                          styles.participantChipText,
+                                          { color: isIncluded ? (isDark ? '#34D399' : '#065F46') : colors.textSecondary },
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {m.display_name}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Section 3: Trip Selector (if user has > 1 trip) */}
+                            {trips.length > 1 && (
+                              <View style={styles.cardSectionBlock}>
+                                <View style={styles.cardSectionHeader}>
+                                  <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
+                                  <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                    TRIP
+                                  </Text>
+                                </View>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                  {trips.slice(0, 8).map(tr => {
+                                    const isCurrent = tr.id === exp.tripId;
+                                    return (
+                                      <TouchableOpacity
+                                        key={tr.id}
+                                        style={[
+                                          styles.tagChip,
+                                          isCurrent
+                                            ? [styles.tagChipActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                            : [styles.tagChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                        ]}
+                                        onPress={() => handleCardTripChange(item.id, tr.id)}
+                                        activeOpacity={0.7}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.tagChipText,
+                                            { color: isCurrent ? (colors.textOnSilver || '#B5504F') : colors.text },
+                                          ]}
+                                          numberOfLines={1}
+                                        >
+                                          {tr.name}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </ScrollView>
+                              </View>
+                            )}
+
+                            {/* Section 4: Category Selector */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="pricetag-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  CATEGORY
+                                </Text>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {availableCategories.map(cat => {
+                                  const isCurrent = (exp.category || '').toLowerCase() === cat.toLowerCase();
+                                  return (
+                                    <TouchableOpacity
+                                      key={cat}
+                                      style={[
+                                        styles.tagChip,
+                                        isCurrent
+                                          ? [styles.tagChipActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                          : [styles.tagChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardCategoryChange(item.id, cat)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.tagChipText,
+                                          { color: isCurrent ? (colors.textOnSilver || '#B5504F') : colors.text },
+                                        ]}
+                                      >
+                                        {cat}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Section 5: Payment Mode Selector */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="card-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  MODE
+                                </Text>
+                              </View>
+                              <View style={styles.paymentModeRow}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.modePill,
+                                    exp.paymentMode === 'upi'
+                                      ? [styles.modePillActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                      : [styles.modePillInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCardPaymentModeChange(item.id, 'upi')}
+                                  activeOpacity={0.7}
+                                >
+                                  <Ionicons
+                                    name="flash-outline"
+                                    size={12}
+                                    color={exp.paymentMode === 'upi' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.modePillText,
+                                      { color: exp.paymentMode === 'upi' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
+                                    ]}
+                                  >
+                                    UPI
+                                  </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.modePill,
+                                    exp.paymentMode === 'cash'
+                                      ? [styles.modePillActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                      : [styles.modePillInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCardPaymentModeChange(item.id, 'cash')}
+                                  activeOpacity={0.7}
+                                >
+                                  <Ionicons
+                                    name="cash-outline"
+                                    size={12}
+                                    color={exp.paymentMode === 'cash' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.modePillText,
+                                      { color: exp.paymentMode === 'cash' ? (colors.textOnSilver || '#B5504F') : colors.textSecondary },
+                                    ]}
+                                  >
+                                    Cash
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+
+                            {/* Footer Buttons */}
+                            {isPending ? (
+                              <View style={styles.actionCardButtonsRow}>
+                                <TouchableOpacity
+                                  style={[styles.confirmBtn, { backgroundColor: '#10B981' }]}
+                                  onPress={async () => {
+                                    if (exp && !isExecutingAction) {
+                                      if (item.action) item.action.status = 'confirmed';
+                                      setPendingAction(null);
+                                      const ok = await executeSubmitExpense(exp);
+                                      if (ok) {
+                                        setMessages(prev => [
+                                          ...prev,
+                                          {
+                                            id: generateUUID(),
+                                            role: 'assistant',
+                                            content: `Confirmed! ₹${exp.amountRupees} for ${exp.description} saved to ${exp.tripName || 'your trip'}.`,
+                                            timestamp: new Date().toISOString(),
+                                          },
+                                        ]);
+                                        speakAssistantReply(`Confirmed! Saved to your trip.`);
+                                      }
+                                    }
+                                  }}
+                                  activeOpacity={0.8}
+                                  disabled={isExecutingAction}
+                                >
+                                  {isExecutingAction ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                  ) : (
+                                    <>
+                                      <Ionicons name="checkmark" size={15} color="#FFFFFF" />
+                                      <Text style={styles.confirmBtnText}>
+                                        Confirm & Add ₹{exp.amountRupees}
+                                      </Text>
+                                    </>
+                                  )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[styles.cancelBtn, { borderColor: '#EF4444' }]}
+                                  onPress={() => {
+                                    if (item.action) item.action.status = 'info_only';
+                                    setPendingAction(null);
                                     setMessages(prev => [
                                       ...prev,
                                       {
                                         id: generateUUID(),
                                         role: 'assistant',
-                                        content: `Confirmed! ₹${proposedExp.amountRupees} was saved to ${proposedExp.tripName || 'your trip'}.`,
+                                        content: 'Cancelled. Let me know if you would like to change the amount or details.',
                                         timestamp: new Date().toISOString(),
                                       },
                                     ]);
-                                    speakAssistantReply(`Confirmed! Saved to your trip.`);
-                                  }
-                                } else if (item.action?.settle && !isExecutingAction) {
-                                  if (item.action) item.action.status = 'confirmed';
-                                  setPendingAction(null);
-                                  const s = item.action.settle;
-                                  try {
-                                    setIsExecutingAction(true);
-                                    await addExpense({
-                                      tripId: s.tripId,
-                                      amountPaise: s.amountPaise,
-                                      description: `Settlement with ${s.toMemberName || 'Member'}`,
-                                      category: 'settlement',
-                                      paidByMemberId: s.fromMemberId,
-                                      paymentMode: 'cash',
-                                      splitType: 'exact',
-                                      participantMemberIds: [s.toMemberId],
-                                      customSplits: [{ memberId: s.toMemberId, shareAmount: s.amountPaise }],
-                                      userId: user?.id || 'local_user',
-                                    });
-                                    await useContactsStore.getState().fetchFriendsSummary(user?.id);
-                                    useTripStore.getState().fetchTrips(user?.id);
-                                    setMessages(prev => [
-                                      ...prev,
+                                    speakAssistantReply('Cancelled.');
+                                  }}
+                                  activeOpacity={0.8}
+                                  disabled={isExecutingAction}
+                                >
+                                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : (
+                              <View style={styles.confirmedCardFooter}>
+                                <View style={styles.confirmedBadgeRow}>
+                                  <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                                  <Text style={styles.confirmedBadgeText}>
+                                    Saved to {exp.tripName || 'Trip'} (Paid by {exp.paidByMemberName || 'You'})
+                                  </Text>
+                                </View>
+
+                                <View style={styles.confirmedActionsRow}>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.confirmedActionBtn,
                                       {
-                                        id: generateUUID(),
-                                        role: 'assistant',
-                                        content: `Confirmed! ₹${s.amountRupees} settlement with ${s.toMemberName || 'Member'} recorded.`,
-                                        timestamp: new Date().toISOString(),
+                                        borderColor: colors.primary,
+                                        backgroundColor: colors.primaryLight,
                                       },
-                                    ]);
-                                    speakAssistantReply('Confirmed! Settlement recorded.');
-                                  } catch (e) {
-                                    console.warn('Voice settle error:', e);
-                                  } finally {
-                                    setIsExecutingAction(false);
-                                  }
-                                }
-                              }}
-                              activeOpacity={0.8}
-                              disabled={isExecutingAction}
-                            >
-                              {isExecutingAction ? (
-                                <ActivityIndicator size="small" color="#FFFFFF" />
-                              ) : (
-                                <>
-                                  <Ionicons name="checkmark" size={15} color="#FFFFFF" />
-                                  <Text style={styles.confirmBtnText}>Confirm & Add</Text>
-                                </>
-                              )}
-                            </TouchableOpacity>
+                                    ]}
+                                    onPress={() => {
+                                      setSelectedExpenseToChange({
+                                        fromTripId: exp.tripId || '',
+                                        expenseId:
+                                          (exp as any)?.expenseId ||
+                                          recentExpenses.find(e => e.tripId === exp.tripId)?.id ||
+                                          '',
+                                        amountRupees: exp.amountRupees,
+                                        description: exp.description,
+                                      });
+                                      setShowChangeEntityModal(true);
+                                    }}
+                                    activeOpacity={0.8}
+                                    disabled={isExecutingAction}
+                                  >
+                                    <Ionicons name="swap-horizontal" size={13} color={colors.primary} />
+                                    <Text style={[styles.confirmedActionBtnText, { color: colors.primary }]}>
+                                      Change Person
+                                    </Text>
+                                  </TouchableOpacity>
 
-                            <TouchableOpacity
-                              style={[styles.cancelBtn, { borderColor: '#EF4444' }]}
-                              onPress={() => {
-                                if (item.action) item.action.status = 'info_only';
-                                setPendingAction(null);
-                                setMessages(prev => [
-                                  ...prev,
-                                  {
-                                    id: generateUUID(),
-                                    role: 'assistant',
-                                    content: 'Cancelled. Let me know if you would like to change the amount or details.',
-                                    timestamp: new Date().toISOString(),
-                                  },
-                                ]);
-                                speakAssistantReply('Cancelled.');
-                              }}
-                              activeOpacity={0.8}
-                              disabled={isExecutingAction}
-                            >
-                              <Text style={styles.cancelBtnText}>Cancel</Text>
-                            </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.confirmedActionBtn, { borderColor: colors.border }]}
+                                    onPress={() => {
+                                      const tId = exp.tripId;
+                                      const eId =
+                                        (exp as any)?.expenseId ||
+                                        recentExpenses.find(e => e.tripId === tId)?.id;
+                                      if (tId && eId) {
+                                        handleModalClose();
+                                        router.push(`/trip/${tId}/expense/${eId}` as any);
+                                      }
+                                    }}
+                                    activeOpacity={0.8}
+                                    disabled={isExecutingAction}
+                                  >
+                                    <Ionicons name="pencil-outline" size={13} color={colors.textSecondary} />
+                                    <Text style={[styles.confirmedActionBtnText, { color: colors.textSecondary }]}>
+                                      Edit
+                                    </Text>
+                                  </TouchableOpacity>
+
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.confirmedActionBtn,
+                                      {
+                                        borderColor: isDark ? '#7F1D1D' : '#FEE2E2',
+                                        backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
+                                      },
+                                    ]}
+                                    onPress={() => {
+                                      const tId = exp.tripId;
+                                      const eId =
+                                        (exp as any)?.expenseId ||
+                                        recentExpenses.find(e => e.tripId === tId)?.id;
+                                      if (tId && eId) {
+                                        handleUndoExpense(tId, eId);
+                                      }
+                                    }}
+                                    activeOpacity={0.8}
+                                    disabled={isExecutingAction}
+                                  >
+                                    <Ionicons name="arrow-undo-outline" size={13} color={colors.danger} />
+                                    <Text style={[styles.confirmedActionBtnText, { color: colors.danger }]}>
+                                      Undo
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
                           </View>
-                        ) : (
-                          <View style={styles.confirmedCardFooter}>
-                            <View style={styles.confirmedBadgeRow}>
-                              <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-                              <Text style={styles.confirmedBadgeText}>
-                                Saved to {item.action.expense.tripName || 'Trip'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.confirmedActionsRow}>
-                              <TouchableOpacity
-                                style={[
-                                  styles.confirmedActionBtn,
-                                  {
-                                    borderColor: colors.primary,
-                                    backgroundColor: colors.primaryLight,
-                                  },
-                                ]}
-                                onPress={() => {
-                                  setSelectedExpenseToChange({
-                                    fromTripId: item.action?.expense?.tripId || '',
-                                    expenseId:
-                                      (item.action?.expense as any)?.expenseId ||
-                                      recentExpenses.find(e => e.tripId === item.action?.expense?.tripId)?.id ||
-                                      '',
-                                    amountRupees: item.action?.expense?.amountRupees,
-                                    description: item.action?.expense?.description,
-                                  });
-                                  setShowChangeEntityModal(true);
-                                }}
-                                activeOpacity={0.8}
-                                disabled={isExecutingAction}
-                              >
-                                <Ionicons name="swap-horizontal" size={13} color={colors.primary} />
-                                <Text style={[styles.confirmedActionBtnText, { color: colors.primary }]}>
-                                  Change Person
-                                </Text>
-                              </TouchableOpacity>
-
-                              <TouchableOpacity
-                                style={[styles.confirmedActionBtn, { borderColor: colors.border }]}
-                                onPress={() => {
-                                  const tId = item.action?.expense?.tripId;
-                                  const eId =
-                                    (item.action?.expense as any)?.expenseId ||
-                                    recentExpenses.find(e => e.tripId === tId)?.id;
-                                  if (tId && eId) {
-                                    handleModalClose();
-                                    router.push(`/trip/${tId}/expense/${eId}` as any);
-                                  }
-                                }}
-                                activeOpacity={0.8}
-                                disabled={isExecutingAction}
-                              >
-                                <Ionicons name="pencil-outline" size={13} color={colors.textSecondary} />
-                                <Text style={[styles.confirmedActionBtnText, { color: colors.textSecondary }]}>
-                                  Edit
-                                </Text>
-                              </TouchableOpacity>
-
-                              <TouchableOpacity
-                                style={[
-                                  styles.confirmedActionBtn,
-                                  {
-                                    borderColor: isDark ? '#7F1D1D' : '#FEE2E2',
-                                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
-                                  },
-                                ]}
-                                onPress={() => {
-                                  const tId = item.action?.expense?.tripId;
-                                  const eId =
-                                    (item.action?.expense as any)?.expenseId ||
-                                    recentExpenses.find(e => e.tripId === tId)?.id;
-                                  if (tId && eId) {
-                                    handleUndoExpense(tId, eId);
-                                  }
-                                }}
-                                activeOpacity={0.8}
-                                disabled={isExecutingAction}
-                              >
-                                <Ionicons name="arrow-undo-outline" size={13} color={colors.danger} />
-                                <Text style={[styles.confirmedActionBtnText, { color: colors.danger }]}>
-                                  Undo
-                                </Text>
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                        )}
-                      </View>
+                        );
+                      })()
                     )}
 
-                    {/* Update Expense Action Card */}
+                    {/* 2. UPDATE_EXPENSE Action Card */}
                     {isAssistant && item.action?.type === 'UPDATE_EXPENSE' && item.action.updateExpense && (
-                      <View
-                        style={[
-                          styles.actionCard,
-                          {
-                            borderColor: item.action.status === 'confirmed' ? '#3B82F6' : '#F59E0B',
-                            backgroundColor: isDark ? colors.background : '#FFFFFF',
-                          },
-                        ]}
-                      >
-                        <View style={styles.actionCardHeader}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <View style={[styles.titleIconBadge, { backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#DBEAFE' }]}>
-                              <Ionicons name="create-outline" size={13} color="#3B82F6" />
-                            </View>
-                            <Text style={[styles.actionCardTitle, { color: '#3B82F6' }]}>
-                              {item.action.status === 'confirmed' ? 'Updated Expense' : 'Confirm Update Expense'}
-                            </Text>
-                          </View>
-                          <Text
-                            style={[styles.actionCardAmount, { color: '#3B82F6' }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit={true}
-                            minimumFontScale={0.72}
+                      (() => {
+                        const upd = item.action.updateExpense;
+                        const targetTripId = upd.tripId;
+                        const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+                        const activePayerId = upd.paidByMemberId;
+                        const participantIds = upd.participantMemberIds || [];
+                        const splitCount = participantIds.length;
+                        const perPersonRupees =
+                          splitCount > 0
+                            ? Math.round((upd.amountPaise || 0) / splitCount / 100).toString()
+                            : upd.amountRupees || '0';
+                        const isPending = item.action.status === 'pending_confirmation';
+                        const availableCategories = ['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'];
+
+                        return (
+                          <View
+                            style={[
+                              styles.actionCard,
+                              {
+                                borderColor: item.action.status === 'confirmed' ? '#3B82F6' : '#F59E0B',
+                                backgroundColor: isDark ? colors.background : '#FFFFFF',
+                              },
+                            ]}
                           >
-                            ₹{item.action.updateExpense.amountRupees}
-                          </Text>
-                        </View>
-
-                        <Text style={[styles.actionCardDesc, { color: colors.text }]}>
-                          {item.action.updateExpense.description}
-                        </Text>
-
-                        {/* Detail tags */}
-                        <View style={styles.actionTagsRow}>
-                          {Boolean(item.action.updateExpense.tripName) && (
-                            <View style={[styles.actionTagPill, { backgroundColor: isDark ? colors.card : '#F1F5F9' }]}>
-                              <Ionicons name="location-outline" size={11} color={colors.primary} />
-                              <Text style={[styles.actionTagText, { color: colors.text }]} numberOfLines={1}>
-                                {item.action.updateExpense.tripName}
+                            <View style={styles.actionCardHeader}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <View style={[styles.titleIconBadge, { backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#DBEAFE' }]}>
+                                  <Ionicons name="create-outline" size={13} color="#3B82F6" />
+                                </View>
+                                <Text style={[styles.actionCardTitle, { color: '#3B82F6' }]}>
+                                  {item.action.status === 'confirmed' ? 'Updated Expense' : 'Confirm Update Expense'}
+                                </Text>
+                              </View>
+                              <Text
+                                style={[styles.actionCardAmount, { color: '#3B82F6' }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit={true}
+                                minimumFontScale={0.72}
+                              >
+                                ₹{upd.amountRupees}
                               </Text>
                             </View>
-                          )}
-                          {Boolean(item.action.updateExpense.category) && (
-                            <View style={[styles.actionTagPill, { backgroundColor: isDark ? colors.card : '#F1F5F9' }]}>
-                              <Ionicons name="pricetag-outline" size={11} color={colors.textSecondary} />
-                              <Text style={[styles.actionTagText, { color: colors.text }]} numberOfLines={1}>
-                                {item.action.updateExpense.category}
-                              </Text>
-                            </View>
-                          )}
-                          {item.action.updateExpense.participantMemberIds && item.action.updateExpense.participantMemberIds.length > 0 && (
-                            <View style={[styles.actionTagPill, { backgroundColor: isDark ? colors.card : '#F1F5F9' }]}>
-                              <Ionicons name="people-outline" size={11} color="#3B82F6" />
-                              <Text style={[styles.actionTagText, { color: colors.text }]} numberOfLines={1}>
-                                {item.action.updateExpense.splitAll
-                                  ? 'All members'
-                                  : `${item.action.updateExpense.participantMemberIds.length} members (50-50)`}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
 
-                        {item.action.status === 'pending_confirmation' ? (
-                          <View style={styles.actionCardButtonsRow}>
-                            <TouchableOpacity
-                              style={[styles.confirmBtn, { backgroundColor: '#3B82F6' }]}
-                              onPress={async () => {
-                                const updPayload = item.action?.updateExpense;
-                                if (updPayload && !isExecutingAction) {
-                                  if (item.action) item.action.status = 'confirmed';
-                                  setPendingAction(null);
-                                  const ok = await executeUpdateExpense(updPayload);
-                                  if (ok) {
+                            <Text style={[styles.actionCardDesc, { color: colors.text }]}>
+                              {upd.description}
+                            </Text>
+
+                            {/* Section 1: Who Paid? */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="wallet-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  WHO PAID?
+                                </Text>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {tripMembers.map(m => {
+                                  const isSelected = m.id === activePayerId;
+                                  return (
+                                    <TouchableOpacity
+                                      key={m.id}
+                                      style={[
+                                        styles.memberChip,
+                                        isSelected
+                                          ? [styles.memberChipActive, { backgroundColor: '#3B82F6', borderColor: '#3B82F6' }]
+                                          : [styles.memberChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardPayerChange(item.id, m.id)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.memberChipText,
+                                          { color: isSelected ? '#FFFFFF' : colors.text },
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {m.display_name}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Section 2: Split With */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="people-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  SPLIT WITH ({splitCount} members - ₹{perPersonRupees}/ea)
+                                </Text>
+                              </View>
+                              <View style={styles.quickPresetsRow}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.presetPill,
+                                    upd.splitAll
+                                      ? [styles.presetPillActive, { backgroundColor: '#3B82F6', borderColor: '#3B82F6' }]
+                                      : [styles.presetPillInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCardSplitAllToggle(item.id)}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.presetPillText, { color: upd.splitAll ? '#FFFFFF' : colors.textSecondary }]}>
+                                    All ({tripMembers.length})
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.presetPill,
+                                    !upd.splitAll && splitCount === 2
+                                      ? [styles.presetPillActive, { backgroundColor: '#3B82F6', borderColor: '#3B82F6' }]
+                                      : [styles.presetPillInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCard5050Toggle(item.id)}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.presetPillText, { color: !upd.splitAll && splitCount === 2 ? '#FFFFFF' : colors.textSecondary }]}>
+                                    50-50
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {tripMembers.map(m => {
+                                  const isIncluded = participantIds.includes(m.id);
+                                  return (
+                                    <TouchableOpacity
+                                      key={m.id}
+                                      style={[
+                                        styles.participantChip,
+                                        isIncluded
+                                          ? [styles.participantChipActive, { backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF', borderColor: '#3B82F6' }]
+                                          : [styles.participantChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardParticipantToggle(item.id, m.id)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Ionicons
+                                        name={isIncluded ? 'checkbox' : 'square-outline'}
+                                        size={14}
+                                        color={isIncluded ? '#3B82F6' : colors.textSecondary}
+                                      />
+                                      <Text style={[styles.participantChipText, { color: isIncluded ? '#3B82F6' : colors.textSecondary }]} numberOfLines={1}>
+                                        {m.display_name}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Section 3: Category */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="pricetag-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  CATEGORY
+                                </Text>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {availableCategories.map(cat => {
+                                  const isCurrent = (upd.category || '').toLowerCase() === cat.toLowerCase();
+                                  return (
+                                    <TouchableOpacity
+                                      key={cat}
+                                      style={[
+                                        styles.tagChip,
+                                        isCurrent
+                                          ? [styles.tagChipActive, { backgroundColor: '#3B82F6', borderColor: '#3B82F6' }]
+                                          : [styles.tagChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardCategoryChange(item.id, cat)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text style={[styles.tagChipText, { color: isCurrent ? '#FFFFFF' : colors.text }]}>
+                                        {cat}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {isPending ? (
+                              <View style={styles.actionCardButtonsRow}>
+                                <TouchableOpacity
+                                  style={[styles.confirmBtn, { backgroundColor: '#3B82F6' }]}
+                                  onPress={async () => {
+                                    if (upd && !isExecutingAction) {
+                                      if (item.action) item.action.status = 'confirmed';
+                                      setPendingAction(null);
+                                      const ok = await executeUpdateExpense(upd);
+                                      if (ok) {
+                                        setMessages(prev => [
+                                          ...prev,
+                                          {
+                                            id: generateUUID(),
+                                            role: 'assistant',
+                                            content: `Updated! The ${upd.description} expense in ${upd.tripName || 'your trip'} was updated.`,
+                                            timestamp: new Date().toISOString(),
+                                          },
+                                        ]);
+                                        speakAssistantReply(`Updated the ${upd.description} expense.`);
+                                      }
+                                    }
+                                  }}
+                                  activeOpacity={0.8}
+                                  disabled={isExecutingAction}
+                                >
+                                  {isExecutingAction ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                  ) : (
+                                    <>
+                                      <Ionicons name="checkmark" size={15} color="#FFFFFF" />
+                                      <Text style={styles.confirmBtnText}>Confirm Update</Text>
+                                    </>
+                                  )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[styles.cancelBtn, { borderColor: colors.border }]}
+                                  onPress={() => {
+                                    if (item.action) item.action.status = 'info_only';
+                                    setPendingAction(null);
                                     setMessages(prev => [
                                       ...prev,
                                       {
                                         id: generateUUID(),
                                         role: 'assistant',
-                                        content: `Updated! The ${updPayload.description} expense in ${updPayload.tripName || 'your trip'} was updated.`,
+                                        content: 'Update cancelled. The expense was kept unchanged.',
                                         timestamp: new Date().toISOString(),
                                       },
                                     ]);
-                                    speakAssistantReply(`Updated the ${updPayload.description} expense.`);
-                                  } else {
-                                    setMessages(prev => [
-                                      ...prev,
-                                      {
-                                        id: generateUUID(),
-                                        role: 'assistant',
-                                        content: `Could not update the expense in ${updPayload.tripName || 'your trip'}.`,
-                                        timestamp: new Date().toISOString(),
-                                      },
-                                    ]);
-                                    speakAssistantReply('Could not update the expense.');
-                                  }
-                                }
-                              }}
-                              activeOpacity={0.8}
-                              disabled={isExecutingAction}
-                            >
-                              {isExecutingAction ? (
-                                <ActivityIndicator size="small" color="#FFFFFF" />
-                              ) : (
-                                <>
-                                  <Ionicons name="checkmark" size={15} color="#FFFFFF" />
-                                  <Text style={styles.confirmBtnText}>Confirm Update</Text>
-                                </>
-                              )}
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={[styles.cancelBtn, { borderColor: colors.border }]}
-                              onPress={() => {
-                                if (item.action) item.action.status = 'info_only';
-                                setPendingAction(null);
-                                setMessages(prev => [
-                                  ...prev,
-                                  {
-                                    id: generateUUID(),
-                                    role: 'assistant',
-                                    content: 'Update cancelled. The expense was kept unchanged.',
-                                    timestamp: new Date().toISOString(),
-                                  },
-                                ]);
-                                speakAssistantReply('Cancelled.');
-                              }}
-                              activeOpacity={0.8}
-                              disabled={isExecutingAction}
-                            >
-                              <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Keep Original</Text>
-                            </TouchableOpacity>
+                                    speakAssistantReply('Cancelled.');
+                                  }}
+                                  activeOpacity={0.8}
+                                  disabled={isExecutingAction}
+                                >
+                                  <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Keep Original</Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : (
+                              <View style={styles.confirmedBadgeRow}>
+                                <Ionicons name="checkmark-circle" size={15} color="#3B82F6" />
+                                <Text style={[styles.confirmedBadgeText, { color: '#3B82F6' }]}>Updated in Trip</Text>
+                              </View>
+                            )}
                           </View>
-                        ) : (
-                          <View style={styles.confirmedBadgeRow}>
-                            <Ionicons name="checkmark-circle" size={15} color="#3B82F6" />
-                            <Text style={[styles.confirmedBadgeText, { color: '#3B82F6' }]}>Updated in Trip</Text>
-                          </View>
-                        )}
-                      </View>
+                        );
+                      })()
                     )}
 
-                    {/* Delete Expense Action Card */}
+                    {/* 3. Delete Expense Action Card */}
                     {isAssistant && item.action?.type === 'DELETE_EXPENSE' && item.action.deleteExpense && (
                       <View
                         style={[
@@ -2071,6 +2871,14 @@ export default function VoiceExpenseModal({
                               </Text>
                             </View>
                           )}
+                        </View>
+
+                        {/* Danger notice */}
+                        <View style={[styles.deleteWarningBox, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2', borderColor: isDark ? '#7F1D1D' : '#FEE2E2' }]}>
+                          <Ionicons name="warning-outline" size={14} color="#EF4444" />
+                          <Text style={[styles.deleteWarningText, { color: isDark ? '#FCA5A5' : '#991B1B' }]}>
+                            This expense will be permanently deleted from {item.action.deleteExpense.tripName || 'your trip'}.
+                          </Text>
                         </View>
 
                         {item.action.status === 'pending_confirmation' ? (
@@ -2141,7 +2949,375 @@ export default function VoiceExpenseModal({
                       </View>
                     )}
 
-                    {/* Start Contact Split Action Card */}
+                    {/* 4. SETTLE_UP Action Card */}
+                    {isAssistant && item.action?.type === 'SETTLE_UP' && item.action.settle && (
+                      (() => {
+                        const s = item.action.settle;
+                        const targetTripId = s.tripId;
+                        const tripMembers = (targetTripId && tripMembersMap[targetTripId]) || rawMembers || [];
+                        const fromMember = tripMembers.find(m => m.id === s.fromMemberId);
+                        const toMember = tripMembers.find(m => m.id === s.toMemberId);
+                        const fromName = fromMember?.display_name || 'You';
+                        const toName = toMember?.display_name || s.toMemberName || 'Member';
+                        const isPending = item.action.status === 'pending_confirmation';
+
+                        return (
+                          <View
+                            style={[
+                              styles.actionCard,
+                              {
+                                borderColor: '#10B981',
+                                backgroundColor: isDark ? colors.background : '#FFFFFF',
+                              },
+                            ]}
+                          >
+                            <View style={styles.actionCardHeader}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <View style={[styles.titleIconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                                  <Ionicons name="swap-vertical" size={14} color="#10B981" />
+                                </View>
+                                <Text style={[styles.actionCardTitle, { color: '#10B981' }]}>
+                                  Settle Up
+                                </Text>
+                              </View>
+                              <Text
+                                style={[styles.actionCardAmount, { color: '#10B981' }]}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit={true}
+                                minimumFontScale={0.72}
+                              >
+                                ₹{s.amountRupees}
+                              </Text>
+                            </View>
+
+                            {/* Transfer Graphic */}
+                            <View style={[styles.settleVisualBox, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }]}>
+                              <View style={styles.settleUserCol}>
+                                <View style={[styles.settleAvatar, { backgroundColor: colors.primaryLight }]}>
+                                  <Text style={[styles.settleAvatarText, { color: colors.primary }]}>
+                                    {fromName.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                                <Text style={[styles.settleUserName, { color: colors.text }]} numberOfLines={1}>
+                                  {fromName}
+                                </Text>
+                                <Text style={[styles.settleRoleSub, { color: colors.textSecondary }]}>Payer</Text>
+                              </View>
+
+                              <View style={styles.settleArrowCol}>
+                                <Text style={styles.settleArrowAmt}>₹{s.amountRupees}</Text>
+                                <Ionicons name="arrow-forward" size={18} color="#10B981" />
+                              </View>
+
+                              <View style={styles.settleUserCol}>
+                                <View style={[styles.settleAvatar, { backgroundColor: 'rgba(16, 185, 129, 0.18)' }]}>
+                                  <Text style={[styles.settleAvatarText, { color: '#10B981' }]}>
+                                    {toName.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                                <Text style={[styles.settleUserName, { color: colors.text }]} numberOfLines={1}>
+                                  {toName}
+                                </Text>
+                                <Text style={[styles.settleRoleSub, { color: colors.textSecondary }]}>Receiver</Text>
+                              </View>
+                            </View>
+
+                            {/* Section: Who is paying? (From) */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="arrow-up-circle-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  PAYER (FROM)
+                                </Text>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {tripMembers.map(m => {
+                                  const isSelected = m.id === s.fromMemberId;
+                                  return (
+                                    <TouchableOpacity
+                                      key={m.id}
+                                      style={[
+                                        styles.memberChip,
+                                        isSelected
+                                          ? [styles.memberChipActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                          : [styles.memberChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardSettleFromChange(item.id, m.id)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text style={[styles.memberChipText, { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.text }]} numberOfLines={1}>
+                                        {m.display_name}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Section: Who is receiving? (To) */}
+                            <View style={styles.cardSectionBlock}>
+                              <View style={styles.cardSectionHeader}>
+                                <Ionicons name="arrow-down-circle-outline" size={12} color={colors.textSecondary} />
+                                <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                                  RECEIVER (TO)
+                                </Text>
+                              </View>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                                {tripMembers.map(m => {
+                                  const isSelected = m.id === s.toMemberId;
+                                  return (
+                                    <TouchableOpacity
+                                      key={m.id}
+                                      style={[
+                                        styles.memberChip,
+                                        isSelected
+                                          ? [styles.memberChipActive, { backgroundColor: '#10B981', borderColor: '#10B981' }]
+                                          : [styles.memberChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                      ]}
+                                      onPress={() => handleCardSettleToChange(item.id, m.id)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text style={[styles.memberChipText, { color: isSelected ? '#FFFFFF' : colors.text }]} numberOfLines={1}>
+                                        {m.display_name}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
+                            </View>
+
+                            {/* Action Buttons: UPI vs Cash */}
+                            <View style={styles.settleActionButtonsCol}>
+                              <TouchableOpacity
+                                style={[styles.settleUpiBtn, { backgroundColor: '#10B981' }]}
+                                onPress={() => handleCardUpiPay(s)}
+                                activeOpacity={0.85}
+                              >
+                                <Ionicons name="flash" size={15} color="#FFFFFF" />
+                                <Text style={styles.settleBtnText}>
+                                  Pay ₹{s.amountRupees} via UPI App
+                                </Text>
+                              </TouchableOpacity>
+
+                              <View style={{ flexDirection: 'row', gap: 8 }}>
+                                <TouchableOpacity
+                                  style={[styles.confirmBtn, { backgroundColor: colors.primary }]}
+                                  onPress={async () => {
+                                    if (s && !isExecutingAction) {
+                                      if (item.action) item.action.status = 'confirmed';
+                                      setPendingAction(null);
+                                      try {
+                                        setIsExecutingAction(true);
+                                        await addExpense({
+                                          tripId: s.tripId,
+                                          amountPaise: s.amountPaise,
+                                          description: `Settlement with ${toName}`,
+                                          category: 'settlement',
+                                          paidByMemberId: s.fromMemberId,
+                                          paymentMode: 'cash',
+                                          splitType: 'exact',
+                                          participantMemberIds: [s.toMemberId],
+                                          customSplits: [{ memberId: s.toMemberId, shareAmount: s.amountPaise }],
+                                          userId: user?.id || 'local_user',
+                                        });
+                                        await useContactsStore.getState().fetchFriendsSummary(user?.id);
+                                        useTripStore.getState().fetchTrips(user?.id);
+                                        setMessages(prev => [
+                                          ...prev,
+                                          {
+                                            id: generateUUID(),
+                                            role: 'assistant',
+                                            content: `Confirmed! ₹${s.amountRupees} settlement with ${toName} recorded.`,
+                                            timestamp: new Date().toISOString(),
+                                          },
+                                        ]);
+                                        speakAssistantReply('Confirmed! Settlement recorded.');
+                                      } catch (e) {
+                                        console.warn('Voice settle error:', e);
+                                      } finally {
+                                        setIsExecutingAction(false);
+                                      }
+                                    }
+                                  }}
+                                  activeOpacity={0.8}
+                                  disabled={isExecutingAction}
+                                >
+                                  <Ionicons name="cash-outline" size={14} color="#FFFFFF" />
+                                  <Text style={styles.confirmBtnText}>Record Cash</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[styles.cancelBtn, { borderColor: colors.border }]}
+                                  onPress={() => {
+                                    if (item.action) item.action.status = 'info_only';
+                                    setPendingAction(null);
+                                    setMessages(prev => [
+                                      ...prev,
+                                      {
+                                        id: generateUUID(),
+                                        role: 'assistant',
+                                        content: 'Settlement cancelled.',
+                                        timestamp: new Date().toISOString(),
+                                      },
+                                    ]);
+                                    speakAssistantReply('Cancelled.');
+                                  }}
+                                  activeOpacity={0.8}
+                                  disabled={isExecutingAction}
+                                >
+                                  <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })()
+                    )}
+
+                    {/* 5. CHECK_BALANCES Action Card */}
+                    {isAssistant && item.action?.type === 'CHECK_BALANCES' && (
+                      <View
+                        style={[
+                          styles.actionCard,
+                          {
+                            borderColor: '#8B5CF6',
+                            backgroundColor: isDark ? colors.background : '#FFFFFF',
+                          },
+                        ]}
+                      >
+                        <View style={styles.actionCardHeader}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={[styles.titleIconBadge, { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.2)' : '#EDE9FE' }]}>
+                              <Ionicons name="wallet" size={14} color="#8B5CF6" />
+                            </View>
+                            <Text style={[styles.actionCardTitle, { color: '#8B5CF6' }]}>
+                              Balances & Hisaab
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              handleModalClose();
+                              router.push('/(tabs)/analyser' as any);
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={{ fontSize: scaleFont(11), color: '#8B5CF6', fontWeight: '700' }}>
+                              Full Breakdown →
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Balance rows */}
+                        {item.action.balances && item.action.balances.length > 0 ? (
+                          <View style={{ gap: 8, marginTop: 4 }}>
+                            {item.action.balances.map((b, bIdx) => (
+                              <View
+                                key={b.id || bIdx}
+                                style={[
+                                  styles.balanceRowCard,
+                                  {
+                                    backgroundColor: isDark ? colors.card : '#F8FAFC',
+                                    borderColor: colors.border,
+                                  },
+                                ]}
+                              >
+                                <View style={styles.balanceRowLeft}>
+                                  <View
+                                    style={[
+                                      styles.chipAvatarCircle,
+                                      {
+                                        backgroundColor:
+                                          b.type === 'owes_you'
+                                            ? 'rgba(16, 185, 129, 0.16)'
+                                            : 'rgba(239, 68, 68, 0.16)',
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.chipAvatarText,
+                                        { color: b.type === 'owes_you' ? '#10B981' : '#EF4444' },
+                                      ]}
+                                    >
+                                      {(b.memberName || 'U').charAt(0).toUpperCase()}
+                                    </Text>
+                                  </View>
+                                  <View style={{ flex: 1, marginRight: 6 }}>
+                                    <Text style={[styles.balanceMemberName, { color: colors.text }]} numberOfLines={1}>
+                                      {b.memberName}
+                                    </Text>
+                                    <Text style={[styles.balanceTripBadge, { color: colors.textSecondary }]} numberOfLines={1}>
+                                      {b.tripName}
+                                    </Text>
+                                  </View>
+                                </View>
+
+                                <View style={styles.balanceRowRight}>
+                                  <View style={{ alignItems: 'flex-end', marginRight: 6 }}>
+                                    <Text
+                                      style={[
+                                        styles.balanceAmountText,
+                                        { color: b.type === 'owes_you' ? '#10B981' : '#EF4444' },
+                                      ]}
+                                      numberOfLines={1}
+                                      adjustsFontSizeToFit={true}
+                                      minimumFontScale={0.72}
+                                    >
+                                      {b.type === 'owes_you' ? `+₹${b.amountRupees}` : `-₹${b.amountRupees}`}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.balanceTypeText,
+                                        { color: b.type === 'owes_you' ? '#10B981' : '#EF4444' },
+                                      ]}
+                                    >
+                                      {b.type === 'owes_you' ? 'owes you' : 'you owe'}
+                                    </Text>
+                                  </View>
+
+                                  {/* 1-Tap Action on row */}
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.balanceActionBtn,
+                                      {
+                                        backgroundColor:
+                                          b.type === 'you_owe' ? '#10B981' : '#25D366',
+                                      },
+                                    ]}
+                                    onPress={() => {
+                                      if (b.type === 'you_owe') {
+                                        handleStartSettleFromBalance(b);
+                                      } else {
+                                        handleCardWhatsAppReminder(b);
+                                      }
+                                    }}
+                                    activeOpacity={0.8}
+                                  >
+                                    <Ionicons
+                                      name={b.type === 'you_owe' ? 'card-outline' : 'logo-whatsapp'}
+                                      size={12}
+                                      color="#FFFFFF"
+                                    />
+                                    <Text style={styles.balanceActionBtnText}>
+                                      {b.type === 'you_owe' ? 'Settle' : 'Remind'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        ) : (
+                          <View style={styles.balancesEmptyBox}>
+                            <Ionicons name="checkmark-done-circle" size={24} color="#10B981" />
+                            <Text style={[styles.balancesEmptyText, { color: colors.textSecondary }]}>
+                              All balances are settled up! Zero dues.
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* 6. Start Contact Split Action Card */}
                     {isAssistant && item.action?.type === 'START_CONTACT_SPLIT' && item.action.contactSplit && (
                       <View
                         style={[
@@ -2197,6 +3373,38 @@ export default function VoiceExpenseModal({
                               </Text>
                             </View>
                           )}
+                        </View>
+
+                        {/* Category switcher */}
+                        <View style={styles.cardSectionBlock}>
+                          <View style={styles.cardSectionHeader}>
+                            <Ionicons name="pricetag-outline" size={12} color={colors.textSecondary} />
+                            <Text style={[styles.cardSectionTitle, { color: colors.textSecondary }]}>
+                              CATEGORY
+                            </Text>
+                          </View>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardChipsScroll}>
+                            {['Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General'].map(cat => {
+                              const isCurrent = (item.action?.contactSplit?.category || '').toLowerCase() === cat.toLowerCase();
+                              return (
+                                <TouchableOpacity
+                                  key={cat}
+                                  style={[
+                                    styles.tagChip,
+                                    isCurrent
+                                      ? [styles.tagChipActive, { backgroundColor: colors.primary, borderColor: colors.primary }]
+                                      : [styles.tagChipInactive, { backgroundColor: isDark ? colors.card : '#F8FAFC', borderColor: colors.border }],
+                                  ]}
+                                  onPress={() => handleCardCategoryChange(item.id, cat)}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.tagChipText, { color: isCurrent ? (colors.textOnSilver || '#B5504F') : colors.text }]}>
+                                    {cat}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </ScrollView>
                         </View>
 
                         {item.action.status === 'pending_confirmation' ? (
@@ -2286,7 +3494,7 @@ export default function VoiceExpenseModal({
                       </View>
                     )}
 
-                    {/* Navigation Action Card */}
+                    {/* 7. Navigation Action Card */}
                     {isAssistant && item.action?.type === 'NAVIGATE' && item.action.navigation?.screen && (
                       <TouchableOpacity
                         style={[styles.navActionCard, { backgroundColor: colors.primary }]}
@@ -2860,5 +4068,279 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: scaleFont(12),
     fontWeight: '700',
+  },
+  // Command-Specific Option Sections & Chips
+  cardSectionBlock: {
+    marginTop: 6,
+    gap: 4,
+  },
+  cardSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  cardSectionTitle: {
+    fontSize: scaleFont(10),
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  cardSectionSubtitle: {
+    fontSize: scaleFont(10),
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  cardChipsScroll: {
+    gap: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 1,
+  },
+  memberChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  memberChipActive: {
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  memberChipInactive: {},
+  chipAvatarCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipAvatarText: {
+    fontSize: scaleFont(10),
+    fontWeight: '800',
+  },
+  memberChipText: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+    maxWidth: 90,
+  },
+  perPersonPill: {
+    marginLeft: 'auto',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  perPersonPillText: {
+    fontSize: scaleFont(10),
+    fontWeight: '700',
+    color: '#10B981',
+  },
+  quickPresetsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginVertical: 2,
+  },
+  presetPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  presetPillActive: {},
+  presetPillInactive: {},
+  presetPillText: {
+    fontSize: scaleFont(10),
+    fontWeight: '700',
+  },
+  participantChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  participantChipActive: {},
+  participantChipInactive: {},
+  participantChipText: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+    maxWidth: 90,
+  },
+  tagChip: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  tagChipActive: {},
+  tagChipInactive: {},
+  tagChipText: {
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+  },
+  paymentModeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  modePillActive: {},
+  modePillInactive: {},
+  modePillText: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+  },
+  deleteWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  deleteWarningText: {
+    flex: 1,
+    fontSize: scaleFont(11),
+    fontWeight: '600',
+    lineHeight: scaleFont(15),
+  },
+  settleVisualBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginVertical: 4,
+  },
+  settleUserCol: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 2,
+  },
+  settleAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settleAvatarText: {
+    fontSize: scaleFont(14),
+    fontWeight: '800',
+  },
+  settleUserName: {
+    fontSize: scaleFont(11),
+    fontWeight: '700',
+    maxWidth: 80,
+    textAlign: 'center',
+  },
+  settleRoleSub: {
+    fontSize: scaleFont(9),
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  settleArrowCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+  },
+  settleArrowAmt: {
+    fontSize: scaleFont(13),
+    fontWeight: '800',
+    color: '#10B981',
+  },
+  settleActionButtonsCol: {
+    gap: 8,
+    marginTop: 8,
+  },
+  settleUpiBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  settleBtnText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(12),
+    fontWeight: '800',
+  },
+  balanceRowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  balanceRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  balanceRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  balanceMemberName: {
+    fontSize: scaleFont(12),
+    fontWeight: '700',
+  },
+  balanceTripBadge: {
+    fontSize: scaleFont(10),
+    fontWeight: '500',
+  },
+  balanceAmountText: {
+    fontSize: scaleFont(13),
+    fontWeight: '800',
+  },
+  balanceTypeText: {
+    fontSize: scaleFont(9),
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  balanceActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  balanceActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: scaleFont(10),
+    fontWeight: '800',
+  },
+  balancesEmptyBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 6,
+  },
+  balancesEmptyText: {
+    fontSize: scaleFont(12),
+    fontWeight: '600',
   },
 });

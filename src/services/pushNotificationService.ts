@@ -1,31 +1,13 @@
 import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
-
-// Safely check whether the ExpoPushTokenManager native module is compiled into this binary
-function isNotificationsNativeAvailable(): boolean {
-  try {
-    if (typeof globalThis !== 'undefined') {
-      const expo = (globalThis as any).expo;
-      if (expo?.modules?.ExpoPushTokenManager) {
-        return true;
-      }
-    }
-    const { NativeModules } = require('react-native');
-    if (NativeModules?.NativeUnimoduleProxy?.exportedMethods?.ExpoPushTokenManager) {
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
+import { AppStorage } from '../lib/storage';
 
 // Safely obtain Notifications module only when native module is compiled in
-function getNotificationsModule(): any {
+export function getNotificationsModule(): any {
+  if (Platform.OS === 'web') {
+    return null;
+  }
   try {
-    if (!isNotificationsNativeAvailable()) {
-      return null;
-    }
     return require('expo-notifications');
   } catch (err) {
     return null;
@@ -45,16 +27,65 @@ try {
   });
 } catch {}
 
-// Configure default Android notification channel with high priority
-if (Platform.OS === 'android' && Notifications?.setNotificationChannelAsync) {
-  Notifications.setNotificationChannelAsync('default', {
-    name: 'Default',
-    importance: Notifications.AndroidImportance?.MAX ?? 5,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#6366F1',
-    sound: 'default',
-  }).catch(() => {});
+/**
+ * Configure high-priority Android notification channels for closed-app & heads-up alerts
+ */
+export async function setupNotificationChannels(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const notif = getNotificationsModule();
+  if (!notif?.setNotificationChannelAsync) return;
+
+  try {
+    const importance = notif.AndroidImportance?.MAX ?? 5;
+    const visibility = notif.AndroidNotificationVisibility?.PUBLIC ?? 1;
+
+    // 1. Default system channel
+    await notif.setNotificationChannelAsync('default', {
+      name: 'Default',
+      importance,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#6366F1',
+      sound: 'default',
+      enableLights: true,
+      enableVibrate: true,
+      showBadge: true,
+      lockscreenVisibility: visibility,
+    });
+
+    // 2. Chat messages channel (high-priority heads-up notification)
+    await notif.setNotificationChannelAsync('trip_chat', {
+      name: 'Trip Chat & Messages',
+      description: 'Notifications for incoming chat messages in trips and splits',
+      importance,
+      vibrationPattern: [0, 200, 150, 200],
+      lightColor: '#22C55E',
+      sound: 'default',
+      enableLights: true,
+      enableVibrate: true,
+      showBadge: true,
+      lockscreenVisibility: visibility,
+    });
+
+    // 3. Expenses channel (high-priority heads-up notification)
+    await notif.setNotificationChannelAsync('expenses', {
+      name: 'Expenses & Settlements',
+      description: 'Notifications when members add expenses or settlements',
+      importance,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#6366F1',
+      sound: 'default',
+      enableLights: true,
+      enableVibrate: true,
+      showBadge: true,
+      lockscreenVisibility: visibility,
+    });
+  } catch (err) {
+    console.warn('[PushNotification] Error setting up notification channels:', err);
+  }
 }
+
+// Initial channel setup on module load
+setupNotificationChannels().catch(() => {});
 
 /**
  * Register device for push notifications and save push_token to Supabase profiles
@@ -65,35 +96,71 @@ export async function registerForPushNotificationsAsync(userId?: string): Promis
     return null;
   }
   try {
+    // 1. Ensure notification channels are registered on Android
+    await setupNotificationChannels();
+
+    // 2. Check and request runtime notification permissions
     const { status: existingStatus } = await notif.getPermissionsAsync();
     let finalStatus = existingStatus;
     if (existingStatus !== 'granted') {
-      const { status } = await notif.requestPermissionsAsync();
+      const { status } = await notif.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+        },
+      });
       finalStatus = status;
     }
     if (finalStatus !== 'granted') {
+      console.log('[PushNotification] Permission not granted. Status:', finalStatus);
       return null;
     }
 
-    let token: string | null = null;
+    // 3. Determine EAS project ID
+    let projectId: string | undefined = undefined;
     try {
-      const expoToken = await notif.getExpoPushTokenAsync();
+      const Constants = require('expo-constants').default;
+      const configuredId =
+        Constants?.expoConfig?.extra?.eas?.projectId ||
+        Constants?.easConfig?.projectId ||
+        process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+      if (configuredId && configuredId !== 'splitYourTrip' && typeof configuredId === 'string' && configuredId.length > 10) {
+        projectId = configuredId;
+      }
+    } catch {}
+
+    // 4. Obtain push token
+    let token: string | null = null;
+    let tokenType: 'expo' | 'device' = 'expo';
+
+    try {
+      const expoToken = await notif.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined
+      );
       token = expoToken?.data ?? null;
-    } catch {
+      if (token) tokenType = 'expo';
+    } catch (expoErr) {
+      console.log('[PushNotification] Expo push token notice:', (expoErr as any)?.message || expoErr);
       try {
         const deviceToken = await notif.getDevicePushTokenAsync();
         token = deviceToken?.data ?? null;
-      } catch {}
+        if (token) tokenType = 'device';
+      } catch (devErr) {
+        console.log('[PushNotification] Device push token notice:', (devErr as any)?.message || devErr);
+      }
     }
 
     if (token && userId) {
       const sb = supabase;
       await sb.from('profiles').update({ push_token: token }).eq('id', userId);
+      await AppStorage.setItem(`@splityourtrip_push_token_${userId}`, token).catch(() => {});
+      console.log(`[PushNotification] Registered ${tokenType} token for ${userId}:`, token.substring(0, 25) + '...');
     }
 
     return token;
   } catch (err) {
-    console.log('registerForPushNotifications notice:', err);
+    console.log('[PushNotification] registerForPushNotifications error:', err);
     return null;
   }
 }
@@ -107,23 +174,29 @@ export async function scheduleLocalNotification(title: string, body: string, dat
     return;
   }
   try {
+    const channelId =
+      data?.type === 'expense_added' || data?.type === 'payment_claim' || data?.type === 'payment_settlement'
+        ? 'expenses'
+        : (data?.type === 'text' || data?.type === 'image' || data?.type === 'audio' ? 'trip_chat' : 'default');
+
     await notif.scheduleNotificationAsync({
       content: {
         title,
         body,
         sound: 'default',
         data: data || {},
+        channelId,
       },
       trigger: null, // Show immediately
     });
   } catch (err) {
-    console.log('scheduleLocalNotification notice:', err);
+    console.log('[PushNotification] scheduleLocalNotification notice:', err);
   }
 }
 
 /**
  * Send real push notification via Expo Push API to all other members of the trip
- * so they receive the notification even when their app is completely closed.
+ * so they receive high-priority alerts even when their app is completely closed.
  */
 export async function sendPushNotificationToMembers(
   tripId: string,
@@ -137,12 +210,14 @@ export async function sendPushNotificationToMembers(
     const sb = supabase;
 
     // 1. Fetch only members belonging to this specific trip
-    const { data: members } = await sb
+    const { data: members, error: membersErr } = await sb
       .from('trip_members')
       .select('profile_id, user_id')
       .eq('trip_id', tripId);
 
-    if (!members || members.length === 0) return;
+    if (membersErr || !members || members.length === 0) return;
+
+    const cleanSenderId = senderId?.toLowerCase()?.trim() || '';
 
     const recipientIds: string[] = Array.from(
       new Set(
@@ -150,7 +225,7 @@ export async function sendPushNotificationToMembers(
           .flatMap((m: any) => [m.profile_id, m.user_id])
           .filter((id: unknown): id is string =>
             typeof id === 'string' &&
-            id !== senderId &&
+            id.toLowerCase().trim() !== cleanSenderId &&
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
           )
       )
@@ -159,12 +234,12 @@ export async function sendPushNotificationToMembers(
     if (recipientIds.length === 0) return;
 
     // 2. Fetch push tokens for only those trip members
-    const { data: profiles } = await sb
+    const { data: profiles, error: profilesErr } = await sb
       .from('profiles')
-      .select('push_token')
+      .select('id, push_token')
       .in('id', recipientIds);
 
-    if (!profiles || profiles.length === 0) return;
+    if (profilesErr || !profiles || profiles.length === 0) return;
 
     const validTokens = profiles
       .map((p: any) => p.push_token)
@@ -172,17 +247,44 @@ export async function sendPushNotificationToMembers(
 
     if (validTokens.length === 0) return;
 
-    // 3. Dispatch to Expo Push API
-    const messages = validTokens.map((to: string) => ({
+    // Filter tokens for Expo Push API (must start with ExponentPushToken or ExpoPushToken)
+    const expoTokens = validTokens.filter((t: string) =>
+      t.startsWith('ExponentPushToken[') || t.startsWith('ExpoPushToken[')
+    );
+
+    const nonExpoTokens = validTokens.filter((t: string) =>
+      !t.startsWith('ExponentPushToken[') && !t.startsWith('ExpoPushToken[')
+    );
+
+    if (nonExpoTokens.length > 0) {
+      console.log(
+        `[PushNotification] Notice: ${nonExpoTokens.length} device(s) have native FCM/APNs tokens requiring Expo project setup.`
+      );
+    }
+
+    if (expoTokens.length === 0) {
+      return;
+    }
+
+    // Determine target channel for Android
+    const channelId =
+      data?.type === 'expense_added' || data?.type === 'payment_claim' || data?.type === 'payment_settlement'
+        ? 'expenses'
+        : (data?.type === 'text' || data?.type === 'image' || data?.type === 'audio' ? 'trip_chat' : 'default');
+
+    // 3. Dispatch to Expo Push API with high priority (wakes up closed apps & Doze mode)
+    const messages = expoTokens.map((to: string) => ({
       to,
       sound: 'default',
       title,
       body,
-      channelId: 'default',
+      channelId,
+      priority: 'high',
+      _displayInForeground: true,
       data: { tripId, ...data },
     }));
 
-    await fetch('https://exp.host/--/api/v2/push/send', {
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -191,7 +293,12 @@ export async function sendPushNotificationToMembers(
       },
       body: JSON.stringify(messages),
     });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn('[PushNotification] Expo push response error:', errText);
+    }
   } catch (err) {
-    console.log('sendPushNotificationToMembers error:', err);
+    console.log('[PushNotification] sendPushNotificationToMembers error:', err);
   }
 }

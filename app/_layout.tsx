@@ -13,6 +13,7 @@ import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native
 import * as Linking from 'expo-linking';
 import UpiConfirmModal from '../src/components/UpiConfirmModal';
 import { useUpiPaymentStore } from '../src/features/settlements/useUpiPaymentStore';
+import { registerForPushNotificationsAsync, getNotificationsModule } from '../src/services/pushNotificationService';
 
 // Suppress known development network and crypto notices
 LogBox.ignoreLogs([
@@ -163,9 +164,50 @@ export default function RootLayout() {
       }
     });
 
+    // Register push notification token on app launch for closed-app notifications
+    const authUser = useAuthStore.getState().user;
+    if (authUser?.id) {
+      registerForPushNotificationsAsync(authUser.id).catch(() => {});
+    }
+
+    // Handle tapping on a push notification (warm or cold launch when app is closed)
+    let notificationSub: { remove: () => void } | null = null;
+    const notif = getNotificationsModule();
+    if (notif?.addNotificationResponseReceivedListener) {
+      notificationSub = notif.addNotificationResponseReceivedListener((response: any) => {
+        try {
+          const notifData = response?.notification?.request?.content?.data;
+          if (notifData?.tripId) {
+            if (notifData.expenseId) {
+              router.push(`/trip/${notifData.tripId}/expense/${notifData.expenseId}`);
+            } else {
+              router.push(`/trip/${notifData.tripId}`);
+            }
+          }
+        } catch (e) {
+          console.warn('[RootLayout] Notification response navigation error:', e);
+        }
+      });
+
+      // Check if launched from a notification while the app was closed
+      notif.getLastNotificationResponseAsync?.().then((lastRes: any) => {
+        if (lastRes) {
+          const notifData = lastRes?.notification?.request?.content?.data;
+          if (notifData?.tripId) {
+            if (notifData.expenseId) {
+              router.push(`/trip/${notifData.tripId}/expense/${notifData.expenseId}`);
+            } else {
+              router.push(`/trip/${notifData.tripId}`);
+            }
+          }
+        }
+      }).catch(() => {});
+    }
+
     return () => {
       urlSub.remove();
       unsubscribeShared();
+      notificationSub?.remove();
     };
   }, []);
 

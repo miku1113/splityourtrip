@@ -484,14 +484,22 @@ export default function AddExpenseScreen() {
     }
   }, [id]);
 
+  const hasLoadedExistingExpenseRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (existingExpense) {
+    if (existingExpense && !hasLoadedExistingExpenseRef.current) {
+      hasLoadedExistingExpenseRef.current = true;
       setAmountRupees((existingExpense.amount / 100).toString());
       setDescription(existingExpense.description);
       setCategory(existingExpense.category || 'Food');
       setPaymentMode((existingExpense.payment_mode as PaymentMode) || 'upi');
       setSplitType((existingExpense.split_type as SplitType) || 'equal');
-      if (existingExpense.paid_by) setPaidBy(existingExpense.paid_by);
+      if (existingExpense.paid_by) {
+        const match = members.find(
+          m => m.id === existingExpense.paid_by || (m.profile_id && m.profile_id === existingExpense.paid_by)
+        );
+        setPaidBy(match?.id || existingExpense.paid_by);
+      }
       const existingAttachment =
         existingExpense.attachment_url ||
         existingExpense.screenshot_path ||
@@ -531,7 +539,7 @@ export default function AddExpenseScreen() {
         }
       }
     }
-  }, [expenseId]);
+  }, [expenseId, existingExpense, members]);
 
   React.useEffect(() => {
     if (!existingExpense) {
@@ -1120,29 +1128,32 @@ export default function AddExpenseScreen() {
       <View style={styles.fieldGroup}>
         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Who Paid?</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-          {members.map(m => (
-            <TouchableOpacity
-              key={m.id}
-              style={[
-                styles.payerChip,
-                {
-                  backgroundColor: paidBy === m.id ? colors.primary : colors.card,
-                  borderColor: paidBy === m.id ? colors.primary : colors.border,
-                },
-              ]}
-              onPress={() => setPaidBy(m.id)}
-            >
-              <Text
+          {members.map(m => {
+            const isSelected = paidBy === m.id || Boolean(m.profile_id && paidBy === m.profile_id);
+            return (
+              <TouchableOpacity
+                key={m.id}
                 style={[
-                  styles.payerText,
-                  { color: paidBy === m.id ? (colors.textOnSilver || '#B5504F') : colors.text },
-                  paidBy === m.id && styles.payerTextActive,
+                  styles.payerChip,
+                  {
+                    backgroundColor: isSelected ? colors.primary : colors.card,
+                    borderColor: isSelected ? colors.primary : colors.border,
+                  },
                 ]}
+                onPress={() => setPaidBy(m.id)}
               >
-                {getMemberDisplayName(m)}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    styles.payerText,
+                    { color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.text },
+                    isSelected && styles.payerTextActive,
+                  ]}
+                >
+                  {getMemberDisplayName(m)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
 

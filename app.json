@@ -2,7 +2,7 @@
   "expo": {
     "name": "Split Your Trip",
     "slug": "splitYourTrip",
-    "version": "1.0.72",
+    "version": "1.0.73",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "splityourtrip",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.splityourtrip.app",
-      "buildNumber": "72",
+      "buildNumber": "73",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.splityourtrip",
-      "versionCode": 72,
+      "versionCode": 73,
       "adaptiveIcon": {
         "backgroundColor": "#2B2F36",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -45,6 +45,14 @@
           ],
           "category": ["DEFAULT"]
         }
+      ],
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ]
     },
     "web": {
@@ -78,6 +86,14 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "splitYourTrip"
+      }
     }
   }
 }

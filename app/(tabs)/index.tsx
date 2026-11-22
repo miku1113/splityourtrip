@@ -393,15 +393,17 @@ export default function MyTripsScreen() {
   const groupTrips = useMemo(() => {
     const seenIds = new Set<string>();
     return trips.filter(t => {
+      if (!t || !t.id) return false;
+      const lowerName = (t.name || '').toLowerCase().trim();
       if (
         t.trip_type === 'friend_split' ||
         t.trip_type === 'personal' ||
         (t as any).is_friend_split ||
-        t.name.toLowerCase().startsWith('split with ') ||
-        t.name.toLowerCase().startsWith('personal (you)') ||
-        t.name.toLowerCase() === 'personal' ||
-        t.name.toLowerCase() === 'you (personal)' ||
-        t.name.toLowerCase() === 'personal expenses'
+        lowerName.startsWith('split with ') ||
+        lowerName.startsWith('personal (you)') ||
+        lowerName === 'personal expenses' ||
+        (lowerName === 'personal' && t.trip_type !== 'group') ||
+        (lowerName === 'you (personal)' && t.trip_type !== 'group')
       ) {
         return false;
       }

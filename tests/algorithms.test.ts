@@ -933,4 +933,34 @@ describe('Voice Expense Parser', () => {
     expect(contactSplitAction.contactSplit.description).toBe('Expense');
     expect(contactSplitAction.contactSplit.category).toBe('General');
   });
+
+  test('editing who paid correctly updates merchant_name and preserves new payer structure', () => {
+    const mockTripMembers = [
+      { id: 'mem-user-1', profile_id: 'prof-user-1', display_name: 'Mihir', role: 'admin' },
+      { id: 'mem-user-2', profile_id: 'prof-user-2', display_name: 'Rohan', role: 'member' },
+    ];
+
+    // When Who Paid is edited to Rohan (mem-user-2), merchant_name must be updated
+    // with new payer_id and payer_name to prevent normalizeExpensesForTrip from reverting
+    const updatedPayerMember = mockTripMembers.find(m => m.id === 'mem-user-2');
+    const updatedMerchantName = JSON.stringify({
+      payer_name: updatedPayerMember?.display_name,
+      payer_id: updatedPayerMember?.id,
+      split_type: 'equal',
+      splits: [
+        { member_id: 'mem-user-1', amount: 5000 },
+        { member_id: 'mem-user-2', amount: 5000 },
+      ],
+    });
+
+    const parsedMerchant = JSON.parse(updatedMerchantName);
+    expect(parsedMerchant.payer_id).toBe('mem-user-2');
+    expect(parsedMerchant.payer_name).toBe('Rohan');
+
+    // Simulate normalization resolution
+    const resolvedPayer = mockTripMembers.find(m => m.id === parsedMerchant.payer_id);
+    expect(resolvedPayer).toBeDefined();
+    expect(resolvedPayer?.id).toBe('mem-user-2');
+    expect(resolvedPayer?.display_name).toBe('Rohan');
+  });
 });

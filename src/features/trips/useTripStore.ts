@@ -779,25 +779,38 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   initTrips: async () => {
     subscribeGlobalTripsRealtime();
     try {
-      const authUser = useAuthStore.getState().user;
       const profileId = useAuthStore.getState().profile?.id;
+      const authUser = useAuthStore.getState().user;
       const targetUserId =
-        authUser?.id && isValidUUID(authUser.id)
-          ? authUser.id
-          : profileId && isValidUUID(profileId)
+        profileId && isValidUUID(profileId)
           ? profileId
+          : authUser?.id && isValidUUID(authUser.id)
+          ? authUser.id
           : null;
-      const storageKey = getUserTripsStorageKey(targetUserId);
 
-      const localTripsRaw = await AppStorage.getItem(storageKey);
-      if (localTripsRaw) {
-        const localTrips: Trip[] = JSON.parse(localTripsRaw);
-        if (Array.isArray(localTrips) && localTrips.length > 0) {
-          const cleanTrips = deduplicateTrips(localTrips);
-          set({ trips: cleanTrips, isHydrated: true });
-        } else {
-          set({ isHydrated: true });
-        }
+      const candidateKeys = Array.from(
+        new Set([
+          getUserTripsStorageKey(targetUserId),
+          getUserTripsStorageKey(profileId),
+          getUserTripsStorageKey(authUser?.id),
+        ])
+      );
+
+      let localTrips: Trip[] = [];
+      for (const k of candidateKeys) {
+        try {
+          const raw = await AppStorage.getItem(k);
+          if (raw) {
+            const parsed: Trip[] = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              localTrips = deduplicateTrips([...localTrips, ...parsed]);
+            }
+          }
+        } catch {}
+      }
+
+      if (localTrips.length > 0) {
+        set({ trips: localTrips, isHydrated: true });
       } else {
         set({ isHydrated: true });
       }
@@ -811,16 +824,16 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
   },
 
   fetchTrips: async (userId?: string, forceRefresh = false) => {
-    // 1. Resolve active authenticated user ID first
+    // 1. Resolve active authenticated user ID first (prioritize profileId which matches profiles table FK)
     let targetUserId = userId;
     if (!targetUserId || !isValidUUID(targetUserId)) {
-      const authUser = useAuthStore.getState().user;
-      if (authUser?.id && isValidUUID(authUser.id)) {
-        targetUserId = authUser.id;
+      const profileId = useAuthStore.getState().profile?.id;
+      if (profileId && isValidUUID(profileId)) {
+        targetUserId = profileId;
       } else {
-        const profileId = useAuthStore.getState().profile?.id;
-        if (profileId && isValidUUID(profileId)) {
-          targetUserId = profileId;
+        const authUser = useAuthStore.getState().user;
+        if (authUser?.id && isValidUUID(authUser.id)) {
+          targetUserId = authUser.id;
         } else if (isSupabaseConfigured) {
           try {
             const { data: { session } } = await withTimeout(supabase.auth.getSession(), 4000);
@@ -924,9 +937,22 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         } catch {}
 
         try {
-          const memberQueryFilter = last10Phone
-            ? `profile_id.eq.${targetUserId},user_id.eq.${targetUserId},phone_number.ilike.%${last10Phone}%`
-            : `profile_id.eq.${targetUserId},user_id.eq.${targetUserId}`;
+          const candidateUserIds = Array.from(
+          new Set(
+            [
+              targetUserId,
+              authState.user?.id,
+              authState.profile?.id,
+            ].filter((id): id is string => Boolean(id && isValidUUID(id)))
+          )
+        );
+
+        const memberIdFilters = candidateUserIds
+          .flatMap(id => [`profile_id.eq.${id}`, `user_id.eq.${id}`]);
+        if (last10Phone) {
+          memberIdFilters.push(`phone_number.ilike.%${last10Phone}%`);
+        }
+        const memberQueryFilter = memberIdFilters.length > 0 ? memberIdFilters.join(',') : `profile_id.eq.${targetUserId}`;
 
         // Execute created trips, member rows, and friend trips concurrently in parallel!
         const [createdRes, memberRes, friendRes] = await Promise.all([
@@ -934,7 +960,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             supabase
               .from('trips')
               .select('*')
-              .eq('created_by', targetUserId)
+              .in('created_by', candidateUserIds.length > 0 ? candidateUserIds : [targetUserId])
               .order('created_at', { ascending: false }),
             8000
           ).catch(() => ({ data: [] as any[], error: null })),
@@ -949,7 +975,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             supabase
               .from('trips')
               .select('*')
-              .eq('friend_id', targetUserId)
+              .in('friend_id', candidateUserIds.length > 0 ? candidateUserIds : [targetUserId])
               .order('created_at', { ascending: false }),
             8000
           ).catch(() => ({ data: [] as any[], error: null })),
@@ -1032,28 +1058,27 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           }
         });
 
-        // Reconcile local trips:
-        // Any trip in localTrips that was already synced, but is NO LONGER present in remoteTrips,
-        // was deleted on the server or on another device.
-        // We prune it cleanly without resurrecting it into mergedTripsMap.
-        // ONLY trips explicitly created offline (_pendingSync === true) are retained and queued for upload.
+        // Reconcile local & in-memory trips:
+        // Preserve any in-memory or locally cached trips that haven't been deleted
+        // This guarantees newly created trips are NEVER lost or discarded across syncs!
+        const candidateLocalTrips = deduplicateTrips([
+          ...get().trips,
+          ...localTrips,
+        ]);
+
         const localOnlyTripsToSync: Trip[] = [];
-        localTrips.forEach(t => {
-          if (mergedTripsMap.has(t.id)) {
+        candidateLocalTrips.forEach(t => {
+          if (!t || !t.id || deletedTripIdsSet.has(t.id)) {
             return;
           }
 
-          const isPendingOffline = (t as any)._pendingSync === true || (t as any)._isOfflinePending === true;
-          if (isPendingOffline) {
+          if (!mergedTripsMap.has(t.id)) {
             mergedTripsMap.set(t.id, t);
             const syncedTrip: Trip = {
               ...t,
-              created_by: targetUserId || t.created_by || '',
+              created_by: t.created_by || targetUserId || '',
             };
             localOnlyTripsToSync.push(syncedTrip);
-          } else {
-            // Remote queries returned active trips, and this trip was not among them -> prune local cached details
-            AppStorage.removeItem(`@splityourtrip_local_details_${t.id}`).catch(() => {});
           }
         });
 
@@ -1063,7 +1088,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             for (const tripToSync of localOnlyTripsToSync) {
               try {
                 const inviteCode = tripToSync.invite_code || Math.random().toString(36).substring(2, 8).toUpperCase();
-                await supabase.from('trips').upsert({
+                const tripSyncPayload: any = {
                   id: tripToSync.id,
                   name: tripToSync.name,
                   description: tripToSync.description || '',
@@ -1074,12 +1099,17 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                   status: tripToSync.status || 'active',
                   invite_code: inviteCode,
                   created_by: targetUserId,
-                }, { onConflict: 'id' });
+                };
+                let { error: syncTripErr } = await supabase.from('trips').upsert(tripSyncPayload, { onConflict: 'id' });
+                if (syncTripErr && (syncTripErr as any).code === '23503') {
+                  tripSyncPayload.created_by = null;
+                  await supabase.from('trips').upsert(tripSyncPayload, { onConflict: 'id' });
+                }
 
                 const authState = useAuthStore.getState();
                 const userName = authState.profile?.full_name || authState.profile?.name || (authState.user as any)?.email?.split('@')[0] || 'You';
                 const userPhone = authState.profile?.phone_number || (authState.user as any)?.phone || (authState.user as any)?.user_metadata?.phone_number || null;
-                await supabase.from('trip_members').upsert({
+                const memberSyncPayload: any = {
                   trip_id: tripToSync.id,
                   profile_id: targetUserId,
                   user_id: targetUserId,
@@ -1088,7 +1118,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                   role: 'admin',
                   status: 'accepted',
                   is_guest: false,
-                }, { onConflict: 'trip_id,profile_id' });
+                };
+                let { error: syncMemErr } = await supabase.from('trip_members').upsert(memberSyncPayload, { onConflict: 'trip_id,profile_id' });
+                if (syncMemErr && (syncMemErr as any).code === '23503') {
+                  memberSyncPayload.user_id = null;
+                  await supabase.from('trip_members').upsert(memberSyncPayload, { onConflict: 'trip_id,profile_id' });
+                }
 
                 // Also sync local expenses if available
                 const localDetailsRaw = await AppStorage.getItem(`@splityourtrip_local_details_${tripToSync.id}`);
@@ -1129,10 +1164,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         const finalTrips = Array.from(mergedTripsMap.values())
           .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-        // Save user-isolated merged list back to AppStorage (never wipe local cache if remote returned empty)
+        // Save user-isolated merged list back to AppStorage across all user aliases
         try {
-          if (finalTrips.length > 0 || localTrips.length === 0) {
-            await AppStorage.setItem(storageKey, JSON.stringify(finalTrips));
+          if (finalTrips.length > 0) {
+            for (const uid of candidateUserIds) {
+              await AppStorage.setItem(getUserTripsStorageKey(uid), JSON.stringify(finalTrips));
+            }
           }
         } catch {}
 
@@ -1172,6 +1209,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     initialMembers?: { name: string; phoneNumber?: string }[],
     budgetPerPersonPaise?: number | null
   ) => {
+    const profile = useAuthStore.getState().profile;
+    const profileId = profile?.id && isValidUUID(profile?.id) ? profile.id : null;
     let authUser = useAuthStore.getState().user;
     if (!authUser?.id) {
       try {
@@ -1182,14 +1221,13 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       } catch {}
     }
 
-    const profileId = useAuthStore.getState().profile?.id;
     const authenticatedUserId =
-      authUser?.id && isValidUUID(authUser.id)
-        ? authUser.id
+      profileId
+        ? profileId
         : isValidUUID(userId)
         ? userId!
-        : profileId && isValidUUID(profileId)
-        ? profileId
+        : authUser?.id && isValidUUID(authUser.id)
+        ? authUser.id
         : null;
     const effectiveUserId = authenticatedUserId || generateUUID();
     const effectiveUserName = userName || (authUser as any)?.user_metadata?.full_name || (authUser as any)?.user_metadata?.name || 'Traveler';
@@ -1293,10 +1331,22 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       isHydrated: true,
     });
 
-    // Persist immediately to AppStorage
+    // Persist immediately to AppStorage across all user aliases
+    const allCandidateUserIds = Array.from(
+      new Set(
+        [
+          authenticatedUserId,
+          authUser?.id,
+          profileId,
+          userId,
+        ].filter((id): id is string => Boolean(id && isValidUUID(id)))
+      )
+    );
+
     try {
-      const userTripsKey = getUserTripsStorageKey(authenticatedUserId);
-      await AppStorage.setItem(userTripsKey, JSON.stringify(newTrips));
+      for (const uid of (allCandidateUserIds.length > 0 ? allCandidateUserIds : [effectiveUserId])) {
+        await AppStorage.setItem(getUserTripsStorageKey(uid), JSON.stringify(newTrips));
+      }
       await AppStorage.setItem(`@splityourtrip_local_details_${tripData.id}`, JSON.stringify({
         members: allInitialMembers,
         expenses: [],
@@ -1323,7 +1373,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           ? finalImageUrl
           : null;
 
-        const tripPayload = {
+        const tripPayload: any = {
           id: newTripId,
           name: name.trim(),
           description: description || '',
@@ -1334,7 +1384,6 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           status: 'active',
           invite_code: inviteCode,
           created_by: authenticatedUserId || null,
-          budget_per_person_paise: budgetPerPersonPaise ?? null,
         };
 
         let { error: tripError } = await withTimeout(
@@ -1344,7 +1393,15 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           5000
         );
 
-        if (tripError) {
+        if (tripError && (tripError as any).code === '23503') {
+          console.warn('Foreign key error in trip created_by, retrying with created_by: null:', tripError.message);
+          tripPayload.created_by = null;
+          const retryRes = await withTimeout(
+            supabase.from('trips').upsert(tripPayload, { onConflict: 'id' }),
+            5000
+          );
+          tripError = retryRes.error;
+        } else if (tripError) {
           console.warn('Admin trip upsert notice, trying user client:', tripError.message);
           const res = await withTimeout(
             supabase.from('trips').upsert(tripPayload, { onConflict: 'id' }),
@@ -1356,15 +1413,16 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         if (!tripError) {
           (tripData as any)._pendingSync = false;
           (tripData as any)._synced = true;
-          const userTripsKey = getUserTripsStorageKey(authenticatedUserId);
           const updated = get().trips.map(t => t.id === newTripId ? { ...t, _pendingSync: false, _synced: true } : t);
           set({ trips: updated });
-          AppStorage.setItem(userTripsKey, JSON.stringify(updated)).catch(() => {});
+          for (const uid of (allCandidateUserIds.length > 0 ? allCandidateUserIds : [effectiveUserId])) {
+            AppStorage.setItem(getUserTripsStorageKey(uid), JSON.stringify(updated)).catch(() => {});
+          }
         }
 
         // Insert admin member + all added members into trip_members
         for (const m of allInitialMembers) {
-          const memberPayload = {
+          const memberPayload: any = {
             id: m.id,
             trip_id: newTripId,
             profile_id: m.profile_id || null,
@@ -1375,10 +1433,23 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             status: 'accepted',
             is_guest: m.is_guest !== undefined ? m.is_guest : !m.profile_id,
           };
-          const { error: mErr } = await supabase
+          let { error: mErr } = await supabase
             .from('trip_members')
             .upsert(memberPayload, { onConflict: 'id' });
-          if (mErr) {
+          if (mErr && (mErr as any).code === '23503') {
+            console.warn('Foreign key error in trip_members, retrying without FK constraints:', mErr.message);
+            // If user_id or profile_id caused FK violation, null out user_id first
+            memberPayload.user_id = null;
+            const res2 = await supabase
+              .from('trip_members')
+              .upsert(memberPayload, { onConflict: 'id' });
+            if (res2.error && (res2.error as any).code === '23503') {
+              memberPayload.profile_id = null;
+              await supabase
+                .from('trip_members')
+                .upsert(memberPayload, { onConflict: 'id' });
+            }
+          } else if (mErr) {
             await supabase
               .from('trip_members')
               .upsert(memberPayload, { onConflict: 'id' });
@@ -1441,10 +1512,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 1. Immediately update Zustand state
     set({ trips: newTrips, activeTrip: newActive });
 
-    // 2. Immediately persist to AppStorage
+    // 2. Immediately persist to AppStorage across candidate user keys
     try {
-      const userTripsKey = getUserTripsStorageKey(authUser?.id);
-      await AppStorage.setItem(userTripsKey, JSON.stringify(newTrips));
+      const candidateUserIds = Array.from(new Set([useAuthStore.getState().profile?.id, authUser?.id].filter(Boolean)));
+      for (const uid of (candidateUserIds.length > 0 ? candidateUserIds : [authUser?.id || 'local_user'])) {
+        await AppStorage.setItem(getUserTripsStorageKey(uid), JSON.stringify(newTrips));
+      }
 
       const localDetailsKey = `@splityourtrip_local_details_${tripId}`;
       const existingDetails = await AppStorage.getItem(localDetailsKey);
@@ -1514,12 +1587,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     });
 
     try {
-      const userTripsKey = getUserTripsStorageKey(authUser?.id);
-      await AppStorage.setItem(userTripsKey, JSON.stringify(newTrips));
-      await AppStorage.removeItem(`@splityourtrip_local_details_${tripId}`);
-      if (authUser?.id) {
-        await AppStorage.removeItem(`@splityourtrip_friends_summary_${authUser.id}`);
+      const candidateUserIds = Array.from(new Set([useAuthStore.getState().profile?.id, authUser?.id].filter(Boolean)));
+      for (const uid of (candidateUserIds.length > 0 ? candidateUserIds : [authUser?.id || 'local_user'])) {
+        await AppStorage.setItem(getUserTripsStorageKey(uid), JSON.stringify(newTrips));
+        await AppStorage.removeItem(`@splityourtrip_friends_summary_${uid}`);
       }
+      await AppStorage.removeItem(`@splityourtrip_local_details_${tripId}`);
     } catch (e) {
       console.warn('Failed to delete trip from storage:', e);
     }
@@ -3419,11 +3492,43 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     }
 
     const tripScopeMembers = get().members.filter(m => m.trip_id === tripId);
-    const payerMember = (tripScopeMembers.length > 0 ? tripScopeMembers : get().members).find(
+    let allCandidateMembers = tripScopeMembers.length > 0 ? tripScopeMembers : get().members;
+    let payerMember = allCandidateMembers.find(
       m => m.id === targetPaidBy || m.profile_id === targetPaidBy
     );
+    if (!payerMember) {
+      try {
+        const rawCached = await AppStorage.getItem(`@splityourtrip_local_details_${tripId}`);
+        if (rawCached) {
+          const parsedCached = JSON.parse(rawCached);
+          if (Array.isArray(parsedCached.members) && parsedCached.members.length > 0) {
+            allCandidateMembers = parsedCached.members;
+            payerMember = allCandidateMembers.find(
+              (m: any) => m.id === targetPaidBy || m.profile_id === targetPaidBy
+            );
+          }
+        }
+      } catch {}
+    }
+    const resolvedPayerId = payerMember?.id || targetPaidBy;
     const payerName = payerMember?.display_name || existingExpense.payerName || 'Member';
     const payerProfileId = payerMember?.profile_id || userId;
+
+    // Build updated structured merchant_name to keep payer_id and splits perfectly in sync
+    const structuredMerchantJson = JSON.stringify({
+      payer_name: payerName,
+      payer_id: resolvedPayerId,
+      split_type: splitType,
+      splits: computedSplits.map(s => {
+        const participant = allCandidateMembers.find(m => m.id === s.memberId);
+        return {
+          member_id: s.memberId,
+          profile_id: participant?.profile_id || null,
+          display_name: participant?.display_name || 'Member',
+          amount: s.shareAmount,
+        };
+      }),
+    });
 
     // Persist local file to documentDirectory so it is never purged by OS cache cleaners
     let permanentAttachmentUri: string | null | undefined = undefined;
@@ -3443,15 +3548,19 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         ? data.attachmentType
         : (existingExpense.attachment_type || (resolvedAttachmentUrl ? 'image' : null));
 
+    const creatorId = existingExpense.created_by || userId || payerProfileId || 'local_user';
+
     const updatedExpense = {
       ...existingExpense,
+      created_by: creatorId,
       amount: amountPaise,
       description: description.trim(),
       category,
-      paid_by: targetPaidBy,
+      paid_by: resolvedPayerId,
       payment_mode: paymentMode,
       split_type: splitType,
       payerName,
+      merchant_name: structuredMerchantJson,
       location: data.location !== undefined ? data.location : existingExpense.location,
       latitude: data.latitude !== undefined ? data.latitude : existingExpense.latitude,
       longitude: data.longitude !== undefined ? data.longitude : existingExpense.longitude,
@@ -3503,7 +3612,10 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           (tripObj?.created_by && isValidUUID(tripObj.created_by) ? tripObj.created_by : null) ||
           'c190b7ba-767d-4c0e-9ec5-53ecd91d06c5';
 
-        const validPaidBy = guaranteedAuthUserId;
+        const validPaidBy =
+          (payerMember?.profile_id && isValidUUID(payerMember.profile_id) ? payerMember.profile_id : null) ||
+          (isValidUUID(resolvedPayerId) ? resolvedPayerId : null) ||
+          guaranteedAuthUserId;
 
         const { error: expenseUpdateError } = await supabase
           .from('expenses')
@@ -3512,20 +3624,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             description: description.trim(),
             category,
             paid_by: validPaidBy,
-            merchant_name: JSON.stringify({
-              payer_name: payerName,
-              payer_id: targetPaidBy,
-              split_type: splitType,
-              splits: computedSplits.map(s => {
-                const participant = (tripScopeMembers.length > 0 ? tripScopeMembers : get().members).find(m => m.id === s.memberId);
-                return {
-                  member_id: s.memberId,
-                  profile_id: participant?.profile_id || null,
-                  display_name: participant?.display_name || 'Member',
-                  amount: s.shareAmount,
-                };
-              }),
-            }),
+            merchant_name: structuredMerchantJson,
             expense_type: 'manual',
             payment_mode: paymentMode,
             split_type: splitType,
@@ -5689,50 +5788,128 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const profile = useAuthStore.getState().profile;
     const effectiveUserId = authUser?.id || profile?.id || 'local_user';
     const effectiveUserName = profile?.name || (authUser as any)?.user_metadata?.full_name || 'You';
+    const allUserIds = Array.from(new Set([authUser?.id, profile?.id, effectiveUserId].filter(id => id && isValidUUID(id)))) as string[];
 
-    // 1. Look for existing personal trip in store
-    const existing = get().trips.find(
+    // 1. Look for existing personal trip candidates in store
+    const candidates = get().trips.filter(
       t =>
-        t.trip_type === 'personal' ||
-        t.name.toLowerCase() === 'personal (you)' ||
-        t.name.toLowerCase() === 'you (personal)' ||
-        t.name.toLowerCase() === 'personal expenses'
+        !deletedTripIdsSet.has(t.id) &&
+        (t.trip_type === 'personal' ||
+          t.name.toLowerCase() === 'personal (you)' ||
+          t.name.toLowerCase() === 'you (personal)' ||
+          t.name.toLowerCase() === 'personal expenses')
     );
-    if (existing) {
-      await AppStorage.setItem(`@splityourtrip_personal_trip_${effectiveUserId}`, existing.id).catch(() => {});
-      return existing;
+
+    if (candidates.length > 0) {
+      // Find candidate with the most expenses / data
+      let bestCandidate: Trip = candidates[0];
+      let maxExpenseCount = -1;
+
+      for (const cand of candidates) {
+        let count = get().expenses.filter(e => e.trip_id === cand.id).length;
+        if (count === 0) {
+          try {
+            const raw = await AppStorage.getItem(`@splityourtrip_local_details_${cand.id}`);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              count = (parsed.expenses || []).length;
+            }
+          } catch {}
+        }
+        if (count > maxExpenseCount) {
+          maxExpenseCount = count;
+          bestCandidate = cand;
+        }
+      }
+
+      if (maxExpenseCount > 0 || candidates.length === 1) {
+        // Clean up any empty duplicate personal trips
+        for (const cand of candidates) {
+          if (cand.id !== bestCandidate.id) {
+            deletedTripIdsSet.add(cand.id);
+            if (isSupabaseConfigured && isValidUUID(cand.id)) {
+              try { await supabase.from('trips').delete().eq('id', cand.id); } catch {}
+            }
+          }
+        }
+        for (const uid of [effectiveUserId, authUser?.id, profile?.id, 'local_user'].filter(Boolean)) {
+          await AppStorage.setItem(`@splityourtrip_personal_trip_${uid}`, bestCandidate.id).catch(() => {});
+        }
+        return bestCandidate;
+      }
     }
 
     // 2. Check cached personal trip id in AppStorage
     try {
-      const cachedId = await AppStorage.getItem(`@splityourtrip_personal_trip_${effectiveUserId}`);
-      if (cachedId) {
-        const found = get().trips.find(t => t.id === cachedId);
-        if (found) return found;
+      for (const uid of [effectiveUserId, authUser?.id, profile?.id, 'local_user'].filter(Boolean)) {
+        const cachedId = await AppStorage.getItem(`@splityourtrip_personal_trip_${uid}`);
+        if (cachedId && !deletedTripIdsSet.has(cachedId)) {
+          const found = get().trips.find(t => t.id === cachedId);
+          if (found) return found;
+        }
       }
     } catch {}
 
     // 3. Query Supabase for any existing personal trip before creating a duplicate
-    if (effectiveUserId && isValidUUID(effectiveUserId)) {
+    if (allUserIds.length > 0 && isSupabaseConfigured) {
       try {
         const sb = supabase;
         const { data: dbTrips } = await withTimeout(
           sb
             .from('trips')
             .select('*')
-            .eq('created_by', effectiveUserId)
+            .in('created_by', allUserIds)
             .or('trip_type.eq.personal,name.ilike.%personal%')
-            .order('created_at', { ascending: false }),
+            .order('created_at', { ascending: true }),
           4000
         ).catch(() => ({ data: null }));
 
         if (dbTrips && dbTrips.length > 0) {
-          const dbTrip = dbTrips[0] as Trip;
-          await AppStorage.setItem(`@splityourtrip_personal_trip_${effectiveUserId}`, dbTrip.id).catch(() => {});
-          if (!get().trips.some(t => t.id === dbTrip.id)) {
-            set({ trips: [dbTrip, ...get().trips] });
+          const validTrips = dbTrips.filter(t => !deletedTripIdsSet.has(t.id));
+          if (validTrips.length > 0) {
+            // Check which dbTrip actually has expenses in Supabase
+            const tripIds = validTrips.map(t => t.id);
+            const { data: exps } = await sb
+              .from('expenses')
+              .select('trip_id')
+              .in('trip_id', tripIds);
+
+            const expsCountByTrip: Record<string, number> = {};
+            (exps || []).forEach((e: any) => {
+              expsCountByTrip[e.trip_id] = (expsCountByTrip[e.trip_id] || 0) + 1;
+            });
+
+            let chosenDbTrip = validTrips[0] as Trip;
+            let maxExps = 0;
+            for (const t of validTrips) {
+              const count = expsCountByTrip[t.id] || 0;
+              if (count > maxExps) {
+                maxExps = count;
+                chosenDbTrip = t as Trip;
+              }
+            }
+
+            // Tombstone any empty duplicate personal trips
+            for (const t of validTrips) {
+              if (t.id !== chosenDbTrip.id && (expsCountByTrip[t.id] || 0) === 0) {
+                deletedTripIdsSet.add(t.id);
+                try { await sb.from('trips').delete().eq('id', t.id); } catch {}
+              }
+            }
+
+            for (const uid of [effectiveUserId, authUser?.id, profile?.id, 'local_user'].filter(Boolean)) {
+              await AppStorage.setItem(`@splityourtrip_personal_trip_${uid}`, chosenDbTrip.id).catch(() => {});
+            }
+
+            const cleanedTrips = get().trips.filter(t => t.id === chosenDbTrip.id || !validTrips.some(vt => vt.id === t.id && vt.id !== chosenDbTrip.id));
+            if (!cleanedTrips.some(t => t.id === chosenDbTrip.id)) {
+              set({ trips: [chosenDbTrip, ...cleanedTrips] });
+            } else {
+              set({ trips: cleanedTrips });
+            }
+
+            return chosenDbTrip;
           }
-          return dbTrip;
         }
       } catch (err) {
         console.warn('Notice querying existing personal trip from db:', err);
@@ -5752,7 +5929,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       );
 
       if (personalTrip) {
-        await AppStorage.setItem(`@splityourtrip_personal_trip_${effectiveUserId}`, personalTrip.id);
+        for (const uid of [effectiveUserId, authUser?.id, profile?.id, 'local_user'].filter(Boolean)) {
+          await AppStorage.setItem(`@splityourtrip_personal_trip_${uid}`, personalTrip.id).catch(() => {});
+        }
         return personalTrip;
       }
     } catch (e) {
@@ -5765,44 +5944,28 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     const authUser = useAuthStore.getState().user;
     const profile = useAuthStore.getState().profile;
     const effectiveUserId = userId || authUser?.id || profile?.id || 'local_user';
+    const allUserIds = Array.from(new Set([userId, authUser?.id, profile?.id, effectiveUserId, 'local_user'].filter(Boolean))) as string[];
 
     // 1. Immediately hydrate from local cache to prevent flickering
     let initialTotal = get().personalExpensesTotalPaise || 0;
     let initialCount = get().personalExpensesCount || 0;
     try {
-      const cached = await AppStorage.getItem(`@splityourtrip_personal_total_${effectiveUserId}`);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && typeof parsed.totalPaise === 'number') {
-          initialTotal = parsed.totalPaise;
-          initialCount = parsed.count || 0;
-          set({ personalExpensesTotalPaise: initialTotal, personalExpensesCount: initialCount });
+      for (const uid of allUserIds) {
+        const cached = await AppStorage.getItem(`@splityourtrip_personal_total_${uid}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed.totalPaise === 'number' && (parsed.totalPaise > 0 || initialTotal === 0)) {
+            initialTotal = parsed.totalPaise;
+            initialCount = parsed.count || 0;
+            set({ personalExpensesTotalPaise: initialTotal, personalExpensesCount: initialCount });
+            if (initialTotal > 0) break;
+          }
         }
       }
     } catch {}
 
-    // 2. Identify personal trip
-    let personalTrip: Trip | null | undefined = get().trips.find(
-      t =>
-        t.trip_type === 'personal' ||
-        t.name.toLowerCase() === 'personal (you)' ||
-        t.name.toLowerCase() === 'you (personal)' ||
-        t.name.toLowerCase() === 'personal expenses'
-    );
-
-    if (!personalTrip) {
-      try {
-        const cachedId = await AppStorage.getItem(`@splityourtrip_personal_trip_${effectiveUserId}`);
-        if (cachedId) {
-          personalTrip = get().trips.find(t => t.id === cachedId);
-        }
-      } catch {}
-    }
-
-    if (!personalTrip) {
-      personalTrip = await get().getOrCreatePersonalTrip();
-    }
-
+    // 2. Identify personal trip via prioritized getOrCreatePersonalTrip
+    const personalTrip = await get().getOrCreatePersonalTrip();
     if (!personalTrip) {
       return { totalPaise: initialTotal, count: initialCount };
     }
@@ -5816,7 +5979,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed.expenses) && parsed.expenses.length > 0) {
-          expensesList = parsed.expenses;
+          expensesList = parsed.expenses.filter((e: any) => !deletedExpenseIdsSet.has(e.id));
         }
       }
     } catch {}
@@ -5824,55 +5987,65 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
     // 4. Merge in-memory expenses if personal trip is currently active in store
     if (get().activeTrip?.id === personalTripId && get().expenses.length > 0) {
       const map = new Map<string, any>();
-      expensesList.forEach(e => { if (e?.id) map.set(e.id, e); });
-      get().expenses.forEach(e => { if (e?.id) map.set(e.id, e); });
+      expensesList.forEach(e => { if (e?.id && !deletedExpenseIdsSet.has(e.id)) map.set(e.id, e); });
+      get().expenses.forEach(e => { if (e?.id && !deletedExpenseIdsSet.has(e.id)) map.set(e.id, e); });
       expensesList = Array.from(map.values());
     }
 
     if (expensesList.length > 0) {
-      const sum = expensesList.reduce((acc, e) => acc + (e.amount || 0), 0);
+      const sum = expensesList.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
       set({ personalExpensesTotalPaise: sum, personalExpensesCount: expensesList.length });
     }
 
     // 5. Query Supabase for latest up-to-date expenses
-    try {
-      const sb = supabase;
-      const { data } = await withTimeout(
-        sb
-          .from('expenses')
-          .select('id, amount, description, category, date, created_at')
-          .eq('trip_id', personalTripId)
-          .order('date', { ascending: false }),
-        6000
-      ).catch(() => ({ data: null }));
+    if (isSupabaseConfigured && isValidUUID(personalTripId)) {
+      try {
+        const sb = supabase;
+        const { data } = await withTimeout(
+          sb
+            .from('expenses')
+            .select('id, amount, description, category, date, created_at')
+            .eq('trip_id', personalTripId)
+            .order('date', { ascending: false }),
+          6000
+        ).catch(() => ({ data: null }));
 
-      if (data && Array.isArray(data)) {
-        expensesList = data;
-        const total = data.reduce((acc, e) => acc + (e.amount || 0), 0);
-        const count = data.length;
-        set({ personalExpensesTotalPaise: total, personalExpensesCount: count });
+        if (data && Array.isArray(data)) {
+          expensesList = data.filter((e: any) => !deletedExpenseIdsSet.has(e.id));
+          const total = expensesList.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+          const count = expensesList.length;
+          set({ personalExpensesTotalPaise: total, personalExpensesCount: count });
 
-        // Update local storage caches asynchronously
-        AppStorage.setItem(
-          `@splityourtrip_personal_total_${effectiveUserId}`,
-          JSON.stringify({ totalPaise: total, count })
-        ).catch(() => {});
+          // Update local storage caches asynchronously for all user IDs
+          for (const uid of allUserIds) {
+            AppStorage.setItem(
+              `@splityourtrip_personal_total_${uid}`,
+              JSON.stringify({ totalPaise: total, count })
+            ).catch(() => {});
+          }
 
-        AppStorage.getItem(`@splityourtrip_local_details_${personalTripId}`)
-          .then(raw => {
-            const parsed = raw ? JSON.parse(raw) : {};
-            parsed.expenses = data;
-            return AppStorage.setItem(`@splityourtrip_local_details_${personalTripId}`, JSON.stringify(parsed));
-          })
-          .catch(() => {});
+          AppStorage.getItem(`@splityourtrip_local_details_${personalTripId}`)
+            .then(raw => {
+              const parsed = raw ? JSON.parse(raw) : {};
+              parsed.expenses = data;
+              return AppStorage.setItem(`@splityourtrip_local_details_${personalTripId}`, JSON.stringify(parsed));
+            })
+            .catch(() => {});
 
-        return { totalPaise: total, count };
-      }
-    } catch {}
+          return { totalPaise: total, count };
+        }
+      } catch {}
+    }
 
-    const finalTotal = expensesList.reduce((acc, e) => acc + (e.amount || 0), 0);
+    const finalTotal = expensesList.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
     const finalCount = expensesList.length;
     set({ personalExpensesTotalPaise: finalTotal, personalExpensesCount: finalCount });
+    for (const uid of allUserIds) {
+      AppStorage.setItem(
+        `@splityourtrip_personal_total_${uid}`,
+        JSON.stringify({ totalPaise: finalTotal, count: finalCount })
+      ).catch(() => {});
+    }
     return { totalPaise: finalTotal, count: finalCount };
   },
 

@@ -88,6 +88,10 @@ const syncUserData = async (userId: string) => {
     const { useContactsStore } = require('../contacts/useContactsStore');
     useContactsStore.getState().initContacts(true);
   } catch {}
+  try {
+    const { registerForPushNotificationsAsync } = require('../../services/pushNotificationService');
+    registerForPushNotificationsAsync(userId).catch(() => {});
+  } catch {}
 };
 
 const isValidUUID = (str?: string | null): boolean => {
@@ -1207,6 +1211,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    const currentUserId = get().user?.id;
+    if (currentUserId && isSupabaseConfigured) {
+      try {
+        await supabase.from('profiles').update({ push_token: null }).eq('id', currentUserId);
+      } catch {}
+    }
     resetUserStores();
     try {
       await AppStorage.removeItem('@splityourtrip_local_trips');

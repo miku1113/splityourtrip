@@ -38,6 +38,15 @@ export interface TranscriptionResponse {
 }
 
 const WHISPER_HALLUCINATIONS = new Set([
+  'the',
+  'the.',
+  'the the',
+  'you',
+  'you.',
+  'bye',
+  'bye.',
+  'goodbye',
+  'goodbye.',
   'subtitles by',
   'subtitles by the amara.org community',
   '[music]',
@@ -54,6 +63,13 @@ const WHISPER_HALLUCINATIONS = new Set([
   'please subscribe',
   'please subscribe!',
   'please subscribe.',
+  "i'm happy to have you.",
+  "i'm happy to have you",
+  'im happy to have you.',
+  'im happy to have you',
+  'english subtitles',
+  'thank you.',
+  'thank you',
 ]);
 
 export function isWhisperHallucination(rawText: string): boolean {
@@ -63,6 +79,8 @@ export function isWhisperHallucination(rawText: string): boolean {
   if (stripped.length === 0) return true;
   if (WHISPER_HALLUCINATIONS.has(trimmed)) return true;
   if (WHISPER_HALLUCINATIONS.has(stripped)) return true;
+  // Common single-word ambient artifacts when mic opens and closes with no speech
+  if (/^(the|you|bye|so|um|uh|ah|oh)\.?$/i.test(trimmed)) return true;
   return false;
 }
 
@@ -88,25 +106,26 @@ export async function transcribeAudioWithDetails(
     }
 
     // Build context-aware domain prompt for Whisper decoder conditioning
-    let basePrompt = 'SplitYourTrip hisaab: ₹, rupees, rupiya, paise, 50-50, split with, Khushi, Rohan, Priya, Isha, Mihir, Jigar, Aman, Pooja, Rahul, dinner, lunch, petrol, taxi, cab, auto, chai, nashta, groceries, hotel, bill, update, delete, paid by me, maine pay kiya, badha ma split kar.';
+    let basePrompt = 'SplitYourTrip hisaab: ₹, rupees, rupiya, paise, 50-50, split with, add expense, dinner, lunch, petrol, taxi, cab, auto, chai, nashta, groceries, dabeli, hotel, bill, dedh sau, dhai hajar, update, delete, paid by me, maine pay kiya, badha ma split kar, hisaab batao.';
     if (language === 'hi') {
-      basePrompt = 'SplitYourTrip hisaab: ₹, rupees, rupaye, paise, 50-50, split karo, add karo, kharcha, dinner, lunch, petrol, taxi, auto, bill, update karo, delete karo, maine pay kiya, hisaab batao.';
+      basePrompt = 'SplitYourTrip hisaab: ₹, rupees, rupaye, paise, 50-50, split karo, add karo, kharcha, dinner, lunch, petrol, taxi, auto, chai, nashta, bill, update karo, delete karo, maine pay kiya, dedh sau, dhai hazaar, hisaab batao.';
     } else if (language === 'gu') {
-      basePrompt = 'SplitYourTrip hisaab: ₹, rupiya, paise, 50-50, badha ma split kar, kharcho, lunch, petrol, taxi, auto, bill, update kar, delete kar, hu aapis, ketlo hisaab che.';
+      basePrompt = 'SplitYourTrip hisaab: ₹, rupiya, paise, 50-50, badha ma split kar, kharcho, lunch, petrol, taxi, auto, chai, nashta, bill, update kar, delete kar, hu aapis, dodh hajar, ketlo hisaab che.';
     } else if (language === 'en') {
-      basePrompt = 'SplitYourTrip expense: ₹, rupees, 50-50, split with, add expense, dinner, lunch, petrol, taxi, cab, hotel, bill, update, delete, paid by me.';
+      basePrompt = 'SplitYourTrip expense: ₹, rupees, 50-50, split with, add expense, dinner, lunch, petrol, taxi, cab, hotel, bill, update, delete, paid by me, 2.5k.';
     }
 
     if (customContextNames && customContextNames.length > 0) {
+      // Support compound trip names (e.g. "Goa 2026", "Office Lunch"), member names, and clean contact names
       const cleanNames = Array.from(
         new Set(
           customContextNames
-            .map(n => n.trim().split(/\s+/)[0])
-            .filter(n => n && n.length > 1 && /^[a-zA-Z\u0900-\u097F\u0A80-\u0AFF]+$/.test(n))
+            .map(n => n.trim().replace(/[^\w\s\u0900-\u097F\u0A80-\u0AFF]/g, '').trim())
+            .filter(n => n && n.length > 1 && !/^(the|you|trip|expense|split)$/i.test(n))
         )
-      ).slice(0, 15);
+      ).slice(0, 25);
       if (cleanNames.length > 0) {
-        basePrompt = `Names: ${cleanNames.join(', ')}. ` + basePrompt;
+        basePrompt = `Context Names & Trips: ${cleanNames.join(', ')}. ` + basePrompt;
       }
     }
 
@@ -501,6 +520,7 @@ export type CopilotActionType =
   | 'START_CONTACT_SPLIT'
   | 'UPDATE_EXPENSE'
   | 'MOVE_EXPENSE'
+  | 'CHECK_BALANCES'
   | 'NONE';
 
 export type CopilotActionStatus =
@@ -570,6 +590,18 @@ export interface CopilotMoveExpensePayload {
   description?: string;
 }
 
+export interface CopilotBalanceItem {
+  id?: string;
+  tripId: string;
+  tripName: string;
+  memberId: string;
+  memberName: string;
+  amountPaise: number;
+  amountRupees: string;
+  type: 'you_owe' | 'owes_you';
+  phoneNumber?: string;
+}
+
 export interface CopilotAction {
   type: CopilotActionType;
   status: CopilotActionStatus;
@@ -578,6 +610,7 @@ export interface CopilotAction {
   deleteExpense?: CopilotDeleteExpensePayload;
   contactSplit?: CopilotContactSplitPayload;
   moveExpense?: CopilotMoveExpensePayload;
+  balances?: CopilotBalanceItem[];
   settle?: {
     tripId: string;
     fromMemberId: string;
@@ -614,9 +647,81 @@ export interface CopilotContactSummary {
   phoneNumber?: string;
 }
 
+export interface CopilotFriendContact {
+  id: string;
+  name: string;
+  phoneNumber?: string;
+  netBalancePaise?: number;
+  defaultTripId?: string;
+}
+
 export interface CopilotTurnResult {
   reply: string;
   action: CopilotAction | null;
+}
+
+/**
+ * Builds structured balance breakdown items for interactive UI cards.
+ */
+export function buildStructuredBalanceItems(params: {
+  balances?: TripBalanceRow[] | any[];
+  trips?: Array<{ id: string; name: string; currency?: string; trip_type?: string }>;
+  tripMembersMap?: Record<string, TripMember[] | any[]>;
+  currentUserId?: string;
+  currentUserPhone?: string | null;
+  contacts?: CopilotContactSummary[];
+  friendContacts?: CopilotFriendContact[];
+}): CopilotBalanceItem[] {
+  const result: CopilotBalanceItem[] = [];
+  const { balances = [], trips = [], currentUserId, currentUserPhone, friendContacts = [] } = params;
+
+  // 1. Process 1-on-1 friend contacts if available
+  friendContacts.forEach(f => {
+    const net = f.netBalancePaise || 0;
+    if (net !== 0) {
+      const trip = trips.find(t => t.id === f.defaultTripId);
+      result.push({
+        id: `friend_${f.id}`,
+        tripId: f.defaultTripId || '',
+        tripName: trip ? trip.name.replace(/^split with\s+/i, '') : f.name,
+        memberId: f.id,
+        memberName: f.name,
+        amountPaise: Math.abs(net),
+        amountRupees: Math.round(Math.abs(net) / 100).toString(),
+        type: net > 0 ? 'owes_you' : 'you_owe',
+        phoneNumber: f.phoneNumber,
+      });
+    }
+  });
+
+  // 2. Process group trip balance rows
+  balances.forEach(b => {
+    const isMe = Boolean(
+      (currentUserId && (b.user_id === currentUserId || b.member_id === currentUserId)) ||
+      (currentUserPhone && b.phone_number && b.phone_number.includes(currentUserPhone.slice(-8))) ||
+      (b.display_name && b.display_name.toLowerCase().includes('you'))
+    );
+    if (!isMe && b.net_balance !== 0) {
+      const tr = trips.find(t => t.id === b.trip_id);
+      const trName = tr ? tr.name : 'Trip';
+      // In SplitYourTrip, net_balance > 0 means gets back from group (you owe them),
+      // net_balance < 0 means owes the group (owes you).
+      const type: 'you_owe' | 'owes_you' = b.net_balance > 0 ? 'you_owe' : 'owes_you';
+      const amtPaise = Math.abs(b.net_balance);
+      result.push({
+        id: `trip_bal_${b.trip_id}_${b.member_id}`,
+        tripId: b.trip_id,
+        tripName: trName,
+        memberId: b.member_id,
+        memberName: b.display_name || 'Member',
+        amountPaise: amtPaise,
+        amountRupees: Math.round(amtPaise / 100).toString(),
+        type,
+      });
+    }
+  });
+
+  return result;
 }
 
 /**
@@ -637,6 +742,7 @@ export async function runVoiceCopilot(params: {
   recentExpenses?: CopilotRecentExpense[];
   contacts?: CopilotContactSummary[];
   pendingAction?: CopilotAction | null;
+  friendContacts?: CopilotFriendContact[];
 }): Promise<CopilotTurnResult> {
   const {
     userPrompt,
@@ -651,6 +757,7 @@ export async function runVoiceCopilot(params: {
     recentExpenses = [],
     contacts = [],
     pendingAction,
+    friendContacts = [],
   } = params;
 
   if (!userPrompt.trim() || isWhisperHallucination(userPrompt.trim())) {
@@ -1180,7 +1287,8 @@ Rules:
 - BALANCES & DEBTS RULES:
   - If user asks who owes what, how much they owe, who owes them, or their overall balance (e.g. "who owes me?", "kitne paise lene hai?", "how much do I owe in Goa?", "what is my net balance?", "hisaab batao"):
     - Answer accurately using Balances and friendsSummary context.
-    - Keep reply concise, friendly, and natural for Text-to-Speech (TTS). Set action = null.
+    - Set action.type = "CHECK_BALANCES", status = "info_only".
+    - Keep reply concise, friendly, and natural for Text-to-Speech (TTS).
 
 - SETTLE UP RULES:
   - If user wants to settle up or clear dues with a person (e.g. "settle with Rohan", "clear dues with Khushi", "Rohan ka hisaab clear karo"):
@@ -1230,7 +1338,7 @@ Output JSON only:
 {
   "reply": "string to be spoken to user",
   "action": null | {
-    "type": "ADD_EXPENSE" | "CONFIRM_ADD_EXPENSE" | "UPDATE_EXPENSE" | "SETTLE_UP" | "NAVIGATE" | "CREATE_TRIP" | "DELETE_EXPENSE" | "START_CONTACT_SPLIT" | "NONE",
+    "type": "ADD_EXPENSE" | "CONFIRM_ADD_EXPENSE" | "UPDATE_EXPENSE" | "SETTLE_UP" | "NAVIGATE" | "CREATE_TRIP" | "DELETE_EXPENSE" | "START_CONTACT_SPLIT" | "CHECK_BALANCES" | "NONE",
     "status": "needs_clarification" | "pending_confirmation" | "confirmed" | "info_only",
     "expense": {
       "amountPaise": number,
@@ -1463,7 +1571,31 @@ Output JSON only:
             action.expense = undefined;
             action.deleteExpense = undefined;
             action.updateExpense = undefined;
+          } else if (action.type === 'CHECK_BALANCES') {
+            action.expense = undefined;
+            action.deleteExpense = undefined;
+            action.updateExpense = undefined;
+            action.contactSplit = undefined;
+            action.settle = undefined;
           }
+        }
+
+        const isBalanceIntent = /\b(who\s*owes|balance|kitne\s*paise|hisaab|how\s*much\s*do\s*i\s*owe|owed|dues)\b/i.test(lowerPrompt);
+        if (isBalanceIntent || (action && action.type === 'CHECK_BALANCES')) {
+          const structuredBalances = buildStructuredBalanceItems({
+            balances,
+            trips,
+            tripMembersMap,
+            currentUserId,
+            currentUserPhone,
+            contacts,
+            friendContacts,
+          });
+          action = {
+            type: 'CHECK_BALANCES',
+            status: 'info_only',
+            balances: structuredBalances,
+          };
         }
 
         if (action) {
@@ -1704,11 +1836,13 @@ export function fallbackLocalVoiceParser(params: {
   recentExpenses?: CopilotRecentExpense[];
   contacts?: CopilotContactSummary[];
   pendingAction?: CopilotAction | null;
+  friendContacts?: CopilotFriendContact[];
 }): CopilotTurnResult {
   const {
     userPrompt,
     trips,
     tripMembersMap = {},
+    balances = [],
     currentUserId,
     currentUserPhone,
     activeTripId,
@@ -1716,6 +1850,7 @@ export function fallbackLocalVoiceParser(params: {
     recentExpenses = [],
     contacts = [],
     pendingAction,
+    friendContacts = [],
   } = params;
 
   const clean = userPrompt.trim();
@@ -1813,7 +1948,74 @@ export function fallbackLocalVoiceParser(params: {
     } else {
       balReply = 'All balances appear settled up!';
     }
-    return { reply: balReply, action: null };
+    const structuredBalances = buildStructuredBalanceItems({
+      balances,
+      trips,
+      tripMembersMap,
+      currentUserId,
+      currentUserPhone,
+      contacts,
+      friendContacts,
+    });
+    return {
+      reply: balReply,
+      action: {
+        type: 'CHECK_BALANCES',
+        status: 'info_only',
+        balances: structuredBalances,
+      },
+    };
+  }
+
+  // 4.1 Settle Up Intent (e.g. "settle with Rohan", "settle up with Khushi", "Rohan ka hisaab clear karo")
+  if (/\b(settle|clear\s*dues|hisaab\s*clear)\b/i.test(lower)) {
+    let matchedMember: any = null;
+    let targetTrip: any = null;
+    for (const [tId, mems] of Object.entries(tripMembersMap)) {
+      const found = (mems || []).find(m => matchesContactName(lower, m.display_name));
+      if (found) {
+        matchedMember = found;
+        targetTrip = trips.find(t => t.id === tId);
+        break;
+      }
+    }
+    if (!matchedMember) {
+      const foundContact = contacts.find(c => matchesContactName(lower, c.name));
+      if (foundContact) {
+        const tr = trips.find(t => matchesContactName(foundContact.name, t.name.replace(/^split with\s+/i, '')));
+        matchedMember = { id: foundContact.id, display_name: foundContact.name };
+        targetTrip = tr || trips[0];
+      }
+    }
+    if (matchedMember && targetTrip) {
+      const tripMembers = tripMembersMap[targetTrip.id] || [];
+      const myMember = tripMembers.find(
+        m =>
+          (currentUserId && (m.user_id === currentUserId || m.profile_id === currentUserId)) ||
+          (currentUserPhone && m.phone_number && m.phone_number.includes(currentUserPhone.slice(-8))) ||
+          (m.display_name && m.display_name.toLowerCase().includes('you'))
+      ) || tripMembers[0];
+      const parsedAmt = parseSpokenAmount(clean);
+      const amtRupees = parsedAmt.amountRupees || '0';
+      const amtPaise = parsedAmt.amountPaise || 0;
+      return {
+        reply: amtPaise > 0
+          ? `Settling ₹${amtRupees} with ${matchedMember.display_name}. Choose UPI or Cash below.`
+          : `Settle up with ${matchedMember.display_name}. Choose UPI or Cash below.`,
+        action: {
+          type: 'SETTLE_UP',
+          status: 'pending_confirmation',
+          settle: {
+            tripId: targetTrip.id,
+            fromMemberId: myMember?.id || '',
+            toMemberId: matchedMember.id,
+            amountPaise: amtPaise,
+            amountRupees: amtRupees,
+            toMemberName: matchedMember.display_name,
+          },
+        },
+      };
+    }
   }
 
   // 4. Delete Expense Intent

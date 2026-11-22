@@ -67,6 +67,8 @@ import {
 import {
   useContactsStore,
   normalizePhone,
+  normalizeNameForMatch,
+  isSelfContact,
   FriendContact,
   getContactNameByPhone,
   getEffectiveContactName,
@@ -332,14 +334,15 @@ export default function ChatView({
         .getState()
         .contacts.find(
           c =>
-            (friendId && c.id === friendId) ||
-            (friendPhone && c.cleanPhone === normalizePhone(friendPhone)) ||
-            c.name.trim().toLowerCase() === title.trim().toLowerCase()
+            (friendId && (c.id === friendId || c.profileId === friendId)) ||
+            (friendPhone && c.cleanPhone && (c.cleanPhone === normalizePhone(friendPhone) || (normalizePhone(friendPhone).length >= 6 && c.cleanPhone.endsWith(normalizePhone(friendPhone).slice(-10))))) ||
+            (c.phoneNumber && friendPhone && normalizePhone(c.phoneNumber) === normalizePhone(friendPhone)) ||
+            normalizeNameForMatch(c.name) === normalizeNameForMatch(title)
         )
     : null;
 
   const [friendNetPaise, setFriendNetPaise] = useState<number>(
-    initialCached?.friendNetPaise ?? initialMatchedContact?.netBalancePaise ?? 0
+    initialMatchedContact?.netBalancePaise ?? initialCached?.friendNetPaise ?? 0
   );
   const [sharedTripLabels, setSharedTripLabels] = useState<string[]>(
     initialCached?.sharedTripLabels ?? []
@@ -703,6 +706,22 @@ export default function ChatView({
     return tripMembers.length > 1 ? (tripMembers[1] || tripMembers[0]) : undefined;
   }, [tripMembers, myMember, friendPhone, friendId]);
 
+  const matchedContact = useMemo(() => {
+    if (isGroup) return undefined;
+    const cleanPhone = normalizePhone(friendPhone || displayPhone || otherMember?.phone_number);
+    const cleanTitle = (displayTitle || title).trim().toLowerCase();
+    const otherProfId = otherMember?.profile_id || (otherMember as any)?.user_id;
+
+    return contacts.find(c => {
+      if (friendId && (c.id === friendId || c.profileId === friendId)) return true;
+      if (otherProfId && (c.id === otherProfId || c.profileId === otherProfId)) return true;
+      if (otherMember?.id && c.id === otherMember.id) return true;
+      if (cleanPhone && c.cleanPhone && (c.cleanPhone === cleanPhone || (cleanPhone.length >= 6 && c.cleanPhone.endsWith(cleanPhone.slice(-10))))) return true;
+      if (c.phoneNumber && cleanPhone && normalizePhone(c.phoneNumber) === cleanPhone) return true;
+      return normalizeNameForMatch(c.name) === normalizeNameForMatch(cleanTitle);
+    });
+  }, [isGroup, friendId, friendPhone, displayPhone, otherMember, displayTitle, title, contacts]);
+
   useEffect(() => {
     if (!isGroup && otherMember) {
       const phone = friendPhone || otherMember.phone_number;
@@ -758,20 +777,25 @@ export default function ChatView({
 
   const resolveExpensePayerName = useCallback(
     (exp: any) => {
+      const payerId = exp.paid_by_id || exp.paid_by;
       if (
-        exp.paid_by_id &&
-        (exp.paid_by_id === user?.id ||
-          exp.paid_by_id === currentUserId ||
-          (myMember && exp.paid_by_id === myMember.id))
+        payerId &&
+        (payerId === user?.id ||
+          payerId === profile?.id ||
+          payerId === currentUserId ||
+          (myMember && (payerId === myMember.id || payerId === myMember.profile_id)))
       ) {
+        return 'You';
+      }
+      if (exp.paid_by_name === 'You' || exp.payerName === 'You') {
         return 'You';
       }
       const member = tripMembers.find(
         m =>
-          exp.paid_by_id &&
-          (m.profile_id === exp.paid_by_id ||
-            m.id === exp.paid_by_id ||
-            (m as any).user_id === exp.paid_by_id)
+          payerId &&
+          (m.profile_id === payerId ||
+            m.id === payerId ||
+            (m as any).user_id === payerId)
       );
       const phone = member?.phone_number;
       return getEffectiveContactName({
@@ -781,7 +805,7 @@ export default function ChatView({
         fallback: exp.paid_by_name || member?.display_name || 'Member',
       });
     },
-    [tripMembers, user?.id, currentUserId, myMember]
+    [tripMembers, user?.id, profile?.id, currentUserId, myMember]
   );
 
   const handleOpenDisputeModal = useCallback((expData: any, item: any) => {
@@ -917,12 +941,6 @@ export default function ChatView({
       }
     }
 
-    const cleanName = displayTitle.trim().toLowerCase();
-    const matchedContact = contacts.find(
-      c =>
-        (friendId && c.id === friendId) ||
-        c.name.trim().toLowerCase() === cleanName
-    );
     if (matchedContact) {
       if (matchedContact.isGuest === false || Boolean(matchedContact.phoneNumber) || matchedContact.isRegistered) {
         return false;
@@ -930,20 +948,12 @@ export default function ChatView({
     }
 
     return true;
-  }, [isGroup, isLinkedLocal, displayTitle, displayPhone, friendId, contacts, otherMember]);
+  }, [isGroup, isLinkedLocal, displayPhone, matchedContact, otherMember]);
 
   const currentFriendAvatarUrl = useMemo(() => {
     if (avatarUrl) return avatarUrl;
-    const cleanFriendName = displayTitle.trim().toLowerCase();
-    const cleanFriendPhone = normalizePhone(displayPhone);
-    const mc = contacts.find(
-      c =>
-        (friendId && c.id === friendId) ||
-        (cleanFriendPhone && c.cleanPhone === cleanFriendPhone) ||
-        c.name.trim().toLowerCase() === cleanFriendName
-    );
-    return mc?.avatarUrl;
-  }, [avatarUrl, displayTitle, displayPhone, contacts, friendId]);
+    return matchedContact?.avatarUrl;
+  }, [avatarUrl, matchedContact?.avatarUrl]);
 
   // Phone contacts available for linking (exclude purely guest entries that have no phone number)
   const phoneContactsToLink = useMemo(() => {
@@ -1028,201 +1038,212 @@ export default function ChatView({
 
     try {
       const cleanFriendName = displayTitle.trim().toLowerCase();
-    const cleanFriendPhone = normalizePhone(displayPhone);
+      const cleanFriendPhone = normalizePhone(displayPhone);
 
-    // Also check matched contact from contacts store
-    const matchedContact = contacts.find(
-      c =>
-        (friendId && c.id === friendId) ||
-        (cleanFriendPhone && c.cleanPhone === cleanFriendPhone) ||
-        c.name.trim().toLowerCase() === cleanFriendName
-    );
-    const targetProfileId = matchedContact?.profileId;
-    const targetPhone = cleanFriendPhone || matchedContact?.cleanPhone || '';
+      const targetProfileId = matchedContact?.profileId || otherMember?.profile_id;
+      const targetPhone = cleanFriendPhone || matchedContact?.cleanPhone || normalizePhone(otherMember?.phone_number) || '';
 
-    let totalNet = 0;
-    const tripBreakdownLabels: string[] = [];
-    const synthesizedExpMsgs: TripMessage[] = [];
+      let totalNet = 0;
+      const tripBreakdownLabels: string[] = [];
+      const synthesizedExpMsgs: TripMessage[] = [];
 
-    const allTrips = useTripStore.getState().trips;
-    const storeMembers = useTripStore.getState().members;
-    const storeExpenses = useTripStore.getState().expenses;
+      const allTrips = useTripStore.getState().trips;
+      const storeMembers = useTripStore.getState().members;
+      const storeExpenses = useTripStore.getState().expenses;
 
-    const tripsData = await Promise.all(
-      allTrips.map(async t => {
-        let tMembers: TripMember[] = [];
-        let tExpenses: any[] = [];
+      const tripsData = await Promise.all(
+        allTrips.map(async t => {
+          let tMembers: TripMember[] = [];
+          let tExpenses: any[] = [];
 
-        try {
-          const raw = await AppStorage.getItem(`@splityourtrip_local_details_${t.id}`);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            tMembers = Array.isArray(parsed.members) ? parsed.members : [];
-            tExpenses = Array.isArray(parsed.expenses) ? parsed.expenses : [];
+          try {
+            const raw = await AppStorage.getItem(`@splityourtrip_local_details_${t.id}`);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              tMembers = Array.isArray(parsed.members) ? parsed.members : [];
+              tExpenses = Array.isArray(parsed.expenses) ? parsed.expenses : [];
+            }
+          } catch {}
+
+          if (tMembers.length === 0) {
+            tMembers = storeMembers.filter(m => m.trip_id === t.id);
           }
-        } catch {}
+          if (tExpenses.length === 0) {
+            tExpenses = storeExpenses.filter(e => e.trip_id === t.id);
+          }
 
-        if (tMembers.length === 0) {
-          tMembers = storeMembers.filter(m => m.trip_id === t.id);
-        }
-        if (tExpenses.length === 0) {
-          tExpenses = storeExpenses.filter(e => e.trip_id === t.id);
-        }
+          return { trip: t, members: tMembers, expenses: tExpenses };
+        })
+      );
 
-        return { trip: t, members: tMembers, expenses: tExpenses };
-      })
-    );
+      for (const { trip: t, members: tMembers, expenses: tExpenses } of tripsData) {
+        if (tMembers.length === 0) continue;
 
-    for (const { trip: t, members: tMembers, expenses: tExpenses } of tripsData) {
-      if (tMembers.length === 0) continue;
+        const myMember = findMyMember(tMembers, user?.id, currentUserPhone);
 
-      const myMember = findMyMember(tMembers, user?.id, currentUserPhone);
+        // Find if this friend is a member of trip `t`
+        const isDirectFriendTrip =
+          t.id === tripId ||
+          (t.trip_type === 'friend_split' &&
+            ((friendId && (t.friend_id === friendId || t.created_by === friendId)) ||
+              (targetProfileId && (t.friend_id === targetProfileId || t.created_by === targetProfileId)) ||
+              t.name.toLowerCase() === `split with ${cleanFriendName}`));
 
-      // Find if this friend is a member of trip `t`
-      const isDirectFriendTrip =
-        t.id === tripId ||
-        (t.trip_type === 'friend_split' &&
-          ((friendId && t.friend_id === friendId) ||
-            (targetProfileId && (t.friend_id === targetProfileId || t.created_by === targetProfileId)) ||
-            t.name.toLowerCase() === `split with ${cleanFriendName}` ||
-            (currentUserName && currentUserName !== 'You' && t.name.toLowerCase() === `split with ${currentUserName.toLowerCase().trim()}`)));
-
-      const friendMember = tMembers.find(m => {
-        if (m.id === myMember?.id) return false;
-        if (isDirectFriendTrip && tMembers.length === 2) return true;
-        if (friendId && m.id === friendId) return true;
-        if (targetProfileId && m.profile_id === targetProfileId) return true;
-        if (targetPhone && normalizePhone(m.phone_number) === targetPhone) return true;
-        return m.display_name.trim().toLowerCase() === cleanFriendName;
-      });
-
-      if (!friendMember || !myMember) continue;
-
-      const normalizedExps = normalizeExpensesForTrip(tExpenses, tMembers);
-      const tBalances = computeBalances(t.id, tMembers, normalizedExps);
-      const netRecord: Record<string, number> = {};
-      tBalances.forEach(b => {
-        netRecord[b.member_id] = b.net_balance;
-      });
-      const settlements = calculateSettlement(netRecord);
-
-      let tripNetWithFriend = 0;
-      for (const s of settlements) {
-        if (s.from === friendMember.id && s.to === myMember.id) {
-          tripNetWithFriend += Number(s.amount) || 0;
-        } else if (s.from === myMember.id && s.to === friendMember.id) {
-          tripNetWithFriend -= Number(s.amount) || 0;
-        }
-      }
-
-      if (tripNetWithFriend !== 0) {
-        totalNet += tripNetWithFriend;
-        const isSplit =
-          t.trip_type === 'friend_split' || t.name.toLowerCase().startsWith('split with ');
-        const labelName = isSplit ? 'Direct Split' : t.name;
-        tripBreakdownLabels.push(labelName);
-      }
-
-      // Collect expenses from this trip that involve this friend
-      for (const exp of normalizedExps) {
-        if (deletedExpenseIdsSet.has(exp.id)) continue;
-        const amt = Number(exp.amount) || 0;
-        const expSplits = exp.splits || [];
-        const isPayerMe =
-          exp.paid_by === myMember.id ||
-          (user?.id && (exp.paid_by === user.id || exp.created_by === user.id));
-        const isPayerFriend =
-          exp.paid_by === friendMember.id ||
-          (targetProfileId && exp.paid_by === targetProfileId);
-        const mySplit = expSplits.find(
-          (s: any) =>
-            s.member_id === myMember.id ||
-            (user?.id && (s.profile_id === user.id || s.member_id === user.id))
-        );
-        const friendSplit = expSplits.find(
-          (s: any) =>
-            s.member_id === friendMember.id ||
-            (targetProfileId && (s.profile_id === targetProfileId || s.member_id === targetProfileId))
-        );
-
-        const meInSplit = Boolean(mySplit);
-        const friendInSplit = Boolean(friendSplit);
-
-        // Strict mutual involvement: in individual chat, show ONLY expenses where WE BOTH ARE SPLITTING TOGETHER!
-        // 1. I paid, and friend is in the split
-        // 2. Friend paid, and I am in the split
-        // 3. Both of us are in the split together (even if a 3rd party paid)
-        const isSplittingTogether =
-          (isPayerMe && friendInSplit) ||
-          (isPayerFriend && meInSplit) ||
-          (meInSplit && friendInSplit);
-
-        if (!isSplittingTogether) continue;
-
-        let impactPaise = 0;
-        if (isPayerMe && friendInSplit) {
-          impactPaise = Number(friendSplit.amount) || 0; // Friend owes you
-        } else if (isPayerFriend && mySplit) {
-          impactPaise = -(Number(mySplit.amount) || 0); // You owe friend
-        }
-
-        const isSplitTrip =
-          t.trip_type === 'friend_split' || t.name.toLowerCase().startsWith('split with ');
-
-        synthesizedExpMsgs.push({
-          id: `shared_exp_${exp.id}`,
-          trip_id: t.id,
-          sender_id: isPayerMe ? currentUserId : friendMember.id,
-          sender_name: exp.payerName || (isPayerMe ? currentUserName : friendMember.display_name),
-          message: `💰 Added expense: "${exp.description}"`,
-          content: '',
-          type: 'expense',
-          expense_id: exp.id,
-          expense_data: {
-            id: exp.id,
-            trip_id: t.id,
-            trip_name: isSplitTrip ? 'Direct Split' : t.name,
-            is_group_expense: !isSplitTrip,
-            description: exp.description,
-            amount: amt,
-            currency: t.currency || 'INR',
-            paid_by_name: exp.payerName || (isPayerMe ? 'You' : friendMember.display_name),
-            paid_by_id: exp.paid_by,
-            split_count: expSplits.length || tMembers.length,
-            category: exp.category || 'General',
-            impact_paise: impactPaise,
-            attachment_url: exp.attachment_url || exp.screenshot_path || (exp as any).media_url || null,
-            screenshot_path: exp.screenshot_path || exp.attachment_url || (exp as any).media_url || null,
-            attachment_name: exp.attachment_name || (exp.attachment_url || exp.screenshot_path ? 'Receipt Photo' : null),
-            attachment_type: exp.attachment_type || (exp.attachment_url || exp.screenshot_path ? 'image' : null),
-            location: exp.location || null,
-            date: exp.created_at || exp.date || new Date().toISOString(),
-          },
-          created_at: exp.created_at || exp.date || new Date().toISOString(),
+        const friendMember = tMembers.find(m => {
+          if (m.id === myMember?.id) return false;
+          if (isSelfContact({
+            id: m.id,
+            profileId: m.profile_id,
+            phoneNumber: m.phone_number,
+            name: m.display_name,
+          }, { id: user?.id, name: currentUserName, phone: currentUserPhone })) {
+            return false;
+          }
+          if (friendId && (m.id === friendId || m.profile_id === friendId)) return true;
+          if (targetProfileId && m.profile_id === targetProfileId) return true;
+          if (targetPhone && normalizePhone(m.phone_number) === targetPhone) return true;
+          if (cleanFriendPhone && normalizePhone(m.phone_number) === cleanFriendPhone) return true;
+          if (cleanFriendName && normalizeNameForMatch(m.display_name) === normalizeNameForMatch(cleanFriendName)) return true;
+          if (isDirectFriendTrip && tMembers.length === 2) return true;
+          return false;
         });
+
+        if (!friendMember || !myMember) continue;
+
+        const normalizedExps = normalizeExpensesForTrip(tExpenses, tMembers);
+        const tBalances = computeBalances(t.id, tMembers, normalizedExps);
+        const netRecord: Record<string, number> = {};
+        tBalances.forEach(b => {
+          netRecord[b.member_id] = b.net_balance;
+        });
+        const settlements = calculateSettlement(netRecord);
+
+        let tripNetWithFriend = 0;
+        for (const s of settlements) {
+          if (s.from === friendMember.id && s.to === myMember.id) {
+            tripNetWithFriend += Number(s.amount) || 0;
+          } else if (s.from === myMember.id && s.to === friendMember.id) {
+            tripNetWithFriend -= Number(s.amount) || 0;
+          }
+        }
+
+        if (tripNetWithFriend !== 0) {
+          totalNet += tripNetWithFriend;
+          const isSplit =
+            t.trip_type === 'friend_split' || t.name.toLowerCase().startsWith('split with ');
+          const labelName = isSplit ? 'Direct Split' : t.name;
+          tripBreakdownLabels.push(labelName);
+        }
+
+        // Collect expenses from this trip that involve this friend
+        for (const exp of normalizedExps) {
+          if (deletedExpenseIdsSet.has(exp.id)) continue;
+          const amt = Number(exp.amount) || 0;
+          const expSplits = exp.splits || [];
+          const isPayerMe =
+            exp.paid_by === myMember.id ||
+            (myMember.profile_id && exp.paid_by === myMember.profile_id) ||
+            (user?.id && exp.paid_by === user.id) ||
+            (profile?.id && exp.paid_by === profile.id) ||
+            exp.paid_by_name === 'You' ||
+            exp.payerName === 'You';
+          const isPayerFriend =
+            exp.paid_by === friendMember.id ||
+            (friendMember.profile_id && exp.paid_by === friendMember.profile_id) ||
+            (targetProfileId && exp.paid_by === targetProfileId) ||
+            (friendMember.display_name && (exp.paid_by_name === friendMember.display_name || exp.payerName === friendMember.display_name));
+          const mySplit = expSplits.find(
+            (s: any) =>
+              s.member_id === myMember.id ||
+              (myMember.profile_id && (s.profile_id === myMember.profile_id || s.member_id === myMember.profile_id)) ||
+              (user?.id && (s.profile_id === user.id || s.member_id === user.id)) ||
+              (profile?.id && (s.profile_id === profile.id || s.member_id === profile.id))
+          );
+          const friendSplit = expSplits.find(
+            (s: any) =>
+              s.member_id === friendMember.id ||
+              (friendMember.profile_id && (s.profile_id === friendMember.profile_id || s.member_id === friendMember.profile_id)) ||
+              (targetProfileId && (s.profile_id === targetProfileId || s.member_id === targetProfileId))
+          );
+
+          const meInSplit = Boolean(mySplit);
+          const friendInSplit = Boolean(friendSplit);
+
+          // Strict mutual involvement: in individual chat, show ONLY expenses where WE BOTH ARE SPLITTING TOGETHER!
+          // 1. I paid, and friend is in the split
+          // 2. Friend paid, and I am in the split
+          // 3. Both of us are in the split together (even if a 3rd party paid)
+          const isSplittingTogether =
+            (isPayerMe && friendInSplit) ||
+            (isPayerFriend && meInSplit) ||
+            (meInSplit && friendInSplit);
+
+          if (!isSplittingTogether) continue;
+
+          let impactPaise = 0;
+          if (isPayerMe && friendInSplit) {
+            impactPaise = Number(friendSplit.amount) || 0; // Friend owes you
+          } else if (isPayerFriend && meInSplit) {
+            impactPaise = -(Number(mySplit.amount) || 0); // You owe friend
+          }
+
+          const isSplitTrip =
+            t.trip_type === 'friend_split' || t.name.toLowerCase().startsWith('split with ');
+
+          synthesizedExpMsgs.push({
+            id: `shared_exp_${exp.id}`,
+            trip_id: t.id,
+            sender_id: isPayerMe ? currentUserId : friendMember.id,
+            sender_name: isPayerMe ? 'You' : friendMember.display_name,
+            message: `💰 Added expense: "${exp.description}"`,
+            content: '',
+            type: 'expense',
+            expense_id: exp.id,
+            expense_data: {
+              id: exp.id,
+              trip_id: t.id,
+              trip_name: isSplitTrip ? 'Direct Split' : t.name,
+              is_group_expense: !isSplitTrip,
+              description: exp.description,
+              amount: amt,
+              currency: t.currency || 'INR',
+              paid_by_name: isPayerMe ? 'You' : (friendMember.display_name || exp.payerName || 'Friend'),
+              paid_by_id: exp.paid_by,
+              split_count: expSplits.length || tMembers.length,
+              category: exp.category || 'General',
+              impact_paise: impactPaise,
+              attachment_url: exp.attachment_url || exp.screenshot_path || (exp as any).media_url || null,
+              screenshot_path: exp.screenshot_path || exp.attachment_url || (exp as any).media_url || null,
+              attachment_name: exp.attachment_name || (exp.attachment_url || exp.screenshot_path ? 'Receipt Photo' : null),
+              attachment_type: exp.attachment_type || (exp.attachment_url || exp.screenshot_path ? 'image' : null),
+              location: exp.location || null,
+              date: exp.created_at || exp.date || new Date().toISOString(),
+            },
+            created_at: exp.created_at || exp.date || new Date().toISOString(),
+          });
+        }
       }
+
+      // Synchronize with matchedContact balance from canonical contacts store
+      if (matchedContact?.netBalancePaise !== undefined) {
+        totalNet = matchedContact.netBalancePaise;
+      }
+
+      setFriendNetPaise(totalNet);
+      setSharedTripLabels(Array.from(new Set(tripBreakdownLabels)));
+      setSharedExpenseMessages(synthesizedExpMsgs);
+
+      const cacheKey = getFriendCacheKey(friendId, displayPhone, displayTitle);
+      friendSharedDataCache.set(cacheKey, {
+        friendNetPaise: totalNet,
+        sharedTripLabels: Array.from(new Set(tripBreakdownLabels)),
+        sharedExpenseMessages: synthesizedExpMsgs,
+        timestamp: Date.now(),
+      });
+    } finally {
+      setIsFriendDataLoaded(true);
     }
-
-    // Fallback to contact store balance ONLY if no shared trips were found or processed
-    if (totalNet === 0 && tripBreakdownLabels.length === 0 && matchedContact?.netBalancePaise) {
-      totalNet = matchedContact.netBalancePaise;
-    }
-
-    setFriendNetPaise(totalNet);
-    setSharedTripLabels(Array.from(new Set(tripBreakdownLabels)));
-    setSharedExpenseMessages(synthesizedExpMsgs);
-
-    const cacheKey = getFriendCacheKey(friendId, displayPhone, displayTitle);
-    friendSharedDataCache.set(cacheKey, {
-      friendNetPaise: totalNet,
-      sharedTripLabels: Array.from(new Set(tripBreakdownLabels)),
-      sharedExpenseMessages: synthesizedExpMsgs,
-      timestamp: Date.now(),
-    });
-  } finally {
-    setIsFriendDataLoaded(true);
-  }
-  }, [isGroup, displayTitle, displayPhone, friendId, contacts, tripId, user?.id, currentUserId, currentUserName]);
+  }, [isGroup, displayTitle, displayPhone, friendId, matchedContact, otherMember, tripId, user?.id, profile?.id, currentUserId, currentUserName, currentUserPhone]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1478,19 +1499,32 @@ export default function ChatView({
           const expSplits = localExp.splits || [];
           const isPayerMe =
             localExp.paid_by === myMem?.id ||
-            (user?.id && (localExp.paid_by === user.id || localExp.created_by === user.id));
-          const isPayerFriend = friendMem && localExp.paid_by === friendMem.id;
+            (myMem?.profile_id && localExp.paid_by === myMem.profile_id) ||
+            (user?.id && localExp.paid_by === user.id) ||
+            (profile?.id && localExp.paid_by === profile.id) ||
+            (localExp as any).paid_by_name === 'You' ||
+            localExp.payerName === 'You';
+          const isPayerFriend =
+            friendMem &&
+            (localExp.paid_by === friendMem.id ||
+              (friendMem.profile_id && localExp.paid_by === friendMem.profile_id) ||
+              (matchedContact?.profileId && localExp.paid_by === matchedContact.profileId) ||
+              (friendMem.display_name && ((localExp as any).paid_by_name === friendMem.display_name || localExp.payerName === friendMem.display_name)));
           const mySplit = expSplits.find(
             (s: any) =>
               s.member_id === myMem?.id ||
-              (user?.id && (s.profile_id === user.id || s.member_id === user.id))
+              (myMem?.profile_id && (s.profile_id === myMem.profile_id || s.member_id === myMem.profile_id)) ||
+              (user?.id && (s.profile_id === user.id || s.member_id === user.id)) ||
+              (profile?.id && (s.profile_id === profile.id || s.member_id === profile.id))
           );
           const friendSplit = friendMem
             ? expSplits.find(
                 (s: any) =>
                   s.member_id === friendMem.id ||
                   (friendMem.profile_id &&
-                    (s.profile_id === friendMem.profile_id || s.member_id === friendMem.profile_id))
+                    (s.profile_id === friendMem.profile_id || s.member_id === friendMem.profile_id)) ||
+                  (matchedContact?.profileId &&
+                    (s.profile_id === matchedContact.profileId || s.member_id === matchedContact.profileId))
               )
             : null;
 
@@ -1685,14 +1719,21 @@ export default function ChatView({
     return tripMembers.find(m => m.id === payTargetMemberId) || selectableMembers[0];
   }, [isGroup, otherMember, selectableMembers, tripMembers, payTargetMemberId]);
 
+  const effectiveFriendNetPaise = useMemo(() => {
+    if (matchedContact?.netBalancePaise !== undefined) {
+      return matchedContact.netBalancePaise;
+    }
+    return friendNetPaise;
+  }, [matchedContact?.netBalancePaise, friendNetPaise]);
+
   // Debt owed to currently selected target receiver (in paise)
   const activeTargetDebtPaise = useMemo(() => {
     if (!isGroup) {
-      return friendNetPaise < 0 ? Math.abs(friendNetPaise) : 0;
+      return effectiveFriendNetPaise < 0 ? Math.abs(effectiveFriendNetPaise) : 0;
     }
     if (!activePayTargetMember) return 0;
     return memberDebtMap[activePayTargetMember.id] || 0;
-  }, [isGroup, friendNetPaise, activePayTargetMember, memberDebtMap]);
+  }, [isGroup, effectiveFriendNetPaise, activePayTargetMember, memberDebtMap]);
 
   // Display name of active receiver
   const activeReceiverName = useMemo(() => {
@@ -1702,7 +1743,7 @@ export default function ChatView({
     return activePayTargetMember?.display_name || 'Friend';
   }, [isGroup, otherMember, activePayTargetMember]);
 
-  const activeBannerNetPaise = isGroup ? groupMyNetPaise : friendNetPaise;
+  const activeBannerNetPaise = isGroup ? groupMyNetPaise : effectiveFriendNetPaise;
   const isChatContentReady = isGroup
     ? isTripDataLoaded && !isChatLoading
     : isFriendDataLoaded && isTripDataLoaded && !isChatLoading;
@@ -1829,9 +1870,29 @@ export default function ChatView({
         playThroughEarpieceAndroid: false,
       });
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const { recording } = await Audio.Recording.createAsync({
+        isMeteringEnabled: true,
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio?.AndroidOutputFormat?.MPEG_4 ?? 2,
+          audioEncoder: Audio?.AndroidAudioEncoder?.AAC ?? 3,
+          sampleRate: 44100,
+          numberOfChannels: 1, // Mono: Eliminates dual-mic phase cancellation
+          bitRate: 128000,
+        },
+        ios: {
+          extension: '.m4a',
+          outputFormat: Audio?.IOSOutputFormat?.MPEG4AAC ?? 'mp4f',
+          audioQuality: Audio?.IOSAudioQuality?.HIGH ?? 127,
+          sampleRate: 44100,
+          numberOfChannels: 1, // Mono: Clean vocal mic capture
+          bitRate: 128000,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 128000,
+        },
+      });
       recordingRef.current = recording;
       setIsRecording(true);
       setRecordingDuration(0);
@@ -2197,8 +2258,8 @@ export default function ChatView({
     let defaultAmount = '';
     if (prefillAmt !== undefined && prefillAmt > 0) {
       defaultAmount = (prefillAmt / 100).toString();
-    } else if (!isGroup && friendNetPaise < 0) {
-      defaultAmount = (Math.abs(friendNetPaise) / 100).toString();
+    } else if (!isGroup && effectiveFriendNetPaise < 0) {
+      defaultAmount = (Math.abs(effectiveFriendNetPaise) / 100).toString();
     } else if (isGroup && chosenTargetId) {
       const netRecord: Record<string, number> = {};
       const safeBalances = Array.isArray(balances) ? balances : [];
@@ -2223,8 +2284,8 @@ export default function ChatView({
     let defaultAmount = '';
     if (prefillAmt !== undefined && prefillAmt > 0) {
       defaultAmount = (prefillAmt / 100).toString();
-    } else if (friendNetPaise > 0) {
-      defaultAmount = (friendNetPaise / 100).toString();
+    } else if (effectiveFriendNetPaise > 0) {
+      defaultAmount = (effectiveFriendNetPaise / 100).toString();
     }
     setRequestAmountText(defaultAmount);
     const defaultTargetId = otherMember?.id || tripMembers.find(m => m.id !== myMember?.id)?.id || '';
@@ -5520,13 +5581,13 @@ export default function ChatView({
 
               {/* Quick Suggestion Chips */}
               <View style={styles.quickChipsRow}>
-                {friendNetPaise > 0 && (
+                {effectiveFriendNetPaise > 0 && (
                   <TouchableOpacity
                     style={[styles.quickChip, { backgroundColor: colors.primaryLight }]}
-                    onPress={() => setRequestAmountText((friendNetPaise / 100).toString())}
+                    onPress={() => setRequestAmountText((effectiveFriendNetPaise / 100).toString())}
                   >
                     <Text style={[styles.quickChipText, { color: colors.primary }]}>
-                      Total Owed: ₹{(friendNetPaise / 100).toFixed(0)}
+                      Total Owed: ₹{(effectiveFriendNetPaise / 100).toFixed(0)}
                     </Text>
                   </TouchableOpacity>
                 )}

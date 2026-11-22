@@ -251,14 +251,18 @@ export default function BillDetailScreen() {
     return false;
   }, [expense, user?.id, myMember]);
 
-  // Populate edit form fields when expense loads
+  // Populate edit form fields when expense loads, but NEVER overwrite user's active inputs while editing
   useEffect(() => {
-    if (expense) {
+    if (expense && !isEditing) {
       setEditDescription(expense.description || '');
       setEditAmountRupees(((Number(expense.amount) || 0) / 100).toString());
       setEditCategory(expense.category || 'General');
       setEditPaymentMode((expense.payment_mode as PaymentMode) || 'upi');
-      setEditPaidBy(expense.paid_by || myMember?.id || '');
+
+      const initialPayer = tripMembers.find(
+        m => m.id === expense.paid_by || (m.profile_id && m.profile_id === expense.paid_by)
+      );
+      setEditPaidBy(initialPayer?.id || expense.paid_by || myMember?.id || '');
       setEditSplitType((expense.split_type as SplitType) || 'equal');
 
       const splits = Array.isArray(expense.splits) ? expense.splits : [];
@@ -306,7 +310,7 @@ export default function BillDetailScreen() {
         setEditCoords(null);
       }
     }
-  }, [expense, myMember?.id, tripMembers]);
+  }, [expense?.id, expense?.paid_by, expense?.amount, myMember?.id, tripMembers, isEditing]);
 
   const payerMember = useMemo(() => {
     if (!expense) return null;
@@ -1477,29 +1481,32 @@ export default function BillDetailScreen() {
             Who Paid?
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 6 }}>
-            {tripMembers.map(m => (
-              <TouchableOpacity
-                key={m.id}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: editPaidBy === m.id ? colors.primary : colors.inputBackground,
-                    borderColor: editPaidBy === m.id ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setEditPaidBy(m.id)}
-              >
-                <Text
-                  style={{
-                    color: editPaidBy === m.id ? (colors.textOnSilver || '#B5504F') : colors.text,
-                    fontWeight: '700',
-                    fontSize: 12,
-                  }}
+            {tripMembers.map(m => {
+              const isSelected = editPaidBy === m.id || Boolean(m.profile_id && editPaidBy === m.profile_id);
+              return (
+                <TouchableOpacity
+                  key={m.id}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: isSelected ? colors.primary : colors.inputBackground,
+                      borderColor: isSelected ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setEditPaidBy(m.id)}
                 >
-                  {m.display_name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={{
+                      color: isSelected ? (colors.textOnSilver || '#B5504F') : colors.text,
+                      fontWeight: '700',
+                      fontSize: 12,
+                    }}
+                  >
+                    {m.display_name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
 
           {/* Location in Edit Mode */}
