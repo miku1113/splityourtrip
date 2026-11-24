@@ -14,7 +14,7 @@ import NotificationCenterModal from '../../src/components/NotificationCenterModa
 import SettleUpModal from '../../src/components/SettleUpModal';
 import VoiceExpenseModal from '../../src/components/VoiceExpenseModal';
 import { useNotificationStore } from '../../src/features/notifications/useNotificationStore';
-import { syncWidgetSummary } from '../../src/services/widgetService';
+import { syncWidgetSummary, syncPendingAssistantVoiceExpenses } from '../../src/services/widgetService';
 import { scaleFont } from '../../src/theme/responsive';
 
 // Pre-load top bar logo assets statically at module level to guarantee instant resolution
@@ -46,6 +46,15 @@ export default function TabLayout() {
       tripCount: trips.length,
     });
   }, [trips.length]);
+
+  // Sync any expenses recorded via Android Assistant Drawer overlay while app was closed
+  useEffect(() => {
+    syncPendingAssistantVoiceExpenses().then(pending => {
+      if (pending && pending.length > 0) {
+        useTripStore.getState().fetchTrips(undefined, true);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Listen to incoming widget shortcut links while tabs are active
   useEffect(() => {

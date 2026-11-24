@@ -47,7 +47,7 @@
             android:ellipsize="end"
             android:fontFamily="sans-serif"
             android:maxLines="1"
-            android:text="Tap to talk with Copilot"
+            android:text="Ask AI to split, add or check..."
             android:textColor="#94A3B8"
             android:textSize="12sp" />
     </LinearLayout>

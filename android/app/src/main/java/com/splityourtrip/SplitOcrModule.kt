@@ -309,6 +309,44 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    @ReactMethod
+    fun getPendingVoiceExpenses(promise: Promise) {
+        try {
+            val prefs = reactContext.getSharedPreferences("SplitYourTripPendingExpenses", android.content.Context.MODE_PRIVATE)
+            val json = prefs.getString("pending_voice_expenses", "[]") ?: "[]"
+            promise.resolve(json)
+        } catch (e: Exception) {
+            promise.reject("PENDING_EXPENSE_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun clearPendingVoiceExpenses(promise: Promise) {
+        try {
+            val prefs = reactContext.getSharedPreferences("SplitYourTripPendingExpenses", android.content.Context.MODE_PRIVATE)
+            prefs.edit().remove("pending_voice_expenses").apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("PENDING_EXPENSE_CLEAR_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun updateWidgetActiveTrip(tripId: String, statusText: String?, promise: Promise) {
+        try {
+            val prefs = reactContext.getSharedPreferences("SplitYourTripWidget", android.content.Context.MODE_PRIVATE)
+            val editor = prefs.edit().putString("active_trip_id", tripId)
+            if (!statusText.isNullOrEmpty()) {
+                editor.putString("widget_status_text", statusText)
+                SplitAiWidgetProvider.updateAllWidgets(reactContext, statusText)
+            }
+            editor.apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
     override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {}
 
     override fun onNewIntent(intent: Intent?) {

@@ -47,3 +47,53 @@ export async function syncWidgetSummary(params: {
 
   await updateWidgetStatus(text);
 }
+
+export interface PendingVoiceExpense {
+  id: string;
+  title: string;
+  amount_paise: number;
+  category: string;
+  payer: string;
+  split: string;
+  created_at: string;
+  synced: boolean;
+}
+
+/**
+ * Checks and retrieves any pending expenses recorded via the Android Assistant Drawer overlay.
+ */
+export async function syncPendingAssistantVoiceExpenses(): Promise<PendingVoiceExpense[]> {
+  if (Platform.OS !== 'android' || !SplitOcr?.getPendingVoiceExpenses) {
+    return [];
+  }
+  try {
+    const raw = await SplitOcr.getPendingVoiceExpenses();
+    if (!raw) return [];
+    const list: PendingVoiceExpense[] = JSON.parse(raw);
+    if (Array.isArray(list) && list.length > 0) {
+      if (SplitOcr.clearPendingVoiceExpenses) {
+        await SplitOcr.clearPendingVoiceExpenses();
+      }
+      return list;
+    }
+  } catch (err) {
+    console.log('[widgetService] Error syncing pending voice expenses:', err);
+  }
+  return [];
+}
+
+/**
+ * Updates the active trip associated with the home screen widget & Assistant drawer.
+ */
+export async function updateWidgetActiveTrip(tripId: string, statusText?: string): Promise<boolean> {
+  if (Platform.OS !== 'android' || !SplitOcr?.updateWidgetActiveTrip) {
+    return false;
+  }
+  try {
+    await SplitOcr.updateWidgetActiveTrip(tripId, statusText || '');
+    return true;
+  } catch (err) {
+    console.log('[widgetService] Failed to update active trip on widget:', err);
+    return false;
+  }
+}

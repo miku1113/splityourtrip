@@ -17,7 +17,7 @@ class SplitAiWidgetProvider : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         val prefs = context.getSharedPreferences("SplitYourTripWidget", Context.MODE_PRIVATE)
-        val statusText = prefs.getString("widget_status_text", "Tap to talk with AI Copilot") ?: "Tap to talk with AI Copilot"
+        val statusText = prefs.getString("widget_status_text", "Ask AI to split, add or check...") ?: "Ask AI to split, add or check..."
 
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId, statusText)
@@ -34,10 +34,10 @@ class SplitAiWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_ai_copilot)
             views.setTextViewText(R.id.widget_subtitle, statusText)
 
-            // Deep link intent: splityourtrip://voice-expense?fromWidget=true
-            val launchIntent = Intent(Intent.ACTION_VIEW, Uri.parse("splityourtrip://voice-expense?fromWidget=true")).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                `package` = context.packageName
+            // Directly launch the Google Assistant-style bottom drawer overlay without opening the main full-screen app
+            val launchIntent = Intent(context, AssistantDrawerActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("AUTO_START_LISTENING", true)
             }
 
             val pendingIntent = PendingIntent.getActivity(

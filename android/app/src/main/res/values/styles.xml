@@ -14,4 +14,23 @@
   <style name="Theme.App.SplashScreen" parent="AppTheme">
     <item name="android:windowBackground">@drawable/splashscreen</item>
   </style>
+
+  <!-- Google Assistant-style Translucent Drawer Overlay Theme -->
+  <style name="Theme.AssistantDrawer" parent="Theme.AppCompat.Light.NoActionBar">
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:colorBackground">@android:color/transparent</item>
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowAnimationStyle">@style/AssistantDrawerAnimation</item>
+    <item name="android:statusBarColor">#66000000</item>
+    <item name="android:navigationBarColor">#1A1D24</item>
+    <item name="android:windowContentOverlay">@null</item>
+    <item name="android:backgroundDimEnabled">true</item>
+    <item name="android:backgroundDimAmount">0.5</item>
+  </style>
+
+  <style name="AssistantDrawerAnimation">
+    <item name="android:windowEnterAnimation">@anim/assistant_slide_up</item>
+    <item name="android:windowExitAnimation">@anim/assistant_slide_down</item>
+  </style>
 </resources>

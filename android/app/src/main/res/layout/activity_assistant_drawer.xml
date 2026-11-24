@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/assistant_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#66000000">
+
+    <!-- Scrim area: Tapping above drawer dismisses the assistant overlay -->
+    <View
+        android:id="@+id/scrim_dismiss_area"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@id/assistant_drawer_container"
+        android:contentDescription="Dismiss Assistant Drawer" />
+
+    <!-- Google Assistant-style Bottom Drawer -->
+    <LinearLayout
+        android:id="@+id/assistant_drawer_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/assistant_drawer_bg"
+        android:elevation="24dp"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="24dp">
+
+        <!-- Top Drag Pill Handle -->
+        <View
+            android:layout_width="44dp"
+            android:layout_height="5dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/assistant_drag_handle" />
+
+        <!-- Google Assistant 4-Color Glowing Dynamic Lightbar -->
+        <LinearLayout
+            android:id="@+id/assistant_lightbar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="14dp"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/bar_blue"
+                android:layout_width="24dp"
+                android:layout_height="4dp"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/assistant_bar_blue" />
+
+            <View
+                android:id="@+id/bar_red"
+                android:layout_width="24dp"
+                android:layout_height="4dp"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/assistant_bar_red" />
+
+            <View
+                android:id="@+id/bar_yellow"
+                android:layout_width="24dp"
+                android:layout_height="4dp"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/assistant_bar_yellow" />
+
+            <View
+                android:id="@+id/bar_green"
+                android:layout_width="24dp"
+                android:layout_height="4dp"
+                android:background="@drawable/assistant_bar_green" />
+        </LinearLayout>
+
+        <!-- Header: App Badge + Close Button -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginEnd="10dp"
+                    android:contentDescription="SplitYourTrip Logo"
+                    android:src="@mipmap/ic_launcher_round" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:text="SplitYourTrip AI Assistant"
+                        android:textColor="#FFFFFF"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_assistant_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif"
+                        android:text="Listening... speak your expense"
+                        android:textColor="#94A3B8"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Close "✕" Button -->
+            <FrameLayout
+                android:id="@+id/btn_close_drawer"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/assistant_chip_bg"
+                android:contentDescription="Close">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="✕"
+                    android:textColor="#94A3B8"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+        </RelativeLayout>
+
+        <!-- Live Transcription & Prompt Speech Box -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/assistant_card_bg"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tv_speech_prompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:lineSpacingExtra="4dp"
+                android:text="Listening... Say something like 'Paid 650 for Dinner with Rohan'"
+                android:textColor="#E2E8F0"
+                android:textSize="16sp" />
+        </FrameLayout>
+
+        <!-- Live Parsed Expense Preview Card (Shown once parsed) -->
+        <LinearLayout
+            android:id="@+id/layout_result_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/assistant_card_bg"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:id="@+id/tv_result_category"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentStart="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="🍕 Food &amp; Dining"
+                    android:textColor="#38BDF8"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/tv_result_amount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="₹0.00"
+                    android:textColor="#10B981"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+            </RelativeLayout>
+
+            <TextView
+                android:id="@+id/tv_result_split_details"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp"
+                android:fontFamily="sans-serif"
+                android:text="Split with group"
+                android:textColor="#94A3B8"
+                android:textSize="12sp" />
+
+            <!-- Action Buttons: Save & Edit -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_save_expense"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/assistant_btn_primary"
+                    android:fontFamily="sans-serif-medium"
+                    android:stateListAnimator="@null"
+                    android:text="✓ Confirm &amp; Save"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btn_cancel_expense"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:background="@drawable/assistant_btn_secondary"
+                    android:fontFamily="sans-serif-medium"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:stateListAnimator="@null"
+                    android:text="Clear"
+                    android:textAllCaps="false"
+                    android:textColor="#94A3B8"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Quick Action Suggestion Chips -->
+        <HorizontalScrollView
+            android:id="@+id/scroll_chips"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/chip_chai"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/assistant_chip_bg"
+                    android:paddingStart="12dp"
+                    android:paddingTop="7dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="7dp"
+                    android:text="☕ Chai ₹40"
+                    android:textColor="#CBD5E1"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/chip_pizza"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/assistant_chip_bg"
+                    android:paddingStart="12dp"
+                    android:paddingTop="7dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="7dp"
+                    android:text="🍕 Lunch ₹450"
+                    android:textColor="#CBD5E1"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/chip_cab"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/assistant_chip_bg"
+                    android:paddingStart="12dp"
+                    android:paddingTop="7dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="7dp"
+                    android:text="🚕 Cab ₹320"
+                    android:textColor="#CBD5E1"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/chip_split_1000"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/assistant_chip_bg"
+                    android:paddingStart="12dp"
+                    android:paddingTop="7dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="7dp"
+                    android:text="👥 Split ₹1000 Equal"
+                    android:textColor="#CBD5E1"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/chip_balance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/assistant_chip_bg"
+                    android:paddingStart="12dp"
+                    android:paddingTop="7dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="7dp"
+                    android:text="📊 Check Balances"
+                    android:textColor="#CBD5E1"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- Text Input Mode (Toggled via keyboard icon) -->
+        <LinearLayout
+            android:id="@+id/layout_text_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/et_manual_input"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/assistant_chip_bg"
+                android:hint="Type e.g. Dinner 500 with Alex..."
+                android:imeOptions="actionSend"
+                android:inputType="text"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#64748B"
+                android:textSize="14sp" />
+
+            <FrameLayout
+                android:id="@+id/btn_send_text"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@drawable/assistant_btn_primary"
+                android:contentDescription="Send">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="➔"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- Bottom Controls Row: Keyboard Toggle, Large Assistant Mic, Open App -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="72dp">
+
+            <!-- Keyboard Mode Toggle -->
+            <FrameLayout
+                android:id="@+id/btn_toggle_keyboard"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/assistant_chip_bg"
+                android:contentDescription="Toggle Keyboard">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="⌨️"
+                    android:textSize="18sp" />
+            </FrameLayout>
+
+            <!-- Large Assistant Mic Center Button with Outer Glow Ring -->
+            <FrameLayout
+                android:id="@+id/mic_container"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_centerInParent="true">
+
+                <!-- Outer Animated Glowing Ring -->
+                <View
+                    android:id="@+id/view_mic_glow"
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
+                    android:background="@drawable/assistant_mic_glow" />
+
+                <!-- Inner Action Circle Button -->
+                <FrameLayout
+                    android:id="@+id/btn_assistant_mic"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/assistant_mic_circle"
+                    android:contentDescription="Speak to Assistant">
+
+                    <TextView
+                        android:id="@+id/tv_mic_icon"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:text="🎙️"
+                        android:textSize="24sp" />
+                </FrameLayout>
+            </FrameLayout>
+
+            <!-- Open Full App Link -->
+            <TextView
+                android:id="@+id/btn_open_app"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/assistant_chip_bg"
+                android:fontFamily="sans-serif-medium"
+                android:paddingStart="12dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="10dp"
+                android:text="📱 Open App"
+                android:textColor="#94A3B8"
+                android:textSize="11sp" />
+        </RelativeLayout>
+    </LinearLayout>
+</RelativeLayout>
