@@ -6,6 +6,7 @@ import { AppStorage } from '../../lib/storage';
 import { supabase, isSupabaseConfigured, GOOGLE_WEB_CLIENT_ID } from '../../lib/supabase';
 import { Profile } from '../../types/database';
 import { getUserCurrencyPreference, setUserCurrencyPreference } from '../../services/currency';
+import { clearAssistantData } from '../../services/widgetService';
 // Dynamically resolve GoogleSignin only when the native module is present in the binary (e.g. custom development build)
 // In standard Expo Go, NativeModules.RNGoogleSignin is undefined. Static imports trigger TurboModuleRegistry.getEnforcing crashes!
 let GoogleSignin: any = null;
@@ -1219,6 +1220,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     resetUserStores();
     try {
+      await clearAssistantData();
       await AppStorage.removeItem('@splityourtrip_local_trips');
       await AppStorage.removeItem('@splityourtrip_cached_contacts');
       await AppStorage.removeItem('@splityourtrip_last_login_at');

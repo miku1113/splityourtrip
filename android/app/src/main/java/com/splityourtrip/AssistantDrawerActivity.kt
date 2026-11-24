@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -103,7 +104,12 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     // Active trip & user state
     private val availableTrips = ArrayList<TripInfo>()
     private var activeTrip: TripInfo? = null
-    private var currentUserId: String = "c190b7ba-767d-4c0e-9ec5-53ecd91d06c5"
+    private var currentUserId: String? = null
+
+    private fun isUserLoggedIn(): Boolean {
+        val uid = currentUserId
+        return !uid.isNullOrEmpty() && uid != "null" && uid != "local_user"
+    }
 
     companion object {
         private const val PERMISSION_REQUEST_AUDIO = 101
@@ -123,11 +129,15 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         // Load trips from SharedPreferences, RKStorage SQLite, or Supabase
         resolveUserAndTrips()
 
-        // Auto start listening on open (like Google Assistant)
+        // Auto start listening on open (like Google Assistant) only if logged in
         val shouldAutoStart = intent.getBooleanExtra("AUTO_START_LISTENING", true)
         if (shouldAutoStart) {
             mainHandler.postDelayed({
-                checkAndStartListening()
+                if (isUserLoggedIn()) {
+                    checkAndStartListening()
+                } else {
+                    notifyLoginRequired(speak = true)
+                }
             }, 300)
         }
     }
@@ -180,11 +190,19 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
 
         // Trip Selector Pill click: opens dialog to choose trip
         layoutActiveTripSelector.setOnClickListener {
-            showTripSelectionDialog()
+            if (!isUserLoggedIn()) {
+                notifyLoginRequired(speak = true)
+            } else {
+                showTripSelectionDialog()
+            }
         }
 
         // Mic button tap
         btnAssistantMic.setOnClickListener {
+            if (!isUserLoggedIn()) {
+                notifyLoginRequired(speak = true)
+                return@setOnClickListener
+            }
             if (isListening) {
                 stopListening()
             } else {
@@ -248,6 +266,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             handleQuickChip("Split 1000 equally with friends", 100000L, "Group Expense", "General")
         }
         chipBalance.setOnClickListener {
+            if (!isUserLoggedIn()) {
+                notifyLoginRequired(speak = true)
+                return@setOnClickListener
+            }
             val tripName = activeTrip?.name ?: "All trips"
             tvSpeechPrompt.text = "Checking balances for $tripName..."
             tvAssistantStatus.text = "Balances are up to date."
@@ -271,17 +293,19 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
      * 3. Supabase REST fallback
      */
     private fun resolveUserAndTrips() {
+        currentUserId = null
+        availableTrips.clear()
+        activeTrip = null
+
         val prefs = getSharedPreferences("SplitYourTripWidget", Context.MODE_PRIVATE)
         val cachedUserId = prefs.getString("user_id", null)
-        if (!cachedUserId.isNullOrEmpty()) {
+        if (!cachedUserId.isNullOrEmpty() && cachedUserId != "null" && cachedUserId != "local_user") {
             currentUserId = cachedUserId
         }
 
         val cachedTripId = prefs.getString("active_trip_id", null)
         val cachedTripName = prefs.getString("active_trip_name", null)
         val tripsJsonStr = prefs.getString("trips_json", null)
-
-        availableTrips.clear()
 
         // 1. Parse tripsJson from SharedPreferences
         if (!tripsJsonStr.isNullOrEmpty()) {
@@ -291,7 +315,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
                     val obj = array.getJSONObject(i)
                     val id = obj.optString("id")
                     val name = obj.optString("name")
-                    val createdBy = obj.optString("created_by", currentUserId)
+                    val createdBy = obj.optString("created_by", currentUserId ?: "")
                     if (id.isNotEmpty() && name.isNotEmpty()) {
                         availableTrips.add(TripInfo(id, name, createdBy))
                     }
@@ -299,16 +323,21 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             } catch (e: Exception) {}
         }
 
-        // 2. Fallback to SQLite RKStorage if empty
-        if (availableTrips.isEmpty()) {
+        // 2. Fallback to SQLite RKStorage if empty or user not yet determined
+        if (currentUserId.isNullOrEmpty() || availableTrips.isEmpty()) {
             readTripsFromLocalStorage()
         }
 
-        // 3. Fallback to Supabase REST query
-        if (availableTrips.isEmpty()) {
-            fetchTripsFromSupabaseAsync()
+        // 3. Fallback to Supabase REST query ONLY if user is logged in
+        if (isUserLoggedIn()) {
+            if (availableTrips.isEmpty()) {
+                fetchTripsFromSupabaseAsync()
+            } else {
+                selectDefaultTrip(cachedTripId, cachedTripName)
+            }
         } else {
-            selectDefaultTrip(cachedTripId, cachedTripName)
+            // User is not logged in
+            updateLoginStateUi()
         }
     }
 
@@ -329,7 +358,9 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
                             val tokenObj = JSONObject(value)
                             val userObj = tokenObj.optJSONObject("user")
                             val uid = userObj?.optString("id")
-                            if (!uid.isNullOrEmpty()) currentUserId = uid
+                            if (!uid.isNullOrEmpty() && uid != "null" && uid != "local_user") {
+                                currentUserId = uid
+                            }
                         } catch (e: Exception) {}
                     } else if (key.contains("local_trips")) {
                         try {
@@ -338,7 +369,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
                                 val tObj = tripsArr.getJSONObject(i)
                                 val tid = tObj.optString("id")
                                 val tname = tObj.optString("name")
-                                val tcreated = tObj.optString("created_by", currentUserId)
+                                val tcreated = tObj.optString("created_by", currentUserId ?: "")
                                 if (tid.isNotEmpty() && tname.isNotEmpty()) {
                                     availableTrips.add(TripInfo(tid, tname, tcreated))
                                 }
@@ -392,22 +423,50 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     }
 
     private fun selectDefaultTrip(preferredId: String?, preferredName: String?) {
-        if (availableTrips.isEmpty()) {
-            tvActiveTripName.text = "Trip: Default"
-            return
-        }
-
         activeTrip = if (!preferredId.isNullOrEmpty()) {
-            availableTrips.find { it.id == preferredId } ?: availableTrips[0]
+            availableTrips.find { it.id == preferredId } ?: (if (availableTrips.isNotEmpty()) availableTrips[0] else null)
         } else {
-            availableTrips[0]
+            if (availableTrips.isNotEmpty()) availableTrips[0] else null
         }
+        updateLoginStateUi()
+    }
 
-        tvActiveTripName.text = "Trip: ${activeTrip?.name}"
-        tvSpeechPrompt.text = "Listening... Say 'Paid 500 for dinner' to add to ${activeTrip?.name}"
+    private fun updateLoginStateUi() {
+        if (!isUserLoggedIn()) {
+            tvActiveTripName.text = "🔒 Log In Required"
+            tvAssistantStatus.text = "Please log in to your account"
+            tvSpeechPrompt.text = "Please log in to SplitYourTrip first to add expenses or manage trips."
+            btnOpenApp.text = "🔐 Log In"
+            btnOpenApp.setTextColor(Color.parseColor("#38BDF8"))
+            layoutResultCard.visibility = View.GONE
+        } else {
+            val tripName = activeTrip?.name ?: "your trip"
+            tvActiveTripName.text = "Trip: $tripName"
+            tvAssistantStatus.text = "Ready to split • Speak or type below"
+            tvSpeechPrompt.text = "Listening... Say something like 'Paid 650 for Dinner' to add to $tripName"
+            btnOpenApp.text = "📱 Open App"
+            btnOpenApp.setTextColor(Color.parseColor("#94A3B8"))
+        }
+    }
+
+    private fun notifyLoginRequired(speak: Boolean = true) {
+        stopListening()
+        layoutResultCard.visibility = View.GONE
+        tvAssistantStatus.text = "Login required • SplitYourTrip"
+        tvSpeechPrompt.text = "Please log in to SplitYourTrip first to add expenses or manage trips."
+        if (speak) {
+            speakText("Please log in to SplitYourTrip first.")
+        }
+        btnOpenApp.text = "🔐 Log In"
+        btnOpenApp.setTextColor(Color.parseColor("#38BDF8"))
+        Toast.makeText(this, "Please log in to SplitYourTrip first", Toast.LENGTH_SHORT).show()
     }
 
     private fun showTripSelectionDialog() {
+        if (!isUserLoggedIn()) {
+            notifyLoginRequired(speak = true)
+            return
+        }
         if (availableTrips.isEmpty()) {
             Toast.makeText(this, "No trips loaded yet", Toast.LENGTH_SHORT).show()
             return
@@ -428,6 +487,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     }
 
     private fun handleQuickChip(promptText: String, amountPaise: Long, title: String, category: String) {
+        if (!isUserLoggedIn()) {
+            notifyLoginRequired(speak = true)
+            return
+        }
         tvSpeechPrompt.text = promptText
         parseAndDisplayExpense(promptText, amountPaise, title, category)
     }
@@ -439,11 +502,19 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             layoutTextInput.visibility = View.GONE
             etManualInput.setText("")
             tvSpeechPrompt.text = query
+            if (!isUserLoggedIn()) {
+                notifyLoginRequired(speak = true)
+                return
+            }
             parseNaturalLanguageExpense(query)
         }
     }
 
     private fun checkAndStartListening() {
+        if (!isUserLoggedIn()) {
+            notifyLoginRequired(speak = true)
+            return
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
                 this,
@@ -581,6 +652,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
      * Extracts: Amount (in integer Paise per Rule 2), Title, Category, Trip target, and Split info.
      */
     private fun parseNaturalLanguageExpense(text: String) {
+        if (!isUserLoggedIn()) {
+            notifyLoginRequired(speak = true)
+            return
+        }
         var amountPaise = 0L
         var title = "Expense"
         var category = "General"
@@ -677,6 +752,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     }
 
     private fun confirmAndSaveExpense() {
+        if (!isUserLoggedIn()) {
+            notifyLoginRequired(speak = true)
+            return
+        }
         if (currentParsedAmountPaise <= 0L) {
             Toast.makeText(this, "Invalid amount", Toast.LENGTH_SHORT).show()
             return
@@ -717,6 +796,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         title: String,
         category: String
     ) {
+        if (!isUserLoggedIn()) {
+            notifyLoginRequired(speak = true)
+            return
+        }
         try {
             val prefs = getSharedPreferences("SplitYourTripPendingExpenses", Context.MODE_PRIVATE)
             val currentArrayStr = prefs.getString("pending_voice_expenses", "[]") ?: "[]"
@@ -747,6 +830,11 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         category: String,
         isoDate: String
     ) {
+        val uid = currentUserId ?: run {
+            notifyLoginRequired(speak = true)
+            return
+        }
+
         Thread {
             try {
                 val url = URL("$SUPABASE_REST_URL/expenses")
@@ -763,8 +851,8 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
                 val payload = JSONObject().apply {
                     put("id", expenseId)
                     put("trip_id", tripId)
-                    put("paid_by", currentUserId)
-                    put("created_by", currentUserId)
+                    put("paid_by", uid)
+                    put("created_by", uid)
                     put("amount", amountPaise)
                     put("description", title)
                     put("category", category)
@@ -791,6 +879,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     }
 
     private fun insertExpenseSplitsAsync(expenseId: String, tripId: String, totalAmountPaise: Long) {
+        val uid = currentUserId ?: return
         try {
             // 1. Fetch trip members
             val membersUrl = URL("$SUPABASE_REST_URL/trip_members?select=id,profile_id&trip_id=eq.$tripId")
@@ -814,12 +903,12 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
                     for (i in 0 until membersArr.length()) {
                         val mObj = membersArr.getJSONObject(i)
                         val mId = mObj.optString("id")
-                        val pId = mObj.optString("profile_id", currentUserId)
+                        val pId = mObj.optString("profile_id", uid)
                         val splitObj = JSONObject().apply {
                             put("id", UUID.randomUUID().toString())
                             put("expense_id", expenseId)
                             put("member_id", mId)
-                            put("profile_id", if (pId.isNullOrEmpty() || pId == "null") currentUserId else pId)
+                            put("profile_id", if (pId.isNullOrEmpty() || pId == "null") uid else pId)
                             put("amount", splitShare)
                             put("share_amount", splitShare)
                             put("share_type", "equal")

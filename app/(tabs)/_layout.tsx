@@ -14,7 +14,7 @@ import NotificationCenterModal from '../../src/components/NotificationCenterModa
 import SettleUpModal from '../../src/components/SettleUpModal';
 import VoiceExpenseModal from '../../src/components/VoiceExpenseModal';
 import { useNotificationStore } from '../../src/features/notifications/useNotificationStore';
-import { syncWidgetSummary, syncPendingAssistantVoiceExpenses, syncAssistantData } from '../../src/services/widgetService';
+import { syncWidgetSummary, syncPendingAssistantVoiceExpenses, syncAssistantData, clearAssistantData } from '../../src/services/widgetService';
 import { scaleFont } from '../../src/theme/responsive';
 
 // Pre-load top bar logo assets statically at module level to guarantee instant resolution
@@ -47,14 +47,16 @@ export default function TabLayout() {
       activeTripName: trips[0]?.name,
     });
 
-    if (trips.length > 0) {
+    if (user?.id && trips.length > 0) {
       const active = trips[0];
       syncAssistantData({
         activeTripId: active.id,
         activeTripName: active.name,
-        userId: user?.id,
+        userId: user.id,
         trips: trips,
       }).catch(() => {});
+    } else if (!user?.id) {
+      clearAssistantData().catch(() => {});
     }
   }, [trips, user?.id]);
 

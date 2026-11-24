@@ -142,3 +142,19 @@ export async function syncAssistantData(params: {
     return false;
   }
 }
+
+/**
+ * Clears cached assistant and widget credentials upon logout.
+ */
+export async function clearAssistantData(): Promise<boolean> {
+  if (Platform.OS !== 'android' || !SplitOcr?.clearAssistantData) {
+    return false;
+  }
+  try {
+    await SplitOcr.clearAssistantData();
+    return true;
+  } catch (err) {
+    console.log('[widgetService] Failed to clear assistant data:', err);
+    return false;
+  }
+}

@@ -767,6 +767,13 @@ export async function runVoiceCopilot(params: {
     };
   }
 
+  if (!currentUserId || currentUserId === 'local_user') {
+    return {
+      reply: 'Please log in to your account first to add expenses or manage your trips.',
+      action: null,
+    };
+  }
+
   // Fast-path for direct confirmation/cancellation of pending action
   const cleanPrompt = userPrompt.trim();
   const lowerPromptDirect = cleanPrompt.toLowerCase();

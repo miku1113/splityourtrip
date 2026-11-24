@@ -1469,8 +1469,25 @@ export default function VoiceExpenseModal({
       setMessages(prev => [...prev, userMsg]);
       setTextInput('');
       setSpeechStatusMessage(null);
-      setIsAnalyzing(true);
       setIsListening(false);
+
+      if (!user?.id) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: generateUUID(),
+            role: 'assistant',
+            content: 'Please log in to your account first to add expenses or manage trips.',
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setIsAnalyzing(false);
+        isTurnProcessingRef.current = false;
+        speakAssistantReply('Please log in to your account first.');
+        return;
+      }
+
+      setIsAnalyzing(true);
 
       // Build history for Groq
       const historyTurns = messages.map(m => ({

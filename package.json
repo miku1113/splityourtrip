@@ -2,7 +2,7 @@
   "name": "splityourtrip",
   "main": "expo-router/entry",
   "license": "0BSD",
-  "version": "1.0.76",
+  "version": "1.0.77",
   "dependencies": {
     "@expo/vector-icons": "^14.0.2",
     "@react-native-async-storage/async-storage": "1.23.1",
