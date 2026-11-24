@@ -14,7 +14,7 @@ import NotificationCenterModal from '../../src/components/NotificationCenterModa
 import SettleUpModal from '../../src/components/SettleUpModal';
 import VoiceExpenseModal from '../../src/components/VoiceExpenseModal';
 import { useNotificationStore } from '../../src/features/notifications/useNotificationStore';
-import { syncWidgetSummary, syncPendingAssistantVoiceExpenses } from '../../src/services/widgetService';
+import { syncWidgetSummary, syncPendingAssistantVoiceExpenses, syncAssistantData } from '../../src/services/widgetService';
 import { scaleFont } from '../../src/theme/responsive';
 
 // Pre-load top bar logo assets statically at module level to guarantee instant resolution
@@ -44,17 +44,49 @@ export default function TabLayout() {
   useEffect(() => {
     syncWidgetSummary({
       tripCount: trips.length,
+      activeTripName: trips[0]?.name,
     });
-  }, [trips.length]);
+
+    if (trips.length > 0) {
+      const active = trips[0];
+      syncAssistantData({
+        activeTripId: active.id,
+        activeTripName: active.name,
+        userId: user?.id,
+        trips: trips,
+      }).catch(() => {});
+    }
+  }, [trips, user?.id]);
 
   // Sync any expenses recorded via Android Assistant Drawer overlay while app was closed
   useEffect(() => {
-    syncPendingAssistantVoiceExpenses().then(pending => {
+    syncPendingAssistantVoiceExpenses().then(async pending => {
       if (pending && pending.length > 0) {
+        for (const item of pending) {
+          const currentTrips = useTripStore.getState().trips;
+          const targetTrip = currentTrips.find(t => t.id === (item as any).trip_id) || currentTrips[0];
+          if (targetTrip) {
+            const members = useTripStore.getState().members.filter(m => m.trip_id === targetTrip.id);
+            const myMember = members.find(m => m.profile_id === user?.id || m.user_id === user?.id) || members[0];
+            const participantIds = members.map(m => m.id);
+
+            await useTripStore.getState().addExpense({
+              tripId: targetTrip.id,
+              paidByMemberId: myMember?.id || user?.id || '',
+              amountPaise: item.amount_paise,
+              description: item.title,
+              category: item.category || 'General',
+              paymentMode: 'cash',
+              splitType: 'equal',
+              participantMemberIds: participantIds.length > 0 ? participantIds : [myMember?.id || ''],
+              userId: user?.id || targetTrip.created_by || 'local_user',
+            });
+          }
+        }
         useTripStore.getState().fetchTrips(undefined, true);
       }
     }).catch(() => {});
-  }, []);
+  }, [user?.id, trips.length]);
 
   // Listen to incoming widget shortcut links while tabs are active
   useEffect(() => {

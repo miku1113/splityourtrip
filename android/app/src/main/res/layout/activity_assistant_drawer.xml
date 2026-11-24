@@ -139,6 +139,47 @@
             </FrameLayout>
         </RelativeLayout>
 
+        <!-- Active Trip Selection Pill -->
+        <LinearLayout
+            android:id="@+id/layout_active_trip_selector"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/assistant_chip_bg"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:text="📍"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tv_active_trip_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:text="Trip: Loading..."
+                android:textColor="#38BDF8"
+                android:textSize="12sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="▾"
+                android:textColor="#94A3B8"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <!-- Live Transcription & Prompt Speech Box -->
         <FrameLayout
             android:layout_width="match_parent"

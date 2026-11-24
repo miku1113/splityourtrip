@@ -97,3 +97,48 @@ export async function updateWidgetActiveTrip(tripId: string, statusText?: string
     return false;
   }
 }
+
+/**
+ * Syncs full active trip metadata, trip list, and user credentials to the Assistant drawer preferences.
+ */
+export async function syncAssistantData(params: {
+  activeTripId?: string;
+  activeTripName?: string;
+  userId?: string;
+  userToken?: string;
+  trips?: any[];
+}): Promise<boolean> {
+  if (Platform.OS !== 'android' || !SplitOcr?.syncAssistantData) {
+    return false;
+  }
+  try {
+    const { activeTripId, activeTripName, userId, userToken, trips } = params;
+    const tripsJson = trips
+      ? JSON.stringify(
+          trips.map(t => ({
+            id: t.id,
+            name: t.name,
+            currency: t.currency || 'INR',
+            created_by: t.created_by,
+            members: (t.members || []).map((m: any) => ({
+              id: m.id,
+              name: m.display_name || m.name,
+              profile_id: m.profile_id || m.user_id,
+            })),
+          }))
+        )
+      : null;
+
+    await SplitOcr.syncAssistantData(
+      activeTripId || null,
+      activeTripName || null,
+      userId || null,
+      userToken || null,
+      tripsJson
+    );
+    return true;
+  } catch (err) {
+    console.log('[widgetService] Failed to sync assistant data:', err);
+    return false;
+  }
+}

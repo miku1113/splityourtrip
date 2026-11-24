@@ -4,10 +4,11 @@ import android.Manifest
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
+import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -31,20 +32,25 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.regex.Pattern
 
 /**
  * Google Assistant-style bottom drawer overlay activity for SplitYourTrip.
- * Opens as a lightweight floating translucent bottom sheet directly over the home screen
- * without launching or switching to the main full-screen app.
+ * Directly saves and syncs expenses to Supabase and local storage without opening the main app.
  */
 class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.OnInitListener {
+
+    data class TripInfo(val id: String, val name: String, val createdBy: String)
 
     private lateinit var scrimDismissArea: View
     private lateinit var btnCloseDrawer: FrameLayout
@@ -64,6 +70,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     private lateinit var tvResultSplitDetails: TextView
     private lateinit var btnSaveExpense: Button
     private lateinit var btnCancelExpense: Button
+
+    // Active Trip Selector
+    private lateinit var layoutActiveTripSelector: LinearLayout
+    private lateinit var tvActiveTripName: TextView
 
     // 4 Google Assistant glowing color bars
     private lateinit var barBlue: View
@@ -90,6 +100,11 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     private var currentParsedPayer: String = "You"
     private var currentParsedSplit: String = "Equal"
 
+    // Active trip & user state
+    private val availableTrips = ArrayList<TripInfo>()
+    private var activeTrip: TripInfo? = null
+    private var currentUserId: String = "c190b7ba-767d-4c0e-9ec5-53ecd91d06c5"
+
     companion object {
         private const val PERMISSION_REQUEST_AUDIO = 101
         private const val SUPABASE_REST_URL = "https://hpjizujbzvwkxvfsoqqd.supabase.co/rest/v1"
@@ -104,6 +119,9 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         initViews()
         setupListeners()
         initTextToSpeech()
+
+        // Load trips from SharedPreferences, RKStorage SQLite, or Supabase
+        resolveUserAndTrips()
 
         // Auto start listening on open (like Google Assistant)
         val shouldAutoStart = intent.getBooleanExtra("AUTO_START_LISTENING", true)
@@ -134,6 +152,9 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         btnSaveExpense = findViewById(R.id.btn_save_expense)
         btnCancelExpense = findViewById(R.id.btn_cancel_expense)
 
+        layoutActiveTripSelector = findViewById(R.id.layout_active_trip_selector)
+        tvActiveTripName = findViewById(R.id.tv_active_trip_name)
+
         barBlue = findViewById(R.id.bar_blue)
         barRed = findViewById(R.id.bar_red)
         barYellow = findViewById(R.id.bar_yellow)
@@ -155,6 +176,11 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         // Close X button
         btnCloseDrawer.setOnClickListener {
             dismissWithAnimation()
+        }
+
+        // Trip Selector Pill click: opens dialog to choose trip
+        layoutActiveTripSelector.setOnClickListener {
+            showTripSelectionDialog()
         }
 
         // Mic button tap
@@ -202,17 +228,18 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         // Cancel / Clear button
         btnCancelExpense.setOnClickListener {
             layoutResultCard.visibility = View.GONE
-            tvSpeechPrompt.text = "Listening... Say something like 'Paid 650 for Dinner with Rohan'"
+            val tripName = activeTrip?.name ?: "your trip"
+            tvSpeechPrompt.text = "Listening... Say something like 'Paid 650 for Dinner' to add to $tripName"
             tvAssistantStatus.text = "Ready to split • Speak or type below"
             currentParsedAmountPaise = 0L
         }
 
         // Quick Suggestion Chips
         chipChai.setOnClickListener {
-            handleQuickChip("Paid 40 for Chai", 4000L, "Chai", "Food & Dining")
+            handleQuickChip("Paid 40 for Chai", 4000L, "Chai", "Food & Drinks")
         }
         chipPizza.setOnClickListener {
-            handleQuickChip("Paid 450 for Lunch", 45000L, "Lunch", "Food & Dining")
+            handleQuickChip("Paid 450 for Lunch", 45000L, "Lunch", "Food & Drinks")
         }
         chipCab.setOnClickListener {
             handleQuickChip("Paid 320 for Cab", 32000L, "Cab", "Transportation")
@@ -221,9 +248,10 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             handleQuickChip("Split 1000 equally with friends", 100000L, "Group Expense", "General")
         }
         chipBalance.setOnClickListener {
-            tvSpeechPrompt.text = "Checking trip balances..."
-            tvAssistantStatus.text = "All your trip balances are up to date."
-            speakText("All your trip balances are currently up to date.")
+            val tripName = activeTrip?.name ?: "All trips"
+            tvSpeechPrompt.text = "Checking balances for $tripName..."
+            tvAssistantStatus.text = "Balances are up to date."
+            speakText("Balances for $tripName are up to date.")
         }
 
         // Open full app link (only if user explicitly wants to leave home screen)
@@ -234,6 +262,169 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             startActivity(appIntent)
             finish()
         }
+    }
+
+    /**
+     * Resolves user ID and available trips from:
+     * 1. SharedPreferences (SplitYourTripWidget)
+     * 2. Local RKStorage SQLite DB
+     * 3. Supabase REST fallback
+     */
+    private fun resolveUserAndTrips() {
+        val prefs = getSharedPreferences("SplitYourTripWidget", Context.MODE_PRIVATE)
+        val cachedUserId = prefs.getString("user_id", null)
+        if (!cachedUserId.isNullOrEmpty()) {
+            currentUserId = cachedUserId
+        }
+
+        val cachedTripId = prefs.getString("active_trip_id", null)
+        val cachedTripName = prefs.getString("active_trip_name", null)
+        val tripsJsonStr = prefs.getString("trips_json", null)
+
+        availableTrips.clear()
+
+        // 1. Parse tripsJson from SharedPreferences
+        if (!tripsJsonStr.isNullOrEmpty()) {
+            try {
+                val array = JSONArray(tripsJsonStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val id = obj.optString("id")
+                    val name = obj.optString("name")
+                    val createdBy = obj.optString("created_by", currentUserId)
+                    if (id.isNotEmpty() && name.isNotEmpty()) {
+                        availableTrips.add(TripInfo(id, name, createdBy))
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+
+        // 2. Fallback to SQLite RKStorage if empty
+        if (availableTrips.isEmpty()) {
+            readTripsFromLocalStorage()
+        }
+
+        // 3. Fallback to Supabase REST query
+        if (availableTrips.isEmpty()) {
+            fetchTripsFromSupabaseAsync()
+        } else {
+            selectDefaultTrip(cachedTripId, cachedTripName)
+        }
+    }
+
+    private fun readTripsFromLocalStorage() {
+        try {
+            val dbFile = getDatabasePath("RKStorage")
+            if (dbFile != null && dbFile.exists()) {
+                val db = SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY)
+                val cursor = db.rawQuery(
+                    "SELECT key, value FROM catalystLocalStorage WHERE key LIKE '@splityourtrip_local_trips%' OR key LIKE 'sb-%-auth-token' LIMIT 10",
+                    null
+                )
+                while (cursor.moveToNext()) {
+                    val key = cursor.getString(0)
+                    val value = cursor.getString(1)
+                    if (key.contains("auth-token")) {
+                        try {
+                            val tokenObj = JSONObject(value)
+                            val userObj = tokenObj.optJSONObject("user")
+                            val uid = userObj?.optString("id")
+                            if (!uid.isNullOrEmpty()) currentUserId = uid
+                        } catch (e: Exception) {}
+                    } else if (key.contains("local_trips")) {
+                        try {
+                            val tripsArr = JSONArray(value)
+                            for (i in 0 until tripsArr.length()) {
+                                val tObj = tripsArr.getJSONObject(i)
+                                val tid = tObj.optString("id")
+                                val tname = tObj.optString("name")
+                                val tcreated = tObj.optString("created_by", currentUserId)
+                                if (tid.isNotEmpty() && tname.isNotEmpty()) {
+                                    availableTrips.add(TripInfo(tid, tname, tcreated))
+                                }
+                            }
+                        } catch (e: Exception) {}
+                    }
+                }
+                cursor.close()
+                db.close()
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun fetchTripsFromSupabaseAsync() {
+        Thread {
+            try {
+                val url = URL("$SUPABASE_REST_URL/trips?select=id,name,created_by&status=eq.active&order=created_at.desc&limit=10")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("apikey", SUPABASE_ANON_KEY)
+                conn.setRequestProperty("Authorization", "Bearer $SUPABASE_ANON_KEY")
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+
+                if (conn.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val jsonStr = reader.readText()
+                    reader.close()
+
+                    val arr = JSONArray(jsonStr)
+                    val fetched = ArrayList<TripInfo>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        val id = obj.optString("id")
+                        val name = obj.optString("name")
+                        val createdBy = obj.optString("created_by")
+                        if (id.isNotEmpty() && name.isNotEmpty()) {
+                            fetched.add(TripInfo(id, name, createdBy))
+                        }
+                    }
+
+                    mainHandler.post {
+                        availableTrips.clear()
+                        availableTrips.addAll(fetched)
+                        selectDefaultTrip(null, null)
+                    }
+                }
+                conn.disconnect()
+            } catch (e: Exception) {}
+        }.start()
+    }
+
+    private fun selectDefaultTrip(preferredId: String?, preferredName: String?) {
+        if (availableTrips.isEmpty()) {
+            tvActiveTripName.text = "Trip: Default"
+            return
+        }
+
+        activeTrip = if (!preferredId.isNullOrEmpty()) {
+            availableTrips.find { it.id == preferredId } ?: availableTrips[0]
+        } else {
+            availableTrips[0]
+        }
+
+        tvActiveTripName.text = "Trip: ${activeTrip?.name}"
+        tvSpeechPrompt.text = "Listening... Say 'Paid 500 for dinner' to add to ${activeTrip?.name}"
+    }
+
+    private fun showTripSelectionDialog() {
+        if (availableTrips.isEmpty()) {
+            Toast.makeText(this, "No trips loaded yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val names = availableTrips.map { it.name }.toTypedArray()
+        val currentIndex = availableTrips.indexOfFirst { it.id == activeTrip?.id }.let { if (it >= 0) it else 0 }
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Trip for Expense")
+            .setSingleChoiceItems(names, currentIndex) { dialog, which ->
+                activeTrip = availableTrips[which]
+                tvActiveTripName.text = "Trip: ${activeTrip?.name}"
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun handleQuickChip(promptText: String, amountPaise: Long, title: String, category: String) {
@@ -318,9 +509,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
             speechRecognizer = null
-        } catch (e: Exception) {
-            // Safe destroy
-        }
+        } catch (e: Exception) {}
         tvMicIcon.text = "🎙️"
         animateMicPulse(false)
         resetLightbar()
@@ -337,7 +526,6 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
     }
 
     override fun onRmsChanged(rmsdB: Float) {
-        // Dynamically animate 4 Google Assistant color bars according to voice decibels
         val scale = Math.max(0.6f, Math.min(2.8f, (rmsdB + 2f) / 3f))
         animateLightbarWave(scale)
     }
@@ -390,7 +578,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
 
     /**
      * Intelligent Natural Language Parsing for Expenses:
-     * Extracts: Amount (in Paise), Title / Category, Payer, Split type.
+     * Extracts: Amount (in integer Paise per Rule 2), Title, Category, Trip target, and Split info.
      */
     private fun parseNaturalLanguageExpense(text: String) {
         var amountPaise = 0L
@@ -399,7 +587,18 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         var split = "Equal"
         val lower = text.lowercase(Locale.ROOT)
 
-        // 1. Amount Extraction (supports: ₹500, 500rs, 500 rupees, 1.5k, 1200.50, etc.)
+        // 1. Match trip if mentioned in speech (e.g. "for Goa trip", "in Daman")
+        for (trip in availableTrips) {
+            val tripLower = trip.name.lowercase(Locale.ROOT)
+            val parts = tripLower.split("\\s+".toRegex()).filter { it.length > 2 && it != "trip" && it != "split" && it != "with" }
+            if (parts.any { lower.contains(it) }) {
+                activeTrip = trip
+                tvActiveTripName.text = "Trip: ${trip.name}"
+                break
+            }
+        }
+
+        // 2. Amount Extraction (supports: ₹500, 500rs, 500 rupees, 1.5k, 1200.50, etc.)
         val amountPattern = Pattern.compile("(?:(?:rs\\.?|inr|₹)\\s*)?([0-9]+(?:\\.[0-9]{1,2})?)\\s*(?:k|rs\\.?|rupees?)?", Pattern.CASE_INSENSITIVE)
         val matcher = amountPattern.matcher(lower)
         if (matcher.find()) {
@@ -411,23 +610,23 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             amountPaise = (amt * 100).toLong()
         }
 
-        // 2. Category & Title Extraction
+        // 3. Category & Title Extraction
         if (lower.contains("chai") || lower.contains("tea") || lower.contains("coffee")) {
             category = "Food & Drinks"
             title = if (lower.contains("chai") || lower.contains("tea")) "Chai" else "Coffee"
-        } else if (lower.contains("dinner") || lower.contains("lunch") || lower.contains("breakfast") || lower.contains("food") || lower.contains("pizza") || lower.contains("burger") || lower.contains("biryani")) {
+        } else if (lower.contains("dinner") || lower.contains("lunch") || lower.contains("breakfast") || lower.contains("food") || lower.contains("pizza") || lower.contains("burger") || lower.contains("biryani") || lower.contains("cafe") || lower.contains("restaurant") || lower.contains("swiggy") || lower.contains("zomato")) {
             category = "Food & Drinks"
             title = if (lower.contains("dinner")) "Dinner" else if (lower.contains("lunch")) "Lunch" else if (lower.contains("breakfast")) "Breakfast" else "Food & Dining"
-        } else if (lower.contains("cab") || lower.contains("uber") || lower.contains("ola") || lower.contains("auto") || lower.contains("taxi") || lower.contains("metro") || lower.contains("bus") || lower.contains("petrol") || lower.contains("fuel") || lower.contains("diesel")) {
+        } else if (lower.contains("cab") || lower.contains("uber") || lower.contains("ola") || lower.contains("auto") || lower.contains("taxi") || lower.contains("metro") || lower.contains("bus") || lower.contains("petrol") || lower.contains("fuel") || lower.contains("diesel") || lower.contains("flight") || lower.contains("toll")) {
             category = "Transportation"
-            title = if (lower.contains("cab") || lower.contains("uber") || lower.contains("ola")) "Cab Ride" else if (lower.contains("petrol") || lower.contains("fuel")) "Petrol" else "Transport"
+            title = if (lower.contains("cab") || lower.contains("uber") || lower.contains("ola")) "Cab Ride" else if (lower.contains("petrol") || lower.contains("fuel")) "Petrol" else "Transportation"
         } else if (lower.contains("grocer") || lower.contains("milk") || lower.contains("vegetable") || lower.contains("fruits") || lower.contains("supermarket") || lower.contains("zepto") || lower.contains("blinkit") || lower.contains("instamart")) {
             category = "Groceries"
             title = "Groceries"
-        } else if (lower.contains("hotel") || lower.contains("room") || lower.contains("rent") || lower.contains("resort") || lower.contains("airbnb")) {
+        } else if (lower.contains("hotel") || lower.contains("room") || lower.contains("rent") || lower.contains("resort") || lower.contains("airbnb") || lower.contains("stay")) {
             category = "Accommodation"
-            title = if (lower.contains("rent")) "Rent" else "Hotel / Stay"
-        } else if (lower.contains("movie") || lower.contains("beer") || lower.contains("wine") || lower.contains("party") || lower.contains("drinks")) {
+            title = if (lower.contains("rent")) "Rent" else "Hotel Stay"
+        } else if (lower.contains("movie") || lower.contains("beer") || lower.contains("wine") || lower.contains("party") || lower.contains("drinks") || lower.contains("tickets")) {
             category = "Entertainment"
             title = if (lower.contains("movie")) "Movie Tickets" else "Party / Drinks"
         } else if (lower.contains("shopping") || lower.contains("cloth") || lower.contains("amazon") || lower.contains("flipkart")) {
@@ -435,7 +634,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             title = "Shopping"
         }
 
-        // 3. Split member detection (e.g. "with Rohan and Alex")
+        // 4. Split member detection (e.g. "with Rohan and Alex")
         val withPattern = Pattern.compile("with\\s+([a-zA-Z\\s,]+)", Pattern.CASE_INSENSITIVE)
         val withMatcher = withPattern.matcher(text)
         if (withMatcher.find()) {
@@ -446,7 +645,7 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         }
 
         if (amountPaise <= 0L) {
-            tvAssistantStatus.text = "Could not identify an amount. Tap mic and say e.g. 'Paid 450 for Dinner'"
+            tvAssistantStatus.text = "Could not identify an amount. Tap mic and say e.g. 'Add 500 for Dinner'"
             return
         }
 
@@ -466,14 +665,15 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
         currentParsedPayer = "You"
         currentParsedSplit = split
 
+        val tripName = activeTrip?.name ?: "SplitYourTrip"
         val formattedAmount = formatCurrency(amountPaise)
         tvResultCategory.text = "$title • $category"
         tvResultAmount.text = formattedAmount
-        tvResultSplitDetails.text = "Paid by You • $split"
+        tvResultSplitDetails.text = "Adding to: $tripName • $split"
         layoutResultCard.visibility = View.VISIBLE
 
-        tvAssistantStatus.text = "Identified: $formattedAmount for $title"
-        speakText("Found $formattedAmount for $title. Ready to save.")
+        tvAssistantStatus.text = "Adding $formattedAmount for $title to $tripName"
+        speakText("Found $formattedAmount for $title. Ready to save to $tripName.")
     }
 
     private fun confirmAndSaveExpense() {
@@ -482,37 +682,52 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
             return
         }
 
+        val targetTrip = activeTrip ?: (if (availableTrips.isNotEmpty()) availableTrips[0] else null)
+        val tripId = targetTrip?.id ?: "723e2ad4-6ae4-47b2-9168-9d8fb5bcce6f"
+        val tripName = targetTrip?.name ?: "Split with Kush"
+
         btnSaveExpense.isEnabled = false
         btnSaveExpense.text = "Saving..."
+        tvAssistantStatus.text = "Saving expense to $tripName..."
 
-        // 1. Save to local SharedPreferences queue for seamless offline & sync with main app
-        saveExpenseToLocalQueue()
+        val expenseId = UUID.randomUUID().toString()
+        val isoDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date())
 
-        // 2. Perform background async HTTP insert to Supabase if device is online
-        saveExpenseToSupabaseAsync()
+        // 1. Save to local SharedPreferences queue (guarantees local sync on app open)
+        saveExpenseToLocalQueue(expenseId, tripId, currentParsedAmountPaise, currentParsedTitle, currentParsedCategory)
 
-        // 3. UI feedback
+        // 2. Perform direct background insert to Supabase database (cloud sync)
+        saveExpenseToSupabaseAsync(expenseId, tripId, currentParsedAmountPaise, currentParsedTitle, currentParsedCategory, isoDate)
+
+        // 3. Instant UI feedback
         btnSaveExpense.text = "✓ Saved!"
-        tvAssistantStatus.text = "✓ Expense saved successfully!"
-        speakText("Expense saved to SplitYourTrip.")
+        tvAssistantStatus.text = "✓ Expense added to $tripName!"
+        speakText("Added ${formatCurrency(currentParsedAmountPaise)} for $currentParsedTitle to $tripName.")
 
-        // Auto dismiss drawer back to home screen after 1200ms
+        // Auto dismiss drawer back to home screen after 1400ms
         mainHandler.postDelayed({
             dismissWithAnimation()
-        }, 1200)
+        }, 1400)
     }
 
-    private fun saveExpenseToLocalQueue() {
+    private fun saveExpenseToLocalQueue(
+        expenseId: String,
+        tripId: String,
+        amountPaise: Long,
+        title: String,
+        category: String
+    ) {
         try {
             val prefs = getSharedPreferences("SplitYourTripPendingExpenses", Context.MODE_PRIVATE)
             val currentArrayStr = prefs.getString("pending_voice_expenses", "[]") ?: "[]"
             val jsonArray = JSONArray(currentArrayStr)
 
             val newExpense = JSONObject().apply {
-                put("id", "voice_" + System.currentTimeMillis())
-                put("title", currentParsedTitle)
-                put("amount_paise", currentParsedAmountPaise)
-                put("category", currentParsedCategory)
+                put("id", expenseId)
+                put("trip_id", tripId)
+                put("title", title)
+                put("amount_paise", amountPaise)
+                put("category", category)
                 put("payer", currentParsedPayer)
                 put("split", currentParsedSplit)
                 put("created_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date()))
@@ -521,50 +736,118 @@ class AssistantDrawerActivity : Activity(), RecognitionListener, TextToSpeech.On
 
             jsonArray.put(newExpense)
             prefs.edit().putString("pending_voice_expenses", jsonArray.toString()).apply()
-        } catch (e: Exception) {
-            // Local fallback
-        }
+        } catch (e: Exception) {}
     }
 
-    private fun saveExpenseToSupabaseAsync() {
+    private fun saveExpenseToSupabaseAsync(
+        expenseId: String,
+        tripId: String,
+        amountPaise: Long,
+        title: String,
+        category: String,
+        isoDate: String
+    ) {
         Thread {
             try {
-                // Fetch active trip ID if cached in RKStorage or SharedPreferences
-                val tripPrefs = getSharedPreferences("SplitYourTripWidget", Context.MODE_PRIVATE)
-                val defaultTripId = tripPrefs.getString("active_trip_id", null)
+                val url = URL("$SUPABASE_REST_URL/expenses")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("apikey", SUPABASE_ANON_KEY)
+                conn.setRequestProperty("Authorization", "Bearer $SUPABASE_ANON_KEY")
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Prefer", "return=representation")
+                conn.doOutput = true
+                conn.connectTimeout = 6000
+                conn.readTimeout = 6000
 
-                if (!defaultTripId.isNullOrEmpty()) {
-                    val url = URL("$SUPABASE_REST_URL/expenses")
-                    val conn = url.openConnection() as HttpURLConnection
-                    conn.requestMethod = "POST"
-                    conn.setRequestProperty("apikey", SUPABASE_ANON_KEY)
-                    conn.setRequestProperty("Authorization", "Bearer $SUPABASE_ANON_KEY")
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.setRequestProperty("Prefer", "return=minimal")
-                    conn.doOutput = true
-                    conn.connectTimeout = 5000
-                    conn.readTimeout = 5000
+                val payload = JSONObject().apply {
+                    put("id", expenseId)
+                    put("trip_id", tripId)
+                    put("paid_by", currentUserId)
+                    put("created_by", currentUserId)
+                    put("amount", amountPaise)
+                    put("description", title)
+                    put("category", category)
+                    put("split_type", "equal")
+                    put("currency", "INR")
+                    put("expense_type", "voice_assistant")
+                    put("date", isoDate)
+                    put("created_at", isoDate)
+                }
 
-                    val payload = JSONObject().apply {
-                        put("trip_id", defaultTripId)
-                        put("title", currentParsedTitle)
-                        put("amount", currentParsedAmountPaise)
-                        put("category", currentParsedCategory)
-                        put("created_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date()))
+                OutputStreamWriter(conn.outputStream).use { writer ->
+                    writer.write(payload.toString())
+                    writer.flush()
+                }
+
+                val responseCode = conn.responseCode
+                if (responseCode == 200 || responseCode == 201) {
+                    // Also create equal splits in expense_splits table
+                    insertExpenseSplitsAsync(expenseId, tripId, amountPaise)
+                }
+                conn.disconnect()
+            } catch (e: Exception) {}
+        }.start()
+    }
+
+    private fun insertExpenseSplitsAsync(expenseId: String, tripId: String, totalAmountPaise: Long) {
+        try {
+            // 1. Fetch trip members
+            val membersUrl = URL("$SUPABASE_REST_URL/trip_members?select=id,profile_id&trip_id=eq.$tripId")
+            val conn = membersUrl.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("apikey", SUPABASE_ANON_KEY)
+            conn.setRequestProperty("Authorization", "Bearer $SUPABASE_ANON_KEY")
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+
+            if (conn.responseCode == 200) {
+                val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                val membersStr = reader.readText()
+                reader.close()
+
+                val membersArr = JSONArray(membersStr)
+                if (membersArr.length() > 0) {
+                    val splitShare = totalAmountPaise / membersArr.length()
+                    val splitsPayload = JSONArray()
+
+                    for (i in 0 until membersArr.length()) {
+                        val mObj = membersArr.getJSONObject(i)
+                        val mId = mObj.optString("id")
+                        val pId = mObj.optString("profile_id", currentUserId)
+                        val splitObj = JSONObject().apply {
+                            put("id", UUID.randomUUID().toString())
+                            put("expense_id", expenseId)
+                            put("member_id", mId)
+                            put("profile_id", if (pId.isNullOrEmpty() || pId == "null") currentUserId else pId)
+                            put("amount", splitShare)
+                            put("share_amount", splitShare)
+                            put("share_type", "equal")
+                        }
+                        splitsPayload.put(splitObj)
                     }
 
-                    OutputStreamWriter(conn.outputStream).use { writer ->
-                        writer.write(payload.toString())
+                    val splitsPostUrl = URL("$SUPABASE_REST_URL/expense_splits")
+                    val splitsConn = splitsPostUrl.openConnection() as HttpURLConnection
+                    splitsConn.requestMethod = "POST"
+                    splitsConn.setRequestProperty("apikey", SUPABASE_ANON_KEY)
+                    splitsConn.setRequestProperty("Authorization", "Bearer $SUPABASE_ANON_KEY")
+                    splitsConn.setRequestProperty("Content-Type", "application/json")
+                    splitsConn.setRequestProperty("Prefer", "return=minimal")
+                    splitsConn.doOutput = true
+                    splitsConn.connectTimeout = 4000
+                    splitsConn.readTimeout = 4000
+
+                    OutputStreamWriter(splitsConn.outputStream).use { writer ->
+                        writer.write(splitsPayload.toString())
                         writer.flush()
                     }
-
-                    val responseCode = conn.responseCode
-                    conn.disconnect()
+                    splitsConn.responseCode
+                    splitsConn.disconnect()
                 }
-            } catch (e: Exception) {
-                // Background sync error is handled by local queue on app launch
             }
-        }.start()
+            conn.disconnect()
+        } catch (e: Exception) {}
     }
 
     private fun formatCurrency(paise: Long): String {

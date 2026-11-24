@@ -347,6 +347,30 @@ class SplitOcrModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    @ReactMethod
+    fun syncAssistantData(
+        activeTripId: String?,
+        activeTripName: String?,
+        userId: String?,
+        userToken: String?,
+        tripsJson: String?,
+        promise: Promise
+    ) {
+        try {
+            val prefs = reactContext.getSharedPreferences("SplitYourTripWidget", android.content.Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            if (!activeTripId.isNullOrEmpty()) editor.putString("active_trip_id", activeTripId)
+            if (!activeTripName.isNullOrEmpty()) editor.putString("active_trip_name", activeTripName)
+            if (!userId.isNullOrEmpty()) editor.putString("user_id", userId)
+            if (!userToken.isNullOrEmpty()) editor.putString("user_token", userToken)
+            if (!tripsJson.isNullOrEmpty()) editor.putString("trips_json", tripsJson)
+            editor.apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("SYNC_ERROR", e.message)
+        }
+    }
+
     override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {}
 
     override fun onNewIntent(intent: Intent?) {
