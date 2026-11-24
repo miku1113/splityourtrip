@@ -46,3 +46,10 @@
   - `~/Desktop/apks/splitYourTrip/SplitYourTrip-v<version>.apk`
   - `~/Desktop/apks/splitYourTrip/app-release.apk`
 
+## 9. Automatic Poco Device Deployment over Tailscale
+- Whenever asked to deploy, test, install, or update the app on the user's Poco device (`poco-m4-5g`), execute:
+  `python3 scripts/deploy-poco.py`
+- This automatically connects over Tailscale (`100.75.151.89`), scans open wireless debugging ports, fetches/caches the release APK, directly updates the app (`adb install -r -d`) without data loss, and launches it automatically.
+- Do NOT prompt the user for repetitive connection instructions or just save APK files; perform the complete deployment automatically.
+
+
