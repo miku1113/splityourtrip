@@ -162,6 +162,7 @@ export default function VoiceExpenseModal({
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const webRecognitionRef = useRef<any>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
+  const hasAutoStartedRef = useRef(false);
 
   // Smooth circular pulse ring animations
   const pulseRing1 = useRef(new Animated.Value(1)).current;
@@ -450,6 +451,7 @@ export default function VoiceExpenseModal({
 
   // Clean up on unmount or close
   const handleModalClose = useCallback(() => {
+    hasAutoStartedRef.current = false;
     stopSpeaking();
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
@@ -1778,8 +1780,8 @@ export default function VoiceExpenseModal({
             }
           }
 
-          // Pure silence guard: if user tapped mic but didn't speak for 7 seconds, auto-cancel cleanly
-          if (!hasSpokenRef.current && duration > 7000) {
+          // Pure silence guard: if user opened modal / tapped mic but didn't speak for 10 seconds, auto-cancel cleanly
+          if (!hasSpokenRef.current && duration > 10000) {
             if (!isStoppingListeningRef.current) {
               isStoppingListeningRef.current = true;
               stopAutomaticListening();
@@ -1911,13 +1913,28 @@ export default function VoiceExpenseModal({
     }
   }, [handleProcessUserTurn, selectedLanguage, contextNames]);
 
-  // Stop listening and speaking when modal closes
+  // Automatically initialize mic and start listening when modal opens, stop when closed
   useEffect(() => {
-    if (!visible) {
+    let autoStartTimer: NodeJS.Timeout | null = null;
+    if (visible) {
+      if (!hasAutoStartedRef.current) {
+        hasAutoStartedRef.current = true;
+        // 250ms delay lets the bottom sheet mount and slide up smoothly before engaging audio hardware
+        autoStartTimer = setTimeout(() => {
+          startAutomaticListening();
+        }, 250);
+      }
+    } else {
+      hasAutoStartedRef.current = false;
       stopAutomaticListening();
       stopSpeaking();
     }
-  }, [visible, stopAutomaticListening]);
+    return () => {
+      if (autoStartTimer) {
+        clearTimeout(autoStartTimer);
+      }
+    };
+  }, [visible, startAutomaticListening, stopAutomaticListening]);
 
   return (
     <DraggableBottomSheet
