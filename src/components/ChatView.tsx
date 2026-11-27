@@ -76,6 +76,7 @@ import {
 import { AppStorage } from '../lib/storage';
 import { calculateSettlement } from '../services/settle';
 import { formatCurrencyAmount } from '../services/currency';
+import { matchesContactName, cleanContactName } from '../services/voiceExpenseParser';
 import TripCoverBadge from './TripCoverBadge';
 import ChatFeedSkeleton, { ChatPaginationSkeleton } from './ChatFeedSkeleton';
 import { StandardBottomSheet } from './StandardBottomSheet';
@@ -737,9 +738,15 @@ export default function ChatView({
       if (byPhone) return byPhone;
     }
 
-    // 2. Match by ID only if contact does NOT have a contradicting phone number
+    // 2. Match by ID only if contact does NOT have a contradicting phone number or name
     return contacts.find(c => {
       if (hasPhoneMismatch(c)) return false;
+      const cClean = cleanContactName(c.name);
+      const titleClean = cleanContactName(cleanTitle);
+      if (cClean && titleClean && cClean !== titleClean && !matchesContactName(titleClean, cClean)) {
+        // Name contradicts! (e.g. contact is Khushi, but chat title is Kush)
+        return false;
+      }
       if (friendId && (c.id === friendId || c.profileId === friendId)) return true;
       if (otherProfId && (c.id === otherProfId || c.profileId === otherProfId)) return true;
       if (otherMember?.id && c.id === otherMember.id) return true;
@@ -1063,6 +1070,7 @@ export default function ChatView({
 
     try {
       const cleanFriendName = displayTitle.trim().toLowerCase();
+      const currentFriendClean = cleanContactName(cleanFriendName || displayTitle);
       const cleanFriendPhone = normalizePhone(displayPhone);
 
       const targetProfileId = matchedContact?.profileId || otherMember?.profile_id;
@@ -1104,15 +1112,34 @@ export default function ChatView({
       for (const { trip: t, members: tMembers, expenses: tExpenses } of tripsData) {
         if (tMembers.length === 0) continue;
 
+        // GUARD: If this is another friend-split trip (t.id !== tripId), strictly verify the trip's friend name!
+        if (t.id !== tripId) {
+          if (t.trip_type === 'friend_split' || t.name.toLowerCase().startsWith('split with ')) {
+            const tFriendName = cleanContactName(t.name.replace(/^split with\s+/i, ''));
+            if (tFriendName && currentFriendClean && tFriendName !== currentFriendClean && !matchesContactName(currentFriendClean, tFriendName)) {
+              // Contradicting friend split trip (e.g. "Split with Kush" when in "Khushi" chat)!
+              continue;
+            }
+          }
+        }
+
         const myMember = findMyMember(tMembers, user?.id, currentUserPhone);
 
         // Find if this friend is a member of trip `t`
         const isDirectFriendTrip =
           t.id === tripId ||
           (t.trip_type === 'friend_split' &&
-            ((friendId && (t.friend_id === friendId || t.created_by === friendId)) ||
-              (targetProfileId && (t.friend_id === targetProfileId || t.created_by === targetProfileId)) ||
-              t.name.toLowerCase() === `split with ${cleanFriendName}`));
+            (() => {
+              const tFriend = cleanContactName(t.name.replace(/^split with\s+/i, ''));
+              if (tFriend && currentFriendClean && tFriend !== currentFriendClean && !matchesContactName(currentFriendClean, tFriend)) {
+                return false;
+              }
+              return Boolean(
+                (friendId && (t.friend_id === friendId || t.created_by === friendId)) ||
+                (targetProfileId && (t.friend_id === targetProfileId || t.created_by === targetProfileId)) ||
+                (tFriend && (tFriend === currentFriendClean || matchesContactName(currentFriendClean, tFriend)))
+              );
+            })());
 
         const friendMember = tMembers.find(m => {
           if (m.id === myMember?.id) return false;
@@ -1125,7 +1152,7 @@ export default function ChatView({
             return false;
           }
 
-          // GUARD: If target phone is known and member phone is known, strictly compare phones!
+          // GUARD 1: If target phone is known and member phone is known, strictly compare phones!
           const mPhone = normalizePhone(m.phone_number);
           if (targetPhone && mPhone) {
             const phonesMatch =
@@ -1137,10 +1164,18 @@ export default function ChatView({
             return false;
           }
 
+          // GUARD 2: Name contradiction check!
+          const mClean = cleanContactName(m.display_name);
+          if (mClean && currentFriendClean && mClean !== currentFriendClean && !matchesContactName(currentFriendClean, mClean)) {
+            // Contradicts! Kush cannot be Khushi, Khushi cannot be Kush!
+            return false;
+          }
+
           if (friendId && (m.id === friendId || m.profile_id === friendId)) return true;
           if (targetProfileId && m.profile_id === targetProfileId) return true;
           if (targetPhone && mPhone && mPhone === targetPhone) return true;
           if (cleanFriendPhone && mPhone && mPhone === cleanFriendPhone) return true;
+          if (mClean && currentFriendClean && (mClean === currentFriendClean || matchesContactName(currentFriendClean, mClean))) return true;
           if (cleanFriendName && normalizeNameForMatch(m.display_name) === normalizeNameForMatch(cleanFriendName)) return true;
           if (isDirectFriendTrip && tMembers.length === 2) return true;
           return false;

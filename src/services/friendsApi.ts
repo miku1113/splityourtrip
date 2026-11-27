@@ -5,6 +5,7 @@ import { FriendContact, normalizePhone, normalizeNameForMatch, getContactNameByP
 import { Trip, TripMember, Expense, ExpenseSplit } from '../types/database';
 import { computeBalances, normalizeExpensesForTrip, findMyMember, parseMessagePayload, deletedTripIdsSet } from '../features/trips/useTripStore';
 import { getBilateralBlockedSet, parseTripBlockMeta } from './blockService';
+import { matchesContactName, cleanContactName } from './voiceExpenseParser';
 
 export interface FriendsApiResult {
   totalOwedToYouPaise: number;
@@ -553,11 +554,19 @@ interface FriendMapEntry {
       totalOwedToYouPaise += f.owedToYouPaise;
       totalYouOwePaise += f.youOwePaise;
 
-      // Select defaultTripId: ONLY assign if a 1-on-1 friend split trip exists!
+      // Select defaultTripId: ONLY assign if a 1-on-1 friend split trip exists and matches this friend!
       const tripsArray = Array.from(f.trips);
       const oneOnOneTrip = tripsArray.find(tId => {
         const meta = allTripsMap.get(tId);
-        return meta && (meta.trip_type === 'friend_split' || meta.name?.toLowerCase().startsWith('split with '));
+        if (!meta) return false;
+        const isOneOnOne = meta.trip_type === 'friend_split' || meta.name?.toLowerCase().startsWith('split with ');
+        if (!isOneOnOne) return false;
+        const tFriendName = cleanContactName(meta.name.replace(/^split with\s+/i, ''));
+        const fClean = cleanContactName(finalResolvedName || f.name);
+        if (tFriendName && fClean && tFriendName !== fClean && !matchesContactName(fClean, tFriendName)) {
+          return false;
+        }
+        return true;
       });
       const defaultTripId = oneOnOneTrip || undefined;
 

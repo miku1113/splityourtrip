@@ -128,8 +128,9 @@ def main():
     devices_proc = subprocess.run([adb, "devices"], capture_output=True, text=True)
     connected_target = None
     for line in devices_proc.stdout.splitlines():
-        if ip in line and "device" in line and not "offline" in line:
-            connected_target = line.split()[0]
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "device" and (ip in line or line.startswith("adb-")):
+            connected_target = parts[0]
             print(f"[+] Already connected to {connected_target}")
             break
 

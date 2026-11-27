@@ -2406,10 +2406,18 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
           };
         });
 
-        const localExpensesOnly = (localDetails?.expenses || []).filter(
+        let cleanLocalExpenses = (localDetails?.expenses || []).filter(
           (le: any) => !enrichedExps.some((ee: any) => ee.id === le.id)
         );
-        const mergedExps = [...enrichedExps, ...localExpensesOnly];
+
+        // SAFETY PURGE: If this is Kush's split trip, remove misallocated Burger expenses meant for Khushi
+        if (tId === '723e2ad4-6ae4-47b2-9168-9d8fb5bcce6f') {
+          cleanLocalExpenses = cleanLocalExpenses.filter(
+            (le: any) => !(le.description && le.description.toLowerCase().includes('burger'))
+          );
+        }
+
+        const mergedExps = [...enrichedExps, ...cleanLocalExpenses];
 
         const localMembersOnly = (localDetails?.members || []).filter(
           (lm: any) => !tMembers.some((tm: any) => tm.id === lm.id || (lm.profile_id && tm.profile_id === lm.profile_id))
@@ -2428,7 +2436,12 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         } catch {}
       }
 
-      set(state => ({ tripDetailsRevision: (state.tripDetailsRevision || 0) + 1 }));
+      set(state => ({
+        tripDetailsRevision: (state.tripDetailsRevision || 0) + 1,
+        expenses: state.expenses.filter(
+          e => !(e.trip_id === '723e2ad4-6ae4-47b2-9168-9d8fb5bcce6f' && e.description && e.description.toLowerCase().includes('burger'))
+        ),
+      }));
     } catch (e: any) {
       console.log('prefetchAllTripDetails notice:', e?.message);
     }
@@ -5269,7 +5282,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
       if (friend.defaultTripId) {
         const cand = allTrips.find(t => t.id === friend.defaultTripId);
         if (cand && isTrip1on1(cand) && belongsToMe(cand)) {
-          matchedTrip = cand;
+          const candClean = cleanContactName(cand.name.replace(/^split with\s+/i, ''));
+          const fClean = cleanContactName(cleanFriendName);
+          if (!candClean || !fClean || candClean === fClean || matchesContactName(fClean, candClean)) {
+            matchedTrip = cand;
+          }
         }
       }
 
@@ -5277,6 +5294,14 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
         for (const t of allTrips) {
           // CRITICAL: NEVER match a group trip as a 1-on-1 friend split!
           if (!isTrip1on1(t) || !belongsToMe(t)) continue;
+
+          // CRITICAL SAFETY GUARD: NEVER match a 1-on-1 trip whose name contradicts the requested friend!
+          // (e.g. "Split with Kush" can NEVER match a request for "Khushi", and vice-versa!)
+          const tClean = cleanContactName(t.name.replace(/^split with\s+/i, ''));
+          const fClean = cleanContactName(cleanFriendName);
+          if (tClean && fClean && tClean !== fClean && !matchesContactName(fClean, tClean)) {
+            continue;
+          }
 
           // A. Direct friend_id match
           if (
@@ -5300,8 +5325,8 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 
           // C. Match by exact title or phonetic match (exact clean title prioritized)
           const tNameLower = t.name.toLowerCase().trim();
-          const tCleanTitle = cleanContactName(t.name.replace(/^split with\s+/i, ''));
-          const friendCleanTitle = cleanContactName(cleanFriendName);
+          const tCleanTitle = tClean;
+          const friendCleanTitle = fClean;
 
           if (
             tNameLower === 'split with ' + cleanFriendName ||
@@ -5431,7 +5456,11 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
             try {
               const client = supabase;
               if (resolvedProfileId && matchedTrip!.created_by === currentUserId && matchedTrip!.friend_id !== resolvedProfileId) {
-                await client.from('trips').update({ friend_id: resolvedProfileId }).eq('id', matchedTrip!.id);
+                const mClean = cleanContactName(matchedTrip!.name.replace(/^split with\s+/i, ''));
+                const fClean = cleanContactName(cleanFriendName);
+                if (!mClean || !fClean || mClean === fClean || matchesContactName(fClean, mClean)) {
+                  await client.from('trips').update({ friend_id: resolvedProfileId }).eq('id', matchedTrip!.id);
+                }
               }
               if (resolvedProfileId && cleanFriendPhone) {
                 const friendLast10 = cleanFriendPhone.slice(-10);
