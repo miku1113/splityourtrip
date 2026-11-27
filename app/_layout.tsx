@@ -2,18 +2,20 @@ import { useFonts } from 'expo-font';
 import { Stack, useRouter } from 'expo-router';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import 'react-native-reanimated';
 import { useAuthStore } from '../src/features/auth/useAuthStore';
 import { useTripStore } from '../src/features/trips/useTripStore';
 import { useTheme, useThemeStore } from '../src/theme/useThemeStore';
 import { useContactsStore } from '../src/features/contacts/useContactsStore';
+import CircularThemeTransition from '../src/components/CircularThemeTransition';
 import { subscribeToSharedData } from '../src/services/receiptOcr';
-import { Platform, StatusBar, View, Text, TextInput, LogBox } from 'react-native';
+import { Animated, Easing, Platform, StatusBar, StyleSheet, View, Text, TextInput, LogBox, useWindowDimensions } from 'react-native';
 import * as Linking from 'expo-linking';
 import UpiConfirmModal from '../src/components/UpiConfirmModal';
 import { useUpiPaymentStore } from '../src/features/settlements/useUpiPaymentStore';
 import { registerForPushNotificationsAsync, getNotificationsModule } from '../src/services/pushNotificationService';
+import { darkColors, lightColors } from '../src/theme/colors';
 
 // Suppress known development network and crypto notices
 LogBox.ignoreLogs([
@@ -122,6 +124,14 @@ export default function RootLayout() {
           router.push(`/trip/${tripId}`);
           return;
         }
+      }
+
+      // Theme toggle deep link (e.g. splityourtrip://theme/light or splityourtrip://theme/dark)
+      if (url.includes('/theme/') || url.includes('theme=')) {
+        const targetMode = url.includes('light') ? 'light' : 'dark';
+        useThemeStore.getState().setThemeMode(targetMode);
+        router.replace('/(tabs)');
+        return;
       }
 
       // 3. OAuth callback deep links
@@ -296,6 +306,7 @@ export default function RootLayout() {
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
         </Stack>
         <UpiConfirmModal />
+        <CircularThemeTransition />
       </ThemeProvider>
     </View>
   );

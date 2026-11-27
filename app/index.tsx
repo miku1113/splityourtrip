@@ -560,9 +560,10 @@ export default function SplashScreen() {
     return () => clearTimeout(failsafeTimer);
   }, [showThemePrompt, hasChosenTheme, user]);
 
-  const handleSelectMode = (mode: ThemeMode) => {
+  const handleSelectMode = (mode: ThemeMode, e?: any) => {
     if (selectedMode === mode) return;
     setSelectedMode(mode);
+    const origin = e?.nativeEvent ? { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY } : undefined;
 
     Animated.parallel([
       Animated.timing(themeAnim, {
@@ -585,8 +586,8 @@ export default function SplashScreen() {
       }),
     ]).start();
 
-    // Sync theme store smoothly
-    setThemeMode(mode);
+    // Sync theme store smoothly with circular animation origin
+    setThemeMode(mode, origin);
   };
 
   const handleConfirmTheme = async (chosenMode?: ThemeMode) => {
@@ -826,7 +827,7 @@ export default function SplashScreen() {
                     { borderColor: '#E8ECF2', shadowColor: '#E8ECF2' },
                   ],
                 ]}
-                onPress={() => handleSelectMode('dark')}
+                onPress={(e) => handleSelectMode('dark', e)}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>🌙</Text>
@@ -856,7 +857,7 @@ export default function SplashScreen() {
                     { borderColor: '#2B2F36', shadowColor: '#2B2F36' },
                   ],
                 ]}
-                onPress={() => handleSelectMode('light')}
+                onPress={(e) => handleSelectMode('light', e)}
                 activeOpacity={0.85}
               >
                 <Text style={styles.themeEmoji}>☀️</Text>

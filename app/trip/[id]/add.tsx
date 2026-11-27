@@ -1583,6 +1583,29 @@ export default function AddExpenseScreen() {
             );
           })}
         </View>
+
+        {/* Quick Save Splits Button */}
+        <TouchableOpacity
+          style={[
+            styles.saveSplitsDirectBtn,
+            { backgroundColor: colors.primary },
+            saving && styles.btnDisabled,
+          ]}
+          onPress={handleSaveExpense}
+          disabled={saving}
+          activeOpacity={0.8}
+        >
+          {saving ? (
+            <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
+          ) : (
+            <View style={styles.saveSplitsBtnContent}>
+              <Ionicons name="checkmark-done" size={16} color={colors.textOnSilver || '#B5504F'} />
+              <Text style={[styles.saveSplitsDirectBtnText, { color: colors.textOnSilver || '#B5504F' }]}>
+                {expenseId ? 'Save & Update Splits' : 'Save Splits'}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* Budget Warning Banner */}
@@ -1892,6 +1915,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: theme.spacing.md,
     marginBottom: theme.spacing.xl,
+  },
+  saveSplitsDirectBtn: {
+    marginTop: 10,
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveSplitsBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  saveSplitsDirectBtnText: {
+    fontWeight: '800',
+    fontSize: 14,
   },
   btnDisabled: {
     opacity: 0.6,

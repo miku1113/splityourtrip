@@ -26,7 +26,7 @@ import { DraggableBottomSheet } from '../../src/components/DraggableBottomSheet'
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, profile, updateProfile, fetchProfile, signOut } = useAuthStore();
-  const { colors } = useTheme();
+  const { colors, isDark, setThemeMode } = useTheme();
 
   const [name, setName] = useState(profile?.full_name || profile?.name || 'Traveler');
   const [upiId, setUpiId] = useState(profile?.upi_id || '');
@@ -385,6 +385,70 @@ export default function ProfileScreen() {
         <Text style={[styles.fieldHelp, { color: colors.textMuted }]}>
           Saved with country code {selectedCurrency.dialCode} ({selectedCurrency.country}) for auto-linking splits.
         </Text>
+
+        {/* Appearance / Theme Toggle */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+          <Text style={[styles.label, { color: colors.textSecondary, marginBottom: 0 }]}>
+            App Appearance
+          </Text>
+          <View style={[styles.currentThemePill, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(245, 158, 11, 0.15)' }]}>
+            <Text style={[styles.currentThemeText, { color: isDark ? '#818CF8' : '#D97706' }]}>
+              {isDark ? '🌙 Dark Active' : '☀️ Light Active'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[styles.themeToggleRow, { marginBottom: 16 }]}>
+          <TouchableOpacity
+            style={[
+              styles.themeCardBtn,
+              {
+                backgroundColor: isDark ? '#1E232E' : '#FFFFFF',
+                borderColor: isDark ? colors.primary : colors.border,
+              },
+              isDark && styles.themeCardActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={(e) => {
+              const { pageX, pageY } = e.nativeEvent;
+              setThemeMode('dark', { x: pageX, y: pageY });
+            }}
+          >
+            <View style={styles.themeOptionHeader}>
+              <Text style={styles.themeEmoji}>🌙</Text>
+              {isDark && (
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+              )}
+            </View>
+            <Text style={[styles.themeOptionName, { color: colors.text }]}>Dark Theme</Text>
+            <Text style={[styles.themeOptionSub, { color: colors.textMuted }]}>Deep Charcoal</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.themeCardBtn,
+              {
+                backgroundColor: !isDark ? '#FFFFFF' : '#1E232E',
+                borderColor: !isDark ? colors.primary : colors.border,
+              },
+              !isDark && styles.themeCardActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={(e) => {
+              const { pageX, pageY } = e.nativeEvent;
+              setThemeMode('light', { x: pageX, y: pageY });
+            }}
+          >
+            <View style={styles.themeOptionHeader}>
+              <Text style={styles.themeEmoji}>☀️</Text>
+              {!isDark && (
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+              )}
+            </View>
+            <Text style={[styles.themeOptionName, { color: colors.text }]}>Light Theme</Text>
+            <Text style={[styles.themeOptionSub, { color: colors.textMuted }]}>Clean Slate</Text>
+          </TouchableOpacity>
+        </View>
 
         <Text style={[styles.label, { color: colors.textSecondary }]}>
           Preferred Currency & Country

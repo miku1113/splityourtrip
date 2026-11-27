@@ -222,18 +222,25 @@ export default function SettingsScreen() {
         ]}
       >
         {/* Dark / Light Theme Toggle */}
-        <View style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}>
+        <TouchableOpacity
+          style={[styles.settingRow, { borderBottomColor: colors.borderLight }]}
+          activeOpacity={0.7}
+          onPress={(e) => {
+            const { pageX, pageY } = e.nativeEvent;
+            toggleTheme({ x: pageX, y: pageY });
+          }}
+        >
           <View style={styles.settingLabelRow}>
             <View
               style={[
                 styles.iconBox,
-                { backgroundColor: colors.primaryLight },
+                { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(245, 158, 11, 0.15)' },
               ]}
             >
               <Ionicons
                 name={isDark ? 'moon' : 'sunny'}
                 size={18}
-                color={colors.primary}
+                color={isDark ? '#818CF8' : '#F59E0B'}
               />
             </View>
             <View>
@@ -245,11 +252,13 @@ export default function SettingsScreen() {
           </View>
           <Switch
             value={isDark}
-            onValueChange={toggleTheme}
+            onValueChange={() => {
+              toggleTheme();
+            }}
             trackColor={{ false: '#D1D5DB', true: colors.primary }}
             thumbColor="#FFFFFF"
           />
-        </View>
+        </TouchableOpacity>
 
         {/* Global Currency Preference */}
         <TouchableOpacity

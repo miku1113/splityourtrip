@@ -407,6 +407,38 @@ export function parseSpokenAmount(text: string): { amountRupees: string; amountP
 }
 
 /**
+ * Cleans an extracted expense description candidate by removing trailing
+ * connectors, split clauses, prepositions, and trip references.
+ */
+function cleanExtractedDescription(raw: string, tripName?: string): string {
+  if (!raw) return '';
+  let candidate = raw.trim();
+
+  // Strip trailing conjunctions, split phrases, prepositions, or payment indicators
+  candidate = candidate.replace(
+    /\s+(?:and\s+)?(?:split|splited|splitting|divide|divided|dividing|share|shared|sharing|baant|baanto|baato|vaho|vacho|between|among|except|excluding|equally|with|in|at|on|using|by|paid\s+by|ke\s*saath|ke\s*sath|sathe|from|via).*$/i,
+    ''
+  ).trim();
+
+  // Strip trailing dangling prepositions/conjunctions
+  candidate = candidate.replace(/\s+(?:and|or|for|of|to|in|at|on|with|by|via)$/i, '').trim();
+
+  // Strip trip name if it was attached
+  if (tripName && tripName.trim()) {
+    const escapedTrip = tripName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    candidate = candidate.replace(new RegExp(`\\b(?:in\\s+|at\\s+)?${escapedTrip}(?:\\s+trip|\\s+tour)?\\b`, 'i'), '').trim();
+  }
+
+  // Reject generic words like 'expense', 'bill', 'kharch', 'kharcha', 'hisab', 'payment'
+  if (/^(?:an?\s+)?(?:expense|bill|kharch|kharcha|hisab|payment|cost)$/i.test(candidate)) {
+    return '';
+  }
+
+  if (candidate.length < 2) return '';
+  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+}
+
+/**
  * Parses spoken voice text in English, Hindi, Gujarati, or Hinglish
  * and extracts expense details matching active trips and members.
  */
@@ -510,18 +542,17 @@ export function parseVoiceExpense(
   }
 
   // 4. MATCH SPLIT PARTICIPANTS
-  const isSplitAll =
+  const explicitSplitAll =
     cleanLower.includes('all the members') ||
     cleanLower.includes('all members') ||
     cleanLower.includes('everyone') ||
     cleanLower.includes('split with all') ||
     cleanLower.includes('split all') ||
-    cleanLower.includes('equally') ||
     cleanLower.includes('among all') ||
     cleanLower.includes('sab members') ||
     cleanLower.includes('sabhi members') ||
     cleanLower.includes('sab log') ||
-    cleanLower.includes('sabme baant do') ||
+    cleanLower.includes('sabme baant') ||
     cleanLower.includes('sab me') ||
     cleanLower.includes('badha member') ||
     cleanLower.includes('badha ma') ||
@@ -532,68 +563,114 @@ export function parseVoiceExpense(
     clean.includes('બધા માં') ||
     clean.includes('બધા વચ્ચે');
 
-  let splitAll = isSplitAll;
+  // Check if user specified an exception clause (e.g. "split with all except Rahul", "everyone except Amit")
+  const exceptMatch = cleanLower.match(/\b(?:except|excluding|chhodine|chodke|ko\s+chodkar|without)\s+([a-z0-9\s,and&]+)/i);
+  const excludedText = exceptMatch && exceptMatch[1] ? exceptMatch[1].toLowerCase() : '';
+
+  // Check if specific member names or target partners are mentioned in split context
+  const hasSpecificSplitPhrase = /\b(?:split\s*(?:equally\s*)?(?:with|between|among)|between\s+[a-z0-9\s,and]+|among\s+[a-z0-9\s,and]+|with\s+[a-z0-9\s,and]+|ke\s*saath|ke\s*sath|sathe)\b/i.test(cleanLower);
+
+  const matchedSpecificMembers: TripMember[] = [];
+  const excludedMemberIds = new Set<string>();
+
+  for (const m of tripMembers) {
+    const mNormalized = cleanText(m.display_name).toLowerCase().replace(/\s*\(you\)\s*/, '');
+    const firstName = mNormalized.split(' ')[0];
+
+    // Check if this member is explicitly excluded (e.g. "except Rahul")
+    if (excludedText && (
+      (firstName.length >= 2 && excludedText.includes(firstName)) ||
+      excludedText.split(/\s+/).some(w => w.length >= 2 && matchesContactName(w, mNormalized))
+    )) {
+      excludedMemberIds.add(m.id);
+      continue;
+    }
+
+    // Check if this member is mentioned in the prompt
+    const matchesMember =
+      (firstName.length >= 2 && cleanLower.includes(firstName)) ||
+      cleanLower.split(/\s+/).some(word => word.length >= 2 && matchesContactName(word, mNormalized));
+
+    if (matchesMember) {
+      matchedSpecificMembers.push(m);
+    }
+  }
+
   const selectedParticipantIds: string[] = [];
   const matchedParticipantNames: string[] = [];
+  let splitAll = false;
 
-  if (isSplitAll || tripMembers.length === 0) {
+  if (explicitSplitAll && excludedMemberIds.size === 0) {
+    // Explicit split all with no exceptions
+    splitAll = true;
+    tripMembers.forEach(m => {
+      selectedParticipantIds.push(m.id);
+      matchedParticipantNames.push(m.display_name);
+    });
+  } else if (explicitSplitAll && excludedMemberIds.size > 0) {
+    // Split all except named members
+    splitAll = false;
+    tripMembers.forEach(m => {
+      if (!excludedMemberIds.has(m.id)) {
+        selectedParticipantIds.push(m.id);
+        matchedParticipantNames.push(m.display_name);
+      }
+    });
+  } else if (matchedSpecificMembers.length > 0) {
+    // Specific members mentioned (e.g. "split with Rahul and Amit", "between me and Rohan")
+    splitAll = false;
+    matchedSpecificMembers.forEach(m => {
+      if (!selectedParticipantIds.includes(m.id)) {
+        selectedParticipantIds.push(m.id);
+        matchedParticipantNames.push(m.display_name);
+      }
+    });
+
+    // Check if current user (Speaker) should be included:
+    // Included unless user explicitly specified "without me" or "only [others]"
+    const withoutMe = /\b(without\s+me|only\s+[a-z0-9\s,and]+|bina\s+mere|mere\s+bina|bina\s+mujhe)\b/i.test(cleanLower);
+    if (!withoutMe && currentMember && !selectedParticipantIds.includes(currentMember.id)) {
+      selectedParticipantIds.unshift(currentMember.id);
+      matchedParticipantNames.unshift(currentMember.display_name || 'You');
+    }
+  } else if (cleanLower.includes('equally') && !hasSpecificSplitPhrase) {
+    // Standalone "equally" without specific names defaults to all
     splitAll = true;
     tripMembers.forEach(m => {
       selectedParticipantIds.push(m.id);
       matchedParticipantNames.push(m.display_name);
     });
   } else {
-    // Check specific member names (with phonetic tolerance, e.g. Kushi -> Khushi)
-    for (const m of tripMembers) {
-      const mNormalized = cleanText(m.display_name).toLowerCase().replace(/\s*\(you\)\s*/, '');
-      const firstName = mNormalized.split(' ')[0];
-      const matchesMember =
-        (firstName.length >= 2 && cleanLower.includes(firstName)) ||
-        cleanLower.split(/\s+/).some(word => word.length >= 2 && matchesContactName(word, mNormalized));
-      if (matchesMember) {
-        if (!selectedParticipantIds.includes(m.id)) {
-          selectedParticipantIds.push(m.id);
-          matchedParticipantNames.push(m.display_name);
-        }
-      }
-    }
-
-    if (currentMember && !selectedParticipantIds.includes(currentMember.id)) {
-      selectedParticipantIds.unshift(currentMember.id);
-      matchedParticipantNames.unshift(currentMember.display_name);
-    }
-
-    if (selectedParticipantIds.length <= 1) {
-      splitAll = true;
-      selectedParticipantIds.length = 0;
-      matchedParticipantNames.length = 0;
-      tripMembers.forEach(m => {
-        selectedParticipantIds.push(m.id);
-        matchedParticipantNames.push(m.display_name);
-      });
-    }
+    // Default fallback: split among all members of the trip
+    splitAll = true;
+    tripMembers.forEach(m => {
+      selectedParticipantIds.push(m.id);
+      matchedParticipantNames.push(m.display_name);
+    });
   }
 
   // 5. MATCH CATEGORY & DESCRIPTION
   let category = 'General';
   let description = '';
 
+  const FOR_DELIMITERS = /(?:\s+(?:and\s+)?(?:split|splited|splitting|divide|divided|dividing|share|shared|sharing|baant|baanto|baato|vaho|vacho|between|among|except|excluding|equally|with|in|at|on|using|by|paid\s+by|ke\s*saath|ke\s*sath|sathe|from|via)|\s*$)/i;
+
   // Extract explicit item description phrases:
-  // e.g. "for a t-shirt with Kushi", "for coffee in Goa", "of 990 for lunch"
-  const forMatch = clean.match(/\b(?:for|ke\s*liye|maate|mate)\s+(?:an?\s+|the\s+)?([a-z0-9\s'-]+?)(?:\s+(?:with|in|at|on|using|by|ke\s*saath|ke\s*sath|sathe|from|via)|\s*$)/i);
+  // e.g. "for a t-shirt with Kushi", "for coffee in Goa", "of 990 for lunch", "for dinner and split with Rahul"
+  const forMatch = clean.match(new RegExp(`\\b(?:for|ke\\s*liye|maate|mate)\\s+(?:an?\\s+|the\\s+)?([a-z0-9\\s'-]+?)${FOR_DELIMITERS.source}`, 'i'));
   if (forMatch && forMatch[1]) {
-    const candidate = forMatch[1].trim();
-    if (!/^(?:expense|bill|kharch|kharcha|hisab|payment)$/i.test(candidate) && candidate.length >= 2) {
-      description = candidate.charAt(0).toUpperCase() + candidate.slice(1);
+    const candidate = cleanExtractedDescription(forMatch[1], matchedTrip?.name);
+    if (candidate) {
+      description = candidate;
     }
   }
 
   if (!description) {
-    const ofForMatch = clean.match(/(?:of|worth)\s+(?:₹|rs\.?|inr)?\s*\d+\s+for\s+(?:an?\s+|the\s+)?([a-z0-9\s'-]+?)(?:\s+(?:with|in|at|on|by)|\s*$)/i);
+    const ofForMatch = clean.match(new RegExp(`(?:of|worth)\\s+(?:₹|rs\\.?|inr)?\\s*\\d+\\s+for\\s+(?:an?\\s+|the\\s+)?([a-z0-9\\s'-]+?)${FOR_DELIMITERS.source}`, 'i'));
     if (ofForMatch && ofForMatch[1]) {
-      const candidate = ofForMatch[1].trim();
-      if (!/^(?:expense|bill|kharch|kharcha|hisab)$/i.test(candidate) && candidate.length >= 2) {
-        description = candidate.charAt(0).toUpperCase() + candidate.slice(1);
+      const candidate = cleanExtractedDescription(ofForMatch[1], matchedTrip?.name);
+      if (candidate) {
+        description = candidate;
       }
     }
   }
@@ -616,7 +693,7 @@ export function parseVoiceExpense(
         category = catName;
         matchedSpecificCategory = true;
         if (!description) {
-          description = kw.charAt(0).toUpperCase() + kw.slice(1);
+          description = cleanExtractedDescription(kw, matchedTrip?.name);
         }
         break;
       }
@@ -639,6 +716,8 @@ export function parseVoiceExpense(
     } else {
       description = 'Voice Expense';
     }
+  } else {
+    description = cleanExtractedDescription(description, matchedTrip?.name) || description;
   }
 
   let confidence = 50;

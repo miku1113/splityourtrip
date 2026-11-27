@@ -160,8 +160,16 @@ def main():
     )
     print(install_res.stdout.strip())
     if "Success" not in install_res.stdout:
-        print(f"[-] Installation failed: {install_res.stderr.strip()}")
-        sys.exit(3)
+        print("[-] Streamed install failed, trying fallback: adb push + pm install...")
+        remote_tmp = "/data/local/tmp/app-deploy.apk"
+        push_res = subprocess.run([adb, "-s", connected_target, "push", apk_path, remote_tmp], capture_output=True, text=True)
+        print(push_res.stdout.strip())
+        pm_res = subprocess.run([adb, "-s", connected_target, "shell", "pm", "install", "-r", "-d", remote_tmp], capture_output=True, text=True)
+        print(pm_res.stdout.strip())
+        subprocess.run([adb, "-s", connected_target, "shell", "rm", "-f", remote_tmp], capture_output=True, text=True)
+        if "Success" not in pm_res.stdout:
+            print(f"[-] Installation failed: {pm_res.stdout.strip()} {pm_res.stderr.strip()}")
+            sys.exit(3)
 
     print("[+] App updated successfully on Poco device!")
 

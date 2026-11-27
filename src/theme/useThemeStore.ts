@@ -5,11 +5,20 @@ import { darkColors, lightColors, theme } from './colors';
 
 export type ThemeMode = 'dark' | 'light';
 
+export interface ThemeTransitionOrigin {
+  x: number;
+  y: number;
+}
+
 interface ThemeState {
   themeMode: ThemeMode;
   hasChosenTheme: boolean;
   isHydrated: boolean;
-  setThemeMode: (mode: ThemeMode) => Promise<void>;
+  transitionMode: ThemeMode | null;
+  transitionOrigin: ThemeTransitionOrigin | null;
+  setThemeMode: (mode: ThemeMode, origin?: ThemeTransitionOrigin) => Promise<void>;
+  requestThemeTransition: (mode: ThemeMode, origin?: ThemeTransitionOrigin) => void;
+  finishThemeTransition: () => Promise<void>;
   completeThemeOnboarding: (mode?: ThemeMode) => Promise<void>;
   initTheme: () => Promise<void>;
 }
@@ -21,6 +30,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   themeMode: 'dark', // Default to Dark Theme as requested
   hasChosenTheme: false,
   isHydrated: false,
+  transitionMode: null,
+  transitionOrigin: null,
 
   initTheme: async () => {
     try {
@@ -46,8 +57,12 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     }
   },
 
-  setThemeMode: async (mode: ThemeMode) => {
+  setThemeMode: async (mode: ThemeMode, origin?: ThemeTransitionOrigin) => {
     const finalMode: ThemeMode = mode === 'light' ? 'light' : 'dark';
+    if (get().themeMode !== finalMode) {
+      get().requestThemeTransition(finalMode, origin);
+      return;
+    }
     set({ themeMode: finalMode, hasChosenTheme: true });
     try {
       await Promise.all([
@@ -59,6 +74,25 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     } catch (e) {
       // Ignored
     }
+  },
+
+  requestThemeTransition: (mode: ThemeMode, origin?: ThemeTransitionOrigin) => {
+    const state = get();
+    if (state.transitionMode || state.themeMode === mode) return;
+    set({ transitionMode: mode, transitionOrigin: origin || null });
+  },
+
+  finishThemeTransition: async () => {
+    const mode = get().transitionMode || get().themeMode;
+    set({ themeMode: mode, transitionMode: null, transitionOrigin: null, hasChosenTheme: true });
+    try {
+      await Promise.all([
+        AppStorage.setItem(THEME_STORAGE_KEY, mode),
+        AppStorage.setItem(THEME_ONBOARDED_KEY, 'true'),
+        AsyncStorage.setItem(THEME_STORAGE_KEY, mode).catch(() => {}),
+        AsyncStorage.setItem(THEME_ONBOARDED_KEY, 'true').catch(() => {}),
+      ]);
+    } catch {}
   },
 
   completeThemeOnboarding: async (mode?: ThemeMode) => {
@@ -89,14 +123,15 @@ export function useTheme() {
     hasChosenTheme,
     isHydrated,
     setThemeMode,
+    requestThemeTransition,
     completeThemeOnboarding,
   } = useThemeStore();
 
   const isDark = themeMode === 'dark';
   const colors = isDark ? darkColors : lightColors;
 
-  const toggleTheme = () => {
-    setThemeMode(isDark ? 'light' : 'dark');
+  const toggleTheme = (origin?: ThemeTransitionOrigin) => {
+    requestThemeTransition(isDark ? 'light' : 'dark', origin);
   };
 
   return {

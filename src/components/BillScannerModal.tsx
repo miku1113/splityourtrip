@@ -17,13 +17,23 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { extractPaymentFromScreenshot } from '../services/receiptOcr';
+import * as FileSystem from 'expo-file-system';
+import { extractPaymentFromScreenshot, recognizeTextFromImage } from '../services/receiptOcr';
 import { useTheme } from '../theme/useThemeStore';
 import { moderateScale, scaleFont } from '../theme/responsive';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SCAN_FRAME_WIDTH = Math.min(SCREEN_WIDTH * 0.82, 330);
 const SCAN_FRAME_HEIGHT = Math.min(SCREEN_WIDTH * 1.05, 420);
+
+function looksLikeReceiptText(text: string): boolean {
+  if (!text || text.trim().length < 18) return false;
+  const normalized = text.toLowerCase();
+  const hasAmount = /(?:₹|rs\.?|inr|\$|€|£)\s*\d[\d,]*(?:\.\d{1,2})?|\b\d{1,5}[.,]\d{2}\b/.test(normalized);
+  const hasReceiptLabel = /\b(total|grand total|amount paid|paid|invoice|receipt|tax|subtotal|bill no|transaction successful|payment successful|payment to)\b/.test(normalized);
+  const meaningfulLines = normalized.split(/\n+/).filter(line => line.trim().length >= 3).length;
+  return hasAmount && hasReceiptLabel && meaningfulLines >= 2;
+}
 
 export interface ScannedBillResult {
   amount: string;
@@ -67,6 +77,9 @@ export default function BillScannerModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('Analyzing receipt...');
   const [qrProcessed, setQrProcessed] = useState(false);
+  const liveScanEnabled = useRef(false);
+  const probeInFlight = useRef(false);
+  const liveScanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Animated laser line inside the scanner frame
   const laserAnim = useRef(new Animated.Value(0)).current;
@@ -74,6 +87,9 @@ export default function BillScannerModal({
   useEffect(() => {
     if (visible) {
       setQrProcessed(false);
+      liveScanEnabled.current = true;
+      probeInFlight.current = false;
+      if (liveScanTimer.current) clearTimeout(liveScanTimer.current);
       // Auto-request camera permission if not granted
       if (!permission?.granted) {
         requestPermission().catch(() => {});
@@ -99,8 +115,60 @@ export default function BillScannerModal({
     } else {
       setIsTorchOn(false);
       setIsProcessing(false);
+      liveScanEnabled.current = false;
+      probeInFlight.current = false;
+      if (liveScanTimer.current) clearTimeout(liveScanTimer.current);
+      liveScanTimer.current = null;
     }
   }, [visible, permission?.granted]);
+
+  const scheduleLiveProbe = (delay = 1200) => {
+    if (!visible || !liveScanEnabled.current || liveScanTimer.current) return;
+    liveScanTimer.current = setTimeout(() => {
+      liveScanTimer.current = null;
+      void inspectPreviewFrame();
+    }, delay);
+  };
+
+  // Read low-resolution preview samples first; only take the full scan photo after
+  // receipt-like text is found. The regular shutter remains available at any time.
+  const inspectPreviewFrame = async () => {
+    if (!visible || !liveScanEnabled.current || probeInFlight.current || isProcessing) return;
+    const camera = cameraRef.current;
+    if (!camera) return scheduleLiveProbe();
+    probeInFlight.current = true;
+    let probeUri: string | undefined;
+    try {
+      const probe = await camera.takePictureAsync({ quality: 0.18, skipProcessing: true });
+      probeUri = probe?.uri;
+      if (probeUri) {
+        const text = await recognizeTextFromImage(probeUri);
+        if (looksLikeReceiptText(text)) {
+          liveScanEnabled.current = false;
+          setProcessingStatus('Receipt found — capturing and reading details...');
+          liveScanTimer.current = setTimeout(() => {
+            liveScanTimer.current = null;
+            if (visible) void handleCapturePhoto();
+          }, 350);
+          return;
+        }
+      }
+    } catch (error) {
+      console.log('[BillScanner] Live receipt detection probe failed:', error);
+    } finally {
+      if (probeUri) {
+        try { await FileSystem.deleteAsync(probeUri, { idempotent: true }); } catch {}
+      }
+      probeInFlight.current = false;
+    }
+    scheduleLiveProbe(1800);
+  };
+
+  const handleCameraReady = () => {
+    if (!visible || !liveScanEnabled.current) return;
+    setProcessingStatus('Looking for a bill in the camera view...');
+    scheduleLiveProbe(700);
+  };
 
   // Process the captured or selected image URI through AI OCR
   const processImageUri = async (uri: string) => {
@@ -214,6 +282,9 @@ export default function BillScannerModal({
   // Shutter tap: Capture photo with live camera
   const handleCapturePhoto = async () => {
     if (isProcessing) return;
+    liveScanEnabled.current = false;
+    if (liveScanTimer.current) clearTimeout(liveScanTimer.current);
+    liveScanTimer.current = null;
     try {
       setIsProcessing(true);
       setProcessingStatus('Capturing image...');
@@ -353,6 +424,7 @@ export default function BillScannerModal({
             ref={cameraRef}
             style={StyleSheet.absoluteFillObject}
             facing={facing}
+            onCameraReady={handleCameraReady}
             enableTorch={isTorchOn}
             barcodeScannerSettings={{
               barcodeTypes: ['qr'],
@@ -438,12 +510,12 @@ export default function BillScannerModal({
           <View style={styles.guidePill}>
             <Ionicons name="scan-outline" size={15} color="#EAB308" />
             <Text style={styles.guidePillText}>
-              Align bill, receipt or UPI QR code
+              Hold the bill in view; it will capture when recognized, or tap scan
             </Text>
           </View>
         </View>
 
-        {/* 4. Bottom Controls (Gallery Button, Big Shutter Button, Flip Camera) */}
+        {/* 4. Bottom Controls (Gallery Button, Rescan Button, Flip Camera) */}
         <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 20) + 14 }]}>
           {/* Gallery Picker Button */}
           <TouchableOpacity
@@ -457,7 +529,7 @@ export default function BillScannerModal({
             <Text style={styles.sideControlText}>Gallery</Text>
           </TouchableOpacity>
 
-          {/* Central Camera Shutter Button */}
+          {/* Manual retry remains available if the automatic scan misses. */}
           <TouchableOpacity
             style={styles.shutterOuter}
             onPress={handleCapturePhoto}
@@ -465,7 +537,7 @@ export default function BillScannerModal({
             disabled={isProcessing}
           >
             <View style={styles.shutterInner}>
-              <Ionicons name="camera" size={26} color="#000000" />
+              <Ionicons name="scan" size={26} color="#000000" />
             </View>
           </TouchableOpacity>
 

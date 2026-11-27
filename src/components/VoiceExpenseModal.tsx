@@ -924,27 +924,71 @@ export default function VoiceExpenseModal({
     [contactsSummary, findOrCreateFriendSplitTrip, executeSubmitExpense]
   );
 
-  // Undo newly added expense
-  const handleUndoExpense = async (tripId: string, expenseId: string) => {
-    try {
-      setIsExecutingAction(true);
-      const success = await deleteExpense(tripId, expenseId);
-      setIsExecutingAction(false);
-      if (success) {
-        setMessages(prev => [
-          ...prev,
-          {
-            id: generateUUID(),
-            role: 'assistant',
-            content: 'The expense was cancelled and removed.',
-            timestamp: new Date().toISOString(),
+  // Undo newly added expense with confirmation dialog and toast
+  const handleUndoExpense = (tripId: string, expenseId: string, messageId?: string, amountText?: string) => {
+    Alert.alert(
+      'Undo Expense',
+      `Are you sure you want to cancel and remove this ${amountText ? `₹${amountText} ` : ''}expense?`,
+      [
+        { text: 'Keep Expense', style: 'cancel' },
+        {
+          text: 'Yes, Undo',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsExecutingAction(true);
+              const success = await deleteExpense(tripId, expenseId);
+              setIsExecutingAction(false);
+              if (success) {
+                if (messageId) {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === messageId
+                        ? {
+                            ...m,
+                            action: m.action
+                              ? {
+                                  ...m.action,
+                                  status: 'cancelled' as any,
+                                  undone: true,
+                                }
+                              : m.action,
+                          }
+                        : m
+                    )
+                  );
+                }
+                setMessages(prev => [
+                  ...prev,
+                  {
+                    id: generateUUID(),
+                    role: 'assistant',
+                    content: '✓ The expense was cancelled and removed.',
+                    timestamp: new Date().toISOString(),
+                  },
+                ]);
+                try {
+                  useNotificationStore.getState().showToast({
+                    id: `undo_${expenseId}`,
+                    type: 'expense',
+                    title: 'Expense Undone',
+                    message: 'The expense was cancelled and removed.',
+                    timestamp: new Date().toISOString(),
+                    read: true,
+                  });
+                } catch {}
+                speakAssistantReply('The expense was cancelled and removed.');
+              } else {
+                Alert.alert('Undo Failed', 'Could not remove this expense. It may have already been removed.');
+              }
+            } catch {
+              setIsExecutingAction(false);
+              Alert.alert('Undo Error', 'An error occurred while removing the expense.');
+            }
           },
-        ]);
-        speakAssistantReply('The expense was cancelled and removed.');
-      }
-    } catch {
-      setIsExecutingAction(false);
-    }
+        },
+      ]
+    );
   };
 
   // Move expense to another friend or trip
@@ -1546,6 +1590,27 @@ export default function VoiceExpenseModal({
             ) {
               setPendingAction(null);
               const ok = await executeSubmitExpense(result.action.expense);
+              if (ok && (result.action.expense as any).expenseId) {
+                const createdExpId = (result.action.expense as any).expenseId;
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === assistantMsg.id
+                      ? {
+                          ...m,
+                          action: m.action && m.action.expense
+                            ? {
+                                ...m.action,
+                                expense: {
+                                  ...m.action.expense,
+                                  expenseId: createdExpId,
+                                },
+                              }
+                            : m.action,
+                        }
+                      : m
+                  )
+                );
+              }
               if (!ok) {
                 const failMsg: CopilotMessage = {
                   id: generateUUID(),
@@ -2576,12 +2641,24 @@ export default function VoiceExpenseModal({
                                       },
                                     ]}
                                     onPress={() => {
-                                      const tId = exp.tripId;
+                                      const tId = exp.tripId || selectedTripId || defaultTripId || trips[0]?.id;
+                                      const storeExpenses = useTripStore.getState().expenses;
                                       const eId =
                                         (exp as any)?.expenseId ||
-                                        recentExpenses.find(e => e.tripId === tId)?.id;
+                                        recentExpenses.find(e => e.tripId === tId)?.id ||
+                                        storeExpenses.find(e => e.trip_id === tId && Math.abs(e.amount - (exp.amountPaise || 0)) < 100)?.id ||
+                                        storeExpenses.find(e => e.trip_id === tId)?.id;
+                                      const amtText =
+                                        exp.amountRupees ||
+                                        (exp.amountPaise ? Math.round(exp.amountPaise / 100).toString() : '');
                                       if (tId && eId) {
-                                        handleUndoExpense(tId, eId);
+                                        handleUndoExpense(tId, eId, item.id, amtText);
+                                      } else {
+                                        Alert.alert(
+                                          'Cannot Locate Expense',
+                                          'This expense could not be located in local memory to undo. You can delete or edit it directly from the trip screen.',
+                                          [{ text: 'OK' }]
+                                        );
                                       }
                                     }}
                                     activeOpacity={0.8}
@@ -3568,6 +3645,20 @@ export default function VoiceExpenseModal({
           {/* Quick Suggestions Chips (when chat is new) */}
           {messages.length <= 2 && (
             <View style={styles.suggestionsWrapper}>
+              <View
+                style={[
+                  styles.proTipBox,
+                  {
+                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.08)' : '#EEF2FF',
+                    borderColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#C7D2FE',
+                  },
+                ]}
+              >
+                <Ionicons name="bulb-outline" size={13} color={colors.primary} />
+                <Text style={[styles.proTipText, { color: colors.textSecondary }]}>
+                  Tip: Speak expense amount & split sequentially for maximum accuracy (e.g. &ldquo;Add ₹150 for Burger King&rdquo; then &ldquo;Split 50-50 with Khushi&rdquo;).
+                </Text>
+              </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
                 {SMART_VOICE_SUGGESTIONS.auto.map((item, idx) => (
                   <TouchableOpacity
@@ -3943,6 +4034,22 @@ const styles = StyleSheet.create({
   },
   suggestionsWrapper: {
     marginVertical: 4,
+  },
+  proTipBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 6,
+  },
+  proTipText: {
+    fontSize: scaleFont(11),
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 15,
   },
   suggestionsScroll: {
     gap: 8,

@@ -1180,9 +1180,19 @@ export default function BillDetailScreen() {
             <Text style={[styles.sectionHeader, { color: colors.textSecondary, marginBottom: 0 }]}>
               SPLIT BREAKDOWN ({expenseSplits.length} {expenseSplits.length === 1 ? 'MEMBER' : 'MEMBERS'})
             </Text>
-            <Text style={[styles.splitMethodTag, { color: colors.primary }]}>
-              {(expense.split_type || 'equal').toUpperCase()} SPLIT
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.splitMethodTag, { color: colors.primary }]}>
+                {(expense.split_type || 'equal').toUpperCase()} SPLIT
+              </Text>
+              <TouchableOpacity
+                style={[styles.editSplitsQuickBtn, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
+                onPress={() => setIsEditing(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="create-outline" size={12} color={colors.primary} />
+                <Text style={[styles.editSplitsQuickBtnText, { color: colors.primary }]}>Edit Splits</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View
@@ -1793,6 +1803,29 @@ export default function BillDetailScreen() {
             })}
           </View>
 
+          {/* Dedicated Save Splits Button */}
+          <TouchableOpacity
+            style={[
+              styles.saveSplitsDirectBtn,
+              { backgroundColor: colors.primary },
+              (saving || deleting) && styles.btnDisabled,
+            ]}
+            onPress={handleSaveChanges}
+            disabled={saving || deleting}
+            activeOpacity={0.8}
+          >
+            {saving ? (
+              <ActivityIndicator color={colors.textOnSilver || '#B5504F'} />
+            ) : (
+              <View style={styles.saveSplitsBtnContent}>
+                <Ionicons name="checkmark-done" size={17} color={colors.textOnSilver || '#B5504F'} />
+                <Text style={[styles.saveSplitsDirectBtnText, { color: colors.textOnSilver || '#B5504F' }]}>
+                  Save Splits
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.saveBtn, { backgroundColor: colors.primary }]}
             onPress={handleSaveChanges}
@@ -2295,6 +2328,39 @@ const styles = StyleSheet.create({
   splitMethodTag: {
     fontSize: 11,
     fontWeight: '800',
+  },
+  editSplitsQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  editSplitsQuickBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  saveSplitsDirectBtn: {
+    marginTop: 12,
+    marginBottom: 4,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveSplitsBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  saveSplitsDirectBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
   splitRow: {
     flexDirection: 'row',

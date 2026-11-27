@@ -5399,7 +5399,7 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
                 .select('*')
                 .eq('trip_type', 'friend_split')
                 .or(`created_by.eq.${currentUserId},friend_id.eq.${currentUserId}`)
-                .ilike('name', `split with ${cleanFriendName}%`)
+                .ilike('name', `split with ${cleanFriendName}`)
                 .limit(1),
               2500
             ).catch(() => ({ data: null }));

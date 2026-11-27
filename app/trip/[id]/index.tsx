@@ -84,7 +84,7 @@ export default function TripDetailScreen() {
             : `${members.length} members · ${expenses.length} expenses`
         }
         avatarText={isSingleSplit ? cleanTitle.charAt(0).toUpperCase() : undefined}
-        friendId={isSingleSplit ? (otherMember?.id || trip.friend_id) : undefined}
+        friendId={isSingleSplit ? (otherMember?.profile_id || otherMember?.id || trip.friend_id) : undefined}
         friendPhone={isSingleSplit ? (otherMember?.phone_number || undefined) : undefined}
         isGroup={!isSingleSplit}
         showHeader={true}

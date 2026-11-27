@@ -1,6 +1,7 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { parseUpiReceipt, ParsedPayment } from './upiParser';
+import { supabase } from '../lib/supabase';
 
 const { SplitOcr } = NativeModules;
 const splitOcrEmitter = SplitOcr && Platform.OS === 'android' ? new NativeEventEmitter(SplitOcr) : null;
@@ -239,6 +240,34 @@ export async function extractPaymentFromScreenshot(
   const combined = additionalText ? `${rawText}\n\n${additionalText}` : rawText;
   console.log('[receiptOcr] RAW OCR TEXT:\n' + combined);
   const parsed = parseUpiReceipt(combined);
+  // Groq vision is a second opinion: OCR remains the primary extraction source.
+  // The Groq key lives only in the authenticated Supabase Edge Function.
+  try {
+    const imageDataUrl = await imageUriToDataUrl(imageUri);
+    if (imageDataUrl) {
+      const { data, error } = await supabase.functions.invoke('analyze-receipt', {
+        body: { image: imageDataUrl, ocrText: combined.slice(0, 12000) },
+      });
+      if (error) throw error;
+      const ai = validateReceiptAiResult(data);
+      if (ai) {
+        // Only use AI as the primary amount when OCR is missing or low confidence.
+        // Keep the OCR candidate as an alternative whenever the two disagree.
+        if (ai.amountPaise && (!parsed.amountPaise || parsed.confidence.amount < 0.72)) {
+          parsed.alternativeAmountPaise = parsed.amountPaise || parsed.alternativeAmountPaise;
+          parsed.amountPaise = ai.amountPaise;
+          parsed.confidence.amount = 0.72;
+        } else if (ai.amountPaise && parsed.amountPaise !== ai.amountPaise) {
+          parsed.alternativeAmountPaise = ai.amountPaise;
+        }
+        if (!parsed.receiverName && ai.merchant) parsed.receiverName = ai.merchant;
+        if (!parsed.suggestedCategory && ai.category) parsed.suggestedCategory = ai.category;
+        if (!parsed.paidAt && ai.date) parsed.paidAt = ai.date;
+      }
+    }
+  } catch (error) {
+    console.warn('[receiptOcr] Groq vision unavailable; keeping OCR result:', error);
+  }
   console.log('[receiptOcr] PARSED PAYMENT:', JSON.stringify(parsed));
 
   return {
@@ -246,6 +275,56 @@ export async function extractPaymentFromScreenshot(
     parsed,
     imageUri,
   };
+}
+
+type ReceiptAiResult = {
+  amountPaise?: number;
+  merchant?: string;
+  date?: string;
+  category?: ParsedPayment['suggestedCategory'];
+};
+
+function validateReceiptAiResult(value: any): ReceiptAiResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const amount = Number(value.amountPaise);
+  const amountPaise = Number.isSafeInteger(amount) && amount > 0 && amount <= 100000000000
+    ? amount
+    : undefined;
+  const allowedCategories: ParsedPayment['suggestedCategory'][] = [
+    'Food', 'Stay', 'Fuel', 'Tickets', 'Groceries', 'General',
+  ];
+  const category = allowedCategories.includes(value.category) ? value.category : undefined;
+  const merchant = typeof value.merchant === 'string' ? value.merchant.trim().slice(0, 100) : '';
+  const date = typeof value.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.date)
+    ? value.date
+    : undefined;
+  if (!amountPaise && !merchant && !category && !date) return null;
+  return { amountPaise, merchant: merchant || undefined, date, category };
+}
+
+async function imageUriToDataUrl(imageUri: string): Promise<string | null> {
+  if (imageUri.startsWith('data:image/')) return imageUri;
+  const ImageManipulator = getImageManipulator();
+  if (ImageManipulator?.manipulateAsync) {
+    try {
+      const image = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [{ resize: { width: 1600 } }],
+        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      if (image.base64) return `data:image/jpeg;base64,${image.base64}`;
+    } catch (error) {
+      console.warn('[receiptOcr] Could not prepare image for vision:', error);
+    }
+  }
+  try {
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return `data:image/jpeg;base64,${base64}`;
+  } catch {
+    return null;
+  }
 }
 
 /**

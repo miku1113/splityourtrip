@@ -30,7 +30,7 @@ const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.82, 340);
 
 export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) {
   const router = useRouter();
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, toggleTheme } = useTheme();
   const { user, profile, signOut } = useAuthStore();
   const { inviteFriend } = useContactsStore();
   const insets = useSafeAreaInsets();
@@ -232,6 +232,38 @@ export default function SidebarDrawer({ visible, onClose }: SidebarDrawerProps) 
                 NAVIGATION
               </Text>
             </View>
+
+            {/* Quick Theme Toggle */}
+            <TouchableOpacity
+              style={[styles.menuItemRow, { borderBottomColor: colors.borderLight }]}
+              activeOpacity={0.7}
+              onPress={(e) => {
+                const { pageX, pageY } = e.nativeEvent;
+                toggleTheme({ x: pageX, y: pageY });
+              }}
+            >
+              <View style={[styles.menuIconBox, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#FEF3C7' }]}>
+                <Ionicons name={isDark ? 'moon' : 'sunny'} size={18} color={isDark ? '#818CF8' : '#D97706'} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuItemTitle, { color: colors.text }]}>
+                  {isDark ? 'Dark Theme' : 'Light Theme'}
+                </Text>
+                <Text style={[styles.menuItemSubtitle, { color: colors.textSecondary }]}>
+                  Tap to switch to {isDark ? 'light' : 'dark'} mode
+                </Text>
+              </View>
+              <View style={{
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 12,
+                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+              }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#818CF8' : '#D97706' }}>
+                  {isDark ? '🌙 Dark' : '☀️ Light'}
+                </Text>
+              </View>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.menuItemRow, { borderBottomColor: colors.borderLight }]}

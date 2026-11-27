@@ -712,12 +712,37 @@ export default function ChatView({
     const cleanTitle = (displayTitle || title).trim().toLowerCase();
     const otherProfId = otherMember?.profile_id || (otherMember as any)?.user_id;
 
+    // Helper: Verify if contact's phone contradicts the current chat phone
+    const hasPhoneMismatch = (c: any) => {
+      if (!cleanPhone) return false;
+      const cPhone = c.cleanPhone || (c.phoneNumber ? normalizePhone(c.phoneNumber) : '');
+      if (!cPhone) return false;
+      return !(
+        cPhone === cleanPhone ||
+        (cleanPhone.length >= 6 && cPhone.endsWith(cleanPhone.slice(-10))) ||
+        (cPhone.length >= 6 && cleanPhone.endsWith(cPhone.slice(-10)))
+      );
+    };
+
+    // 1. Prioritize strict phone number match first
+    if (cleanPhone) {
+      const byPhone = contacts.find(c => {
+        const cPhone = c.cleanPhone || (c.phoneNumber ? normalizePhone(c.phoneNumber) : '');
+        return (
+          cPhone === cleanPhone ||
+          (cleanPhone.length >= 6 && cPhone.endsWith(cleanPhone.slice(-10))) ||
+          (cPhone.length >= 6 && cleanPhone.endsWith(cPhone.slice(-10)))
+        );
+      });
+      if (byPhone) return byPhone;
+    }
+
+    // 2. Match by ID only if contact does NOT have a contradicting phone number
     return contacts.find(c => {
+      if (hasPhoneMismatch(c)) return false;
       if (friendId && (c.id === friendId || c.profileId === friendId)) return true;
       if (otherProfId && (c.id === otherProfId || c.profileId === otherProfId)) return true;
       if (otherMember?.id && c.id === otherMember.id) return true;
-      if (cleanPhone && c.cleanPhone && (c.cleanPhone === cleanPhone || (cleanPhone.length >= 6 && c.cleanPhone.endsWith(cleanPhone.slice(-10))))) return true;
-      if (c.phoneNumber && cleanPhone && normalizePhone(c.phoneNumber) === cleanPhone) return true;
       return normalizeNameForMatch(c.name) === normalizeNameForMatch(cleanTitle);
     });
   }, [isGroup, friendId, friendPhone, displayPhone, otherMember, displayTitle, title, contacts]);
@@ -1099,10 +1124,23 @@ export default function ChatView({
           }, { id: user?.id, name: currentUserName, phone: currentUserPhone })) {
             return false;
           }
+
+          // GUARD: If target phone is known and member phone is known, strictly compare phones!
+          const mPhone = normalizePhone(m.phone_number);
+          if (targetPhone && mPhone) {
+            const phonesMatch =
+              targetPhone === mPhone ||
+              (targetPhone.length >= 6 && mPhone.endsWith(targetPhone.slice(-10))) ||
+              (mPhone.length >= 6 && targetPhone.endsWith(mPhone.slice(-10)));
+            if (phonesMatch) return true;
+            // Phone numbers are both present and contradict each other -> CANNOT be the same friend!
+            return false;
+          }
+
           if (friendId && (m.id === friendId || m.profile_id === friendId)) return true;
           if (targetProfileId && m.profile_id === targetProfileId) return true;
-          if (targetPhone && normalizePhone(m.phone_number) === targetPhone) return true;
-          if (cleanFriendPhone && normalizePhone(m.phone_number) === cleanFriendPhone) return true;
+          if (targetPhone && mPhone && mPhone === targetPhone) return true;
+          if (cleanFriendPhone && mPhone && mPhone === cleanFriendPhone) return true;
           if (cleanFriendName && normalizeNameForMatch(m.display_name) === normalizeNameForMatch(cleanFriendName)) return true;
           if (isDirectFriendTrip && tMembers.length === 2) return true;
           return false;
